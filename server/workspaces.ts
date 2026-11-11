@@ -5,7 +5,8 @@ import {dirname, join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {Invalid, NotFound} from './errors.ts';
 
-export type WorkspaceInfo = {id: string; name: string; color: string; icon: string; db: string; created: string; sort: number};
+/** logo: a small image as a data URL (the app shrinks uploads to 128 px). */
+export type WorkspaceInfo = {id: string; name: string; color: string; icon: string; logo?: string; db: string; created: string; sort: number};
 const MAIN_DB = () => process.env.TASKS_DB ?? 'data/tasks.db';
 const ROOT = () => dirname(MAIN_DB());
 const FILE = () => join(ROOT(), 'workspaces.json');
@@ -48,10 +49,16 @@ export function createWorkspace(input: {name?: unknown; color?: unknown; icon?: 
   save([...list, w]);
   return w;
 }
-export function updateWorkspace(id: string, patch: {name?: unknown; color?: unknown; icon?: unknown}): WorkspaceInfo {
+const cleanLogo = (v: unknown) => {
+  if (v === '' || v === null) return '';
+  if (typeof v !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) throw new Invalid('The logo must be a PNG, JPEG or WebP image');
+  if (v.length > 200_000) throw new Invalid('The logo is too large; use an image under 150 KB');
+  return v;
+};
+export function updateWorkspace(id: string, patch: {name?: unknown; color?: unknown; icon?: unknown; logo?: unknown}): WorkspaceInfo {
   const list = listWorkspaces(), w = list.find(x => x.id === id);
   if (!w) throw new NotFound('Workspace not found');
-  const next = {...w, ...(patch.name !== undefined ? {name: cleanName(patch.name)} : {}), ...(color(patch.color) ? {color: color(patch.color)!} : {}), ...(patch.icon !== undefined ? {icon: String(patch.icon).slice(0, 40)} : {})};
+  const next = {...w, ...(patch.name !== undefined ? {name: cleanName(patch.name)} : {}), ...(color(patch.color) ? {color: color(patch.color)!} : {}), ...(patch.icon !== undefined ? {icon: String(patch.icon).slice(0, 40)} : {}), ...(patch.logo !== undefined ? {logo: cleanLogo(patch.logo)} : {})};
   save(list.map(x => x.id === id ? next : x));
   return next;
 }

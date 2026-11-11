@@ -1118,3 +1118,8 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .level-preset.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .level-chips { display: flex; flex-wrap: wrap; gap: 3px; }
 .level-chips .tag { font-size: 10.5px; }
+
+/* Workspace logo */
+.ws-logo { object-fit: contain; background: #fff; border: 1px solid var(--line); padding: 1px; }
+.ws-logo-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+.ws-logo-preview { width: 36px; height: 36px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
