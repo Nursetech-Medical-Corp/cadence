@@ -117,8 +117,10 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   const startResize = (e: React.PointerEvent, c: Col) => {
     e.preventDefault(); e.stopPropagation();
     resizing.current = {id: c.id, x: e.clientX, w: c.width};
-    const move = (ev: PointerEvent) => { const r = resizing.current; if (r) setLive({id: r.id, width: Math.max(60, r.w + ev.clientX - r.x)}); };
+    let frame = 0;
+    const move = (ev: PointerEvent) => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { const r = resizing.current; if (r) setLive({id: r.id, width: Math.max(60, r.w + ev.clientX - r.x)}); }); };
     const upFn = (ev: PointerEvent) => {
+      cancelAnimationFrame(frame);
       const r = resizing.current; resizing.current = null; setLive(null);
       removeEventListener('pointermove', move); removeEventListener('pointerup', upFn);
       if (r) saveCols(cols.map(x => ({id: x.id, width: x.id === r.id ? Math.max(60, r.w + ev.clientX - r.x) : x.width})));
@@ -136,7 +138,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
 
   return (
     <div className="table-wrap" ref={wrap}>
-      <table className="grid">
+      <table className="grid" style={{width: 50 + shown.reduce((a, c) => a + c.width, 0) + 44}}>
         <thead><tr>
           <th className="sel-col">{(() => {
             const n = rows.filter(i => selected.has(i.id)).length, all = rows.length > 0 && n === rows.length;
@@ -147,11 +149,11 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           })()}</th>
           {shown.map(c => (
             <th key={c.id} style={{width: c.width}} className={overCol === c.id && dragCol !== c.id ? 'drop' : ''}
-              draggable onDragStart={() => setDragCol(c.id)} onDragEnd={() => { setDragCol(null); setOverCol(null); }}
+              draggable onDragStart={e => { if (resizing.current) { e.preventDefault(); return; } setDragCol(c.id); }} onDragEnd={() => { setDragCol(null); setOverCol(null); }}
               onDragOver={e => { e.preventDefault(); setOverCol(c.id); }} onDrop={() => { dropCol(c.id); setOverCol(null); }}>
               <ColumnHeader col={c} sorts={sorts} project={project} store={store}
                 setSorts={s => setConfig({sorts: s, sort: null})} hide={() => setConfig({hidden: [...hidden, c.id]})} />
-              <span className="resize" onPointerDown={e => startResize(e, c)} onClick={e => e.stopPropagation()} title="Drag to resize" />
+              <span className={'resize' + (live?.id === c.id ? ' on' : '')} onPointerDown={e => startResize(e, c)} onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={e => e.stopPropagation()} title="Drag to resize" />
             </th>
           ))}
           <th className="add-col"><AddColumnButton store={store} project={project} /></th>

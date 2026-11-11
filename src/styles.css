@@ -153,7 +153,7 @@ kbd { font: 11px ui-monospace, monospace; color: var(--muted); border: 1px solid
 .grid td { padding: 0 4px; border-bottom: 1px solid var(--line2); border-right: 1px solid var(--line2); height: var(--row); overflow: hidden; white-space: nowrap; }
 .grid td:first-child, .grid th:first-child { padding-left: 20px; }
 .grid tr:hover td { background: var(--hover); } .grid tr.done .inline { color: var(--muted); text-decoration: line-through; }
-.grid th.add-col { width: 44px; cursor: default; }
+.grid th.add-col { min-width: 44px; cursor: default; }
 .title-cell { display: flex; align-items: center; gap: 6px; }
 .add-field { display: flex; flex-direction: column; gap: 6px; padding: 4px; }
 .add-field input, .add-field select { border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--bg); }
@@ -309,8 +309,10 @@ body > .popover.wide { min-width: 260px; }
 .row-meta { gap: 6px; margin-left: 8px; }
 .row-meta > .picker, .row-meta > .date-wrap, .row-meta > span { flex: none; }
 .row-meta > .picker > .cell-btn { overflow: hidden; }
-.row-meta .sprint-slot { width: 88px; }
-.row-meta .sprint-slot .cell-btn { width: 100%; }
+.row-meta .sprint-slot { width: 104px; display: flex; }
+.row-meta .sprint-slot .picker { width: 100%; }
+.row-meta .sprint-slot .cell-btn { width: 100%; overflow: hidden; }
+.sprint-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 .row-meta .person-slot .cell-btn { width: 36px; justify-content: center; }
 .row-meta .est-slot { width: 30px; text-align: right; }
 .g-right { cursor: grab; } .g-right.panning, .g-right.panning * { cursor: grabbing !important; user-select: none; }

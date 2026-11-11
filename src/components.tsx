@@ -165,7 +165,7 @@ export function SprintSelect({sprints, value, onChange, projectId}: {sprints: Sp
   const onAdd = store && pid ? async (name: string) => (await store.createSprint(pid, {name}))?.id : undefined;
   return <Menu value={value} title="Sprint" onChange={onChange} onAdd={onAdd} addLabel="New sprint (2 weeks after the last)"
     options={[{value: null, label: 'Backlog'}, ...sprints.map(s => ({value: s.id as string | null, label: `${s.name} (${s.start.slice(5)} to ${s.end.slice(5)})`}))]}
-    render={<span className={s ? 'sprint-chip' : 'muted'}>{s?.name ?? 'Backlog'}</span>} />;
+    render={<span className={s ? 'sprint-chip' : 'muted'} title={s?.name}>{s?.name ?? 'Backlog'}</span>} />;
 }
 
 export function PeoplePicker({value, people, onChange, compact, onReorder}: {value: string[]; people: Person[]; onChange: (v: string[]) => void; compact?: boolean; onReorder?: (ids: string[]) => void}) {
