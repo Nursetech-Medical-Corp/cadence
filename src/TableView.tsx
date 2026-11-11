@@ -4,7 +4,7 @@ import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, EyeOff, MoreHorizontal, Plus, Trash2, Pencil} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
 import {between, fmtMinutes, type Store} from './store.ts';
-import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect} from './components.tsx';
+import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
@@ -52,8 +52,8 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     {id: 'sprint', name: 'Sprint', width: 130, sortVal: i => sprints.find(s => s.id === i.sprint)?.start ?? '9', raw: i => i.sprint, cell: i => <SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => up(i)({sprint})} />},
     {id: 'start', name: 'Start', width: 130, sortVal: i => i.start ?? '9', raw: i => i.start, cell: i => <DateInput value={i.start} onChange={start => up(i)({start})} />},
     {id: 'due', name: 'Due', width: 130, sortVal: i => i.due ?? '9', raw: i => i.due, cell: i => <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => up(i)({due})} />},
-    {id: 'estimate', name: 'Estimate (h)', width: 110, sortVal: i => i.estimate ?? 0, raw: i => i.estimate, cell: i => (
-      <input className="inline num" type="number" defaultValue={i.estimate ?? ''} key={String(i.estimate)} onBlur={e => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== i.estimate) up(i)({estimate: v}); }} />)},
+    {id: 'estimate', name: 'Estimate', width: 110, sortVal: i => estimateOf(i, store.items).hours ?? 0, raw: i => estimateOf(i, store.items).hours, cell: i => (
+      <EstimateCell item={i} items={store.items} onChange={estimate => up(i)({estimate})} />)},
     {id: 'tags', name: 'Tags', width: 160, sortVal: i => i.tags.join(','), raw: i => i.tags, cell: i => (
       <InlineText value={i.tags.join(', ')} placeholder="-" onSave={v => up(i)({tags: v.split(',').map(s => s.trim()).filter(Boolean)})} />)},
     ...project.fields.map((f): Col => {

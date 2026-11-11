@@ -1,4 +1,5 @@
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
+import {parseDuration} from './dates.ts';
 import {createPortal} from 'react-dom';
 import {Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon, GripVertical} from 'lucide-react';
 import type {Item, Person, Project, Sprint, Status} from './types.ts';
@@ -167,6 +168,40 @@ export function TypeSelect({project, value, onChange}: {project: Project; value:
   const store = useStoreCtx();
   const onAdd = store ? (name: string) => { if (!project.types.includes(name)) store.updateProject(project.id, {types: [...project.types, name]}); return name; } : undefined;
   return <Menu value={value} title="Type" onChange={onChange} onAdd={onAdd} addLabel="Add type" options={project.types.map(t => ({value: t, label: t, icon: <TypeBadge type={t} />}))} render={<TypeBadge type={value} />} />;
+}
+
+/** Hours as 10h, 1h 30m or 45m. */
+export const fmtHours = (h: number) => { const m = Math.round(h * 60); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`; };
+// Subitems by parent and estimates by item, worked out once per version of the item list.
+const estCache = new WeakMap<Map<string, Item>, {kids: Map<string, Item[]>; est: Map<string, {hours: number | null; rolled: boolean}>}>();
+/** An item's estimate: its own, or for a parent the total of its subitems' estimates (Σ), so nothing counts twice. */
+export function estimateOf(item: Item, items: Map<string, Item>): {hours: number | null; rolled: boolean} {
+  let c = estCache.get(items);
+  if (!c) {
+    const kids = new Map<string, Item[]>();
+    for (const i of items.values()) if (i.parentId) kids.set(i.parentId, [...(kids.get(i.parentId) ?? []), i]);
+    estCache.set(items, c = {kids, est: new Map()});
+  }
+  const hit = c.est.get(item.id);
+  if (hit) return hit;
+  let sum = 0, any = false;
+  for (const k of c.kids.get(item.id) ?? []) { const e = estimateOf(k, items).hours; if (e != null) { sum += e; any = true; } }
+  const r = any ? {hours: sum, rolled: true} : {hours: item.estimate, rolled: false};
+  c.est.set(item.id, r);
+  return r;
+}
+/** Read-only estimate text: Σ marks a total of subitems. */
+export function EstimateText({item, items}: {item: Item; items: Map<string, Item>}) {
+  const e = estimateOf(item, items);
+  return e.hours == null ? null : <span className="muted est-text" title={e.rolled ? 'Total of its subitems' : 'Estimate'}>{e.rolled ? '\u03a3 ' : ''}{fmtHours(e.hours)}</span>;
+}
+/** Editable estimate: type 2h, 1h 30m, 90m or 1.5 (hours). Parents show their subitems' total instead. */
+export function EstimateCell({item, items, onChange}: {item: Item; items: Map<string, Item>; onChange: (hours: number | null) => void}) {
+  const e = estimateOf(item, items);
+  if (e.rolled) return <EstimateText item={item} items={items} />;
+  return <input className="inline num est-input" placeholder="-" defaultValue={item.estimate != null ? fmtHours(item.estimate) : ''} key={String(item.estimate)} title="Hours: 2h, 1h 30m, 90m or 1.5"
+    onBlur={ev => { const m = parseDuration(ev.target.value); if (Number.isNaN(m)) { ev.target.value = item.estimate != null ? fmtHours(item.estimate) : ''; return; } const h = m ? Math.round(m / 60 * 100) / 100 : null; if (h !== item.estimate) onChange(h); }}
+    onKeyDown={ev => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} />;
 }
 
 export function TypeBadge({type}: {type: string}) {

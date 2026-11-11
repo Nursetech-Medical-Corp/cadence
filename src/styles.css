@@ -314,7 +314,7 @@ body > .popover.wide { min-width: 260px; }
 .row-meta .sprint-slot .cell-btn { width: 100%; overflow: hidden; }
 .sprint-chip { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
 .row-meta .person-slot .cell-btn { width: 36px; justify-content: center; }
-.row-meta .est-slot { width: 30px; text-align: right; }
+.row-meta .est-slot { width: 52px; text-align: right; white-space: nowrap; }
 .g-right { cursor: grab; } .g-right.panning, .g-right.panning * { cursor: grabbing !important; user-select: none; }
 .grid tr.fresh td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .grid tr.draft td { background: var(--accent-soft); }
@@ -1159,3 +1159,7 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .sc-sub { padding-left: 28px; cursor: pointer; }
 /* On sprint cards the type is a small colored dot (its name shows on hover), so the title has room. */
 .sc-item .type { flex: none; font-size: 0; width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%; background: currentColor; }
+
+/* Estimates: Σ marks a parent's total of its subitems */
+.est-text { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inline.est-input { width: 80px; }

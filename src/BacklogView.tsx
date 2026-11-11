@@ -5,7 +5,7 @@ import {Fragment, useMemo, useState} from 'react';
 import {ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, Plus} from 'lucide-react';
 import type {Item} from './types.ts';
 import {between} from './store.ts';
-import {Check, PeoplePicker, PriorityIcon, SprintSelect, StatusSelect, TypeBadge} from './components.tsx';
+import {Check, PeoplePicker, PriorityIcon, SprintSelect, StatusSelect, TypeBadge, EstimateText} from './components.tsx';
 import {SprintCard, sprintState} from './SprintParts.tsx';
 import type {ViewProps} from './viewProps.ts';
 
@@ -70,7 +70,7 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
           {i.priority > 0 && <PriorityIcon value={i.priority} />}
           {total > 0 && <span className="count" title="Done of all descendants">{done}/{total}</span>}
           <span className="row-meta">
-            <span className="small muted est-slot">{i.estimate != null ? `${i.estimate}h` : ''}</span>
+            <span className="small est-slot"><EstimateText item={i} items={store.items} /></span>
             <span className="sprint-slot"><SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => store.updateItem(i.id, {sprint})} /></span>
             <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
             <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} compact />

@@ -3,7 +3,7 @@ import {Trash2, ArrowLeftFromLine, ChevronDown, ChevronRight} from 'lucide-react
 import type {BurnPoint, Item, Person, Sprint} from './types.ts';
 import {api, type Store} from './store.ts';
 import {daysBetween} from './dates.ts';
-import {Avatar, DateInput, InlineText, Check, PeoplePicker, TypeBadge} from './components.tsx';
+import {Avatar, DateInput, InlineText, Check, PeoplePicker, TypeBadge, EstimateText} from './components.tsx';
 
 export function sprintState(s: Sprint, today: string) {
   return today < s.start ? 'upcoming' : today > s.end ? 'closed' : 'current';
@@ -177,7 +177,7 @@ function SprintRow({store, item: i, items, open, onDragItem}: {store: Store; ite
       {project && <span onClick={stop}><Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} /></span>}
       <TypeBadge type={i.type} />
       <span className="grow">{i.title}</span>
-      {i.estimate ? <span className="muted">{i.estimate}h</span> : null}
+      <EstimateText item={i} items={store.items} />
       <span className="sc-actions" onClick={stop}>
         <button className="icon" title="Take out of this sprint (back to the backlog)" onClick={() => store.updateItem(i.id, {sprint: null})}><ArrowLeftFromLine size={12} /></button>
       </span>

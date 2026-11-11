@@ -4,19 +4,10 @@ import {useEffect, useMemo, useState} from 'react';
 import {ChevronDown, ChevronRight, Play, Square, Trash2} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
 import {api, fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
+import {parseDuration} from './dates.ts';
 import {Avatar, Popover} from './components.tsx';
 
-/** Minutes from "3h 20m", "1.5h", "90m", "1:30" or "1.5" (hours). 0 when empty, NaN when unreadable. */
-export function parseDuration(v: string) {
-  const t = v.trim().toLowerCase();
-  if (!t) return 0;
-  const hm = /^(\d+):(\d{1,2})$/.exec(t);
-  if (hm) return Number(hm[1]) * 60 + Number(hm[2]);
-  const hmText = /^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:ins?|inutes?)?)?$/.exec(t);
-  if (hmText && (hmText[1] || hmText[2])) return Math.round(Number(hmText[1] ?? 0) * 60 + Number(hmText[2] ?? 0));
-  const h = Number(t);
-  return Number.isFinite(h) && h >= 0 ? Math.round(h * 60) : NaN;
-}
+export {parseDuration};
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const toMin = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));

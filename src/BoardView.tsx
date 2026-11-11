@@ -7,7 +7,7 @@ import {GripVertical, Link2, Repeat} from 'lucide-react';
 import type {Item, ItemPatch, Sprint} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {between, type Store} from './store.ts';
-import {Avatars, PriorityIcon, StatusIcon, TypeBadge} from './components.tsx';
+import {Avatars, PriorityIcon, StatusIcon, TypeBadge, EstimateText} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf, type SortRule} from './Sorting.tsx';
 
@@ -120,7 +120,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                   <div className="card-meta">
                     {groupBy !== 'status' && <StatusIcon status={project.statuses.find(s => s.id === i.status)} />}
                     {i.due && <span className={'small' + (i.due < store.today && !i.completed ? ' overdue' : ' muted')}>{i.due.slice(5).replace('-', '/')}</span>}
-                    {i.estimate != null && <span className="small muted">{i.estimate}h</span>}
+                    <span className="small"><EstimateText item={i} items={store.items} /></span>
                     {i.recur && <Repeat size={12} className="muted" />}
                     {blocked && <span className="small overdue" title="Blocked by unfinished work"><Link2 size={12} /> blocked</span>}
                     {i.tags.map(t => <span key={t} className="tag">{t}</span>)}
