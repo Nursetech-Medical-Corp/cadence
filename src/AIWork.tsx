@@ -128,7 +128,7 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       <h1><Bot size={20} /> AI work</h1>
       <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve or send it back with a comment. Mark tasks Human, AI or Either in any item.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
-        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <span className="muted small">{store.people.filter(p => p.kind === 'ai').length} AI workers. Add one on the Team page and give it a token.</span>
       </div>
       <div className="board" style={{padding: 0}}>

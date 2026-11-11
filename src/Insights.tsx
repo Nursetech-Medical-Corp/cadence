@@ -58,7 +58,7 @@ export function InsightsPage({store, open}: {store: Store; open: (id: string) =>
       <p className="muted">How work is going across people. Estimates are compared with logged time on finished items, so accuracy improves as people use timers.</p>
       <div className="toolbar" style={{padding: '0 0 12px', border: 0}}>
         <div className="seg">{[7, 14, 30, 90].map(d => <button key={d} className={days === d ? 'on' : ''} onClick={() => setDays(d)}>{d} days</button>)}</div>
-        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <span className="muted small">{fmtMinutes(totalMins)} logged in this period, {items.filter(i => i.completed && inRange(i.completed)).length} items finished</span>
       </div>
 

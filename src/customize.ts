@@ -10,8 +10,8 @@ export type Policy = 'personal' | 'shared' | 'locked';
 export type Area = 'viewSettings' | 'viewOrder' | 'projectOrder';
 export const AREAS: [Area, string, string][] = [
   ['viewSettings', 'View settings', 'Filters, sort, grouping, columns, colors and row layout'],
-  ['viewOrder', 'Order of view tabs', 'Which tab comes first in a project'],
-  ['projectOrder', 'Order of projects', 'The project list in the sidebar'],
+  ['viewOrder', 'Order of view tabs', 'Which tab comes first in a space'],
+  ['projectOrder', 'Order of spaces', 'The space list in the sidebar'],
 ];
 export const POLICIES: [Policy, string][] = [['personal', 'Each person, saved for them'], ['shared', 'Changes apply to everyone'], ['locked', 'Admins only']];
 

@@ -76,7 +76,7 @@ export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint
   {kind: 'workload', label: 'Workload', icon: Users, hint: 'Hours per person per day vs capacity'},
   {kind: 'backlog', label: 'Backlog', icon: Layers, hint: 'Epics, features, stories. Plan into sprints'},
   {kind: 'sprint', label: 'Sprint', icon: Zap, hint: 'Sprint board, burndown, capacity'},
-  {kind: 'files', label: 'Files', icon: Paperclip, hint: 'Every attachment in the project. Drop files to make a task per file'},
+  {kind: 'files', label: 'Files', icon: Paperclip, hint: 'Every attachment in the space. Drop files to make a task per file'},
 ];
 export const viewIcon = (k: ViewKind) => VIEW_KINDS.find(v => v.kind === k)?.icon ?? CalendarRange;
 /** A color per view kind, so tabs and the sidebar are easy to scan. */
@@ -290,7 +290,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
       {store.settings.features.approvals && <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>}
       {store.settings.features.aiWork && <button className={'nav-btn' + (route.page === 'ai' ? ' active' : '')} onClick={() => go({page: 'ai'})}><Bot size={15} /> AI work</button>}
 
-      <div className="nav-section">Projects
+      <div className="nav-section">Spaces
         <NewProjectMenu store={store} onCreated={id => go({page: 'project', id, view: ''})} />
       </div>
       <ProjectList store={store} activeId={projectId} render={(p, n, x) => {
@@ -339,7 +339,7 @@ function ProjectNavButton({store, project, active, extra, onOpen, expanded, onTo
   const done = () => { setEditing(false); if (name.trim() && name !== project.name) store.updateProject(project.id, {name: name.trim()}); else setName(project.name); };
   return (
     <div role="button" tabIndex={0} className={'nav-btn proj-nav' + (active ? ' active' : '') + (isRollup(project) ? ' is-rollup' : '')} onClick={() => !editing && onOpen()}
-      onKeyDown={e => { if (e.key === 'Enter' && !editing) onOpen(); }} onDoubleClick={() => { setName(project.name); setEditing(true); }} title={isRollup(project) ? 'Work from many projects together. Double-click to rename' : 'Double-click to rename'}>
+      onKeyDown={e => { if (e.key === 'Enter' && !editing) onOpen(); }} onDoubleClick={() => { setName(project.name); setEditing(true); }} title={isRollup(project) ? 'Work from many spaces together. Double-click to rename' : 'Double-click to rename'}>
       {extra.grip}
       <button className={'proj-caret' + (expanded ? ' open' : '')} title={expanded ? 'Hide views' : 'Show views'} aria-expanded={expanded} onClick={e => { e.stopPropagation(); onToggle(); }}><ChevronRight size={13} /></button>
       {extra.icon}
@@ -420,10 +420,10 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
   return <>
     <header className="head">
       <div className="head-top">
-        <span className="crumb">Projects /</span>
+        <span className="crumb">Spaces /</span>
         <InlineText value={project.name} onSave={name => name && store.updateProject(project.id, {name})} className="h1-edit" />
         <span className="muted small">{items.filter(i => !i.completed).length} open</span>
-        {isRollup(own) && <button className="tag rollup-tag" onClick={() => go({page: 'project', id: own.id, view: 'settings'})} title="Choose which projects show here">Rollup of {included.length} project{included.length === 1 ? '' : 's'}</button>}
+        {isRollup(own) && <button className="tag rollup-tag" onClick={() => go({page: 'project', id: own.id, view: 'settings'})} title="Choose which spaces show here">Rollup of {included.length} project{included.length === 1 ? '' : 's'}</button>}
       </div>
       <div className="tabs">
         {views.map(v => <span key={v.id} className={'tab-drag' + (dragView === v.id ? ' dragging' : '') + (overView === v.id && dragView && dragView !== v.id ? ' drop' : '')}
@@ -489,10 +489,10 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
           setMenu(false);
           const n = prompt('Template name', `${view.name} view`);
           if (n === null) return;
-          try { await api('/templates', {method: 'POST', body: {kind: 'view', viewId: view.id, projectId: project.id, name: n}}); alert(`Saved "${n || view.name}" as a view template. Add it to any project from + View.`); } catch (e) { store.fail(e); }
+          try { await api('/templates', {method: 'POST', body: {kind: 'view', viewId: view.id, projectId: project.id, name: n}}); alert(`Saved "${n || view.name}" as a view template. Add it to any space from + View.`); } catch (e) { store.fail(e); }
         }}><LayoutTemplate size={14} /> Save as template</button>
         {store.projects.length > 1 && <>
-          <div className="pop-label">Copy to project</div>
+          <div className="pop-label">Copy to space</div>
           {store.projects.filter(p => p.id !== project.id).map(p => (
             <button key={p.id} className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(p.id, view.name, view.kind, {...view.config, columns: undefined, sprint: undefined}); if (v) go({page: 'project', id: p.id, view: v.id}); }}><FolderInput size={14} /> {p.name}</button>
           ))}
@@ -710,9 +710,9 @@ function FindProject({id}: {id: string}) {
       setWhere(null);
     }).catch(() => setWhere(null));
   }, [id]);
-  if (where === undefined) return <Empty title="Looking for this project...">Checking your other workspaces.</Empty>;
-  if (!where) return <Empty title="Project not found">It may have been deleted. Pick a project in the sidebar.</Empty>;
-  return <Empty title={`This project is in ${where.name}`}><button className="btn primary" onClick={() => switchWorkspace(where.id, location.hash.slice(1))}>Open {where.name}</button></Empty>;
+  if (where === undefined) return <Empty title="Looking for this space...">Checking your other workspaces.</Empty>;
+  if (!where) return <Empty title="Space not found">It may have been deleted. Pick a space in the sidebar.</Empty>;
+  return <Empty title={`This space is in ${where.name}`}><button className="btn primary" onClick={() => switchWorkspace(where.id, location.hash.slice(1))}>Open {where.name}</button></Empty>;
 }
 
 /** Saved view templates, offered at the top of + View. */

@@ -17,7 +17,7 @@ type Slot = {id: WidgetId; w: number; h?: number};
 const ROW = 80;
 const WIDGETS: Record<WidgetId, {title: string; hint: string}> = {
   comments: {title: 'Comments for me', hint: 'Comments assigned to you, until you resolve them'},
-  quick: {title: 'Quick add', hint: 'Add a task for yourself to any project'},
+  quick: {title: 'Quick add', hint: 'Add a task for yourself to any space'},
   focus: {title: 'Today and overdue', hint: 'What needs doing now'},
   week: {title: 'This week', hint: 'Seven-day strip with your due items'},
   upcoming: {title: 'Coming up', hint: 'Due in the next 14 days'},
@@ -25,13 +25,13 @@ const WIDGETS: Record<WidgetId, {title: string; hint: string}> = {
   done: {title: 'Completed today', hint: 'What you finished today'},
   time: {title: 'Time this week', hint: 'Hours logged per day'},
   sprints: {title: 'My sprints', hint: 'Your share of each current sprint'},
-  projects: {title: 'By project', hint: 'Open work per project'},
+  projects: {title: 'By space', hint: 'Open work per space'},
   inbox: {title: 'Latest notifications', hint: 'Mentions, assignments, comments'},
   waiting: {title: 'Waiting on others', hint: 'Items you created that others own'},
   recurring: {title: 'Recurring', hint: 'Your repeating work'},
-  chart: {title: 'Chart', hint: 'Count work by status, priority, type, person, project or tag'},
+  chart: {title: 'Chart', hint: 'Count work by status, priority, type, person, space or tag'},
   chart2: {title: 'Chart 2', hint: 'A second chart with its own settings'},
-  flow: {title: 'Cumulative flow', hint: 'Work per stage over time for a project'},
+  flow: {title: 'Cumulative flow', hint: 'Work per stage over time for a space'},
 };
 const DEFAULT: Slot[] = [{id: 'quick', w: 3}, {id: 'comments', w: 1}, {id: 'focus', w: 1}, {id: 'week', w: 2}, {id: 'sprints', w: 1}, {id: 'time', w: 1}, {id: 'upcoming', w: 1}, {id: 'inbox', w: 1}];
 // Older saved layouts used {wide}; convert them.

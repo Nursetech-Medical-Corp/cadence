@@ -133,8 +133,8 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
       <IntegrationsCard store={store} project={project} />
 
       <section className="set-card danger-card">
-        <div className="set-card-head"><h3>Delete project</h3><span className="muted small">Removes the project, its items, sprints and views. A backup snapshot is kept in Data and backups.</span></div>
-        <button className="btn danger" onClick={() => { if (confirm(`Delete project "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`)) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete project</button>
+        <div className="set-card-head"><h3>Delete space</h3><span className="muted small">Removes the project, its items, sprints and views. A backup snapshot is kept in Data and backups.</span></div>
+        <button className="btn danger" onClick={() => { if (confirm(`Delete space "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`)) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete space</button>
       </section>
     </div>
   );

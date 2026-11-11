@@ -24,7 +24,7 @@ export const FIELD_KINDS: {group: string; kinds: Kind[]}[] = [
     {kind: 'files', label: 'Files', icon: Paperclip, hint: "The item's attachments, with quick view"},
   ]},
   {group: 'Advanced', kinds: [
-    {kind: 'relation', label: 'Relation', icon: Workflow, hint: 'Link to other items, any project'},
+    {kind: 'relation', label: 'Relation', icon: Workflow, hint: 'Link to other items, any space'},
     {kind: 'rollup', label: 'Rollup', icon: Sigma, hint: 'Count or sum over related items or subitems'},
     {kind: 'formula', label: 'Formula', icon: Calculator, hint: 'Math and logic over other columns'},
   ]},

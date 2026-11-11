@@ -10,7 +10,7 @@ Read this once, then call `get_workspace`. Everything a person can do on screen,
 
 ## The model
 
-- **Project**: has statuses (each in a group: todo, doing, done), item types in hierarchy order (for example Initiative, Workstream, Task, Subtask; names differ per project), custom fields, views, sprints, automations, and access rules.
+- **Space** (called project in the API, tools and fields like projectId): a team or area such as Engineering or Sales. Inside it, items have levels; the default is Project > Phase > Task > Subtask, so an item of type Project is not a space. A space has statuses (each in a group: todo, doing, done), item types in hierarchy order (for example Project, Phase, Task, Subtask; names differ per space), custom fields, views, sprints, automations, and access rules.
 - **Item**: `title`, `body` (Markdown), `type`, `status` (a status id), `priority` (0 none, 1 urgent, 2 high, 3 medium, 4 low), `assignees` (person ids), `start`/`due` (YYYY-MM-DD), `estimate` (hours), `tags`, `sprint` (sprint id or null for backlog), `parentId`, `deps` (ids this item waits for), `recur` (repeat rule), `fields` (custom values). Reference items by id or key like `OPS-12`.
 - Special `fields`: `worker` (`human`, `ai`, `either`: who should do it), `review` (AI review state, set by the review tools), `ext` (`{source, id, url}` link to a record in another system).
 - **People** are `human` or `ai`. Planning data per person: weekly hours, skill, hourly rate, start and end dates, planned hire.

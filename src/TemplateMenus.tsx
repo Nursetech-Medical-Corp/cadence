@@ -91,45 +91,55 @@ export function NewProjectMenu({store, onCreated}: {store: Store; onCreated: (id
   const [name, setName] = useState('');
   const [tpl, setTpl] = useState('');
   const [preset, setPreset] = useState(0);
+  const [custom, setCustom] = useState('');
+  const customLevels = custom.split(/[,>]/).map(x => x.trim()).filter(Boolean);
+  const levels = preset < LEVELS.length ? LEVELS[preset].types : customLevels;
   const create = async () => {
     if (!name.trim()) return;
     try {
-      const p = tpl ? await api<Project>(`/templates/${tpl}/use`, {method: 'POST', body: {name}}) : await api<Project>('/projects', {method: 'POST', body: {name, types: LEVELS[preset].types}});
+      const p = tpl ? await api<Project>(`/templates/${tpl}/use`, {method: 'POST', body: {name}}) : await api<Project>('/projects', {method: 'POST', body: {name, types: levels.length ? levels : LEVELS[0].types}});
       setOpen(false); setName(''); setTpl('');
       if (p) onCreated(p.id);
     } catch (e) { store.fail(e); }
   };
   return (
     <span className="picker" style={{marginLeft: 'auto'}}>
-      <button className="icon" title="New project" onClick={() => setOpen(o => !o)}><Plus size={14} /></button>
+      <button className="icon" title="New space" onClick={() => setOpen(o => !o)}><Plus size={14} /></button>
       <Popover open={open} onClose={() => setOpen(false)} className="wide">
-        <div className="pop-label">New project</div>
-        <input autoFocus className="pop-search" placeholder="Project name" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()} />
+        <div className="pop-label">New space</div>
+        <input autoFocus className="pop-search" placeholder="Space name" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()} />
         {!tpl && <>
-          <div className="pop-label">Level names (rename any time in Settings)</div>
-          <select className="plain-select" style={{width: '100%', marginBottom: 6}} value={preset} onChange={e => setPreset(Number(e.target.value))}>
-            {LEVELS.map((l, n) => <option key={l.name} value={n}>{l.name}: {l.types.join(' > ')}</option>)}
-          </select>
+          <div className="pop-label">How work is organized (rename any time in Settings)</div>
+          <div className="level-presets">
+            {[...LEVELS, {name: 'Custom', hint: 'Your own names, top to bottom', types: []}].map((l, n) => (
+              <button key={l.name} className={'level-preset' + (preset === n ? ' on' : '')} onClick={() => setPreset(n)} title={l.hint}>
+                <b>{l.name}</b>
+                <span className="level-chips">{(n < LEVELS.length ? l.types : customLevels).map(t => <span key={t} className="tag">{t}</span>)}{n === LEVELS.length && !customLevels.length && <span className="muted small">your own names</span>}</span>
+              </button>
+            ))}
+          </div>
+          {preset === LEVELS.length && <input className="pop-search" placeholder="Levels, top to bottom: Goal, Project, Task, Subtask" value={custom} onChange={e => setCustom(e.target.value)} />}
         </>}
         <button className="pop-row" onClick={async () => { try { const p = await api<Project>('/projects/rollup', {method: 'POST', body: {name: name.trim() || 'Rollup'}}); setOpen(false); setName(''); onCreated(p.id); } catch (e) { store.fail(e); } }}>
-          <Layers size={14} /> Or make a rollup: views across chosen projects
+          <Layers size={14} /> Or make a rollup: views across chosen spaces
         </button>
         <div className="pop-label">Start from</div>
         <select className="plain-select" style={{width: '100%', marginBottom: 6}} value={tpl} onChange={e => setTpl(e.target.value)}>
           <option value="">Blank (default statuses and views)</option>
           {templates.filter(t => t.kind === 'project').map(t => <option key={t.id} value={t.id}>Template: {t.name}</option>)}
         </select>
-        <button className="btn primary" disabled={!name.trim()} onClick={create}>Create project</button>
+        <button className="btn primary" disabled={!name.trim()} onClick={create}>Create space</button>
       </Popover>
     </span>
   );
 }
 
-/** Naming presets for a new project's levels. Every name can be changed later in Settings > Item types. */
+/** Naming presets for a new space's levels, top to bottom. Every name can be changed later in Settings > Item types. */
 const LEVELS = [
-  {name: 'General', types: ['Initiative', 'Workstream', 'Task', 'Subtask']},
-  {name: 'Simple', types: ['Project', 'Task', 'Subtask']},
-  {name: 'Quality and regulatory', types: ['Program', 'Deliverable', 'Task', 'Subtask', 'Issue']},
-  {name: 'Operations', types: ['Area', 'Process', 'Task', 'Subtask']},
-  {name: 'Software (Azure style)', types: ['Epic', 'Feature', 'Story', 'Task', 'Bug']},
+  {name: 'General', hint: 'Most teams: projects split into phases, then tasks', types: ['Project', 'Phase', 'Task', 'Subtask']},
+  {name: 'Simple', hint: 'Just tasks and their steps', types: ['Task', 'Subtask']},
+  {name: 'Software (Jira style)', hint: 'Projects hold epics, epics hold stories', types: ['Project', 'Epic', 'Story', 'Subtask', 'Bug']},
+  {name: 'Azure DevOps', hint: 'The Azure Boards levels', types: ['Epic', 'Feature', 'User Story', 'Task', 'Bug']},
+  {name: 'Quality and regulatory', hint: 'Programs, deliverables and issues', types: ['Program', 'Deliverable', 'Task', 'Subtask', 'Issue']},
+  {name: 'Operations', hint: 'Areas and repeatable processes', types: ['Area', 'Process', 'Task', 'Subtask']},
 ];

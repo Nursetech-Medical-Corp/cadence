@@ -1110,3 +1110,11 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .proj-caret:hover { background: var(--hover); color: var(--text); }
 .proj-caret svg { transition: transform .12s; }
 .proj-caret.open svg { transform: rotate(90deg); }
+
+/* New space: level presets */
+.level-presets { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; max-height: 260px; overflow: auto; }
+.level-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px 8px; cursor: pointer; font: inherit; color: var(--text); }
+.level-preset:hover { border-color: var(--accent); }
+.level-preset.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.level-chips { display: flex; flex-wrap: wrap; gap: 3px; }
+.level-chips .tag { font-size: 10.5px; }

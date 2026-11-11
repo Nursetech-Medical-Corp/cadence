@@ -259,7 +259,7 @@ function ColumnHeader({col, sorts, setSorts, hide, project, store}: {
         {mine && <button className="pop-row" onClick={() => { setSorts(sorts.filter(s => s.col !== col.id)); setOpen(false); }}>Remove this sort</button>}
         {sorts.length > 0 && <button className="pop-row" onClick={() => { setSort(null); setOpen(false); }}>Clear all sorting</button>}
         {col.id !== 'title' && <button className="pop-row" onClick={() => { hide(); setOpen(false); }}><EyeOff size={14} /> Hide column</button>}
-        {field && <button className="pop-row" style={{color: 'var(--danger)'}} onClick={() => { if (confirm(`Delete field "${field.name}" from this project? Values stay on items but are hidden.`)) store.updateProject(project.id, {fields: project.fields.filter(f => f.id !== field.id)}); setOpen(false); }}><Trash2 size={14} /> Delete field</button>}
+        {field && <button className="pop-row" style={{color: 'var(--danger)'}} onClick={() => { if (confirm(`Delete field "${field.name}" from this space? Values stay on items but are hidden.`)) store.updateProject(project.id, {fields: project.fields.filter(f => f.id !== field.id)}); setOpen(false); }}><Trash2 size={14} /> Delete field</button>}
       </Popover>
     </span>
   );

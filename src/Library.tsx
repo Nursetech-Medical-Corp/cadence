@@ -25,7 +25,7 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
   };
   const edit = (t: {id: string}) => { location.hash = `/templates/${t.id}`; };
   const create = async (kind: 'item' | 'project') => {
-    try { edit(await api<Template>('/templates', {method: 'POST', body: {kind, blank: true, name: kind === 'project' ? 'New project template' : 'New template'}})); } catch (e) { err(e); }
+    try { edit(await api<Template>('/templates', {method: 'POST', body: {kind, blank: true, name: kind === 'project' ? 'New space template' : 'New template'}})); } catch (e) { err(e); }
   };
   const saveProject = async (pid: string) => {
     const p = store.projects.find(x => x.id === pid);
@@ -76,13 +76,13 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
   return (
     <div className="page" style={{maxWidth: 1100}}>
       <h1><LayoutTemplate size={20} /> Templates</h1>
-      <p className="muted">Build once, reuse forever. <b>Task templates</b> are any level of work with its steps: a single task, a vendor onboarding workstream, a whole initiative. <b>Project templates</b> are a full board: levels, statuses, views and starting items.
+      <p className="muted">Build once, reuse forever. <b>Task templates</b> are any level of work with its steps: a single task, a vendor onboarding workstream, a whole initiative. <b>Space templates</b> are a full board: levels, statuses, views and starting items.
         Dates are relative, so steps land on the right days from whatever start you pick. AI agents can read, write and use templates through MCP (get_template, create_template, update_template, use_template) or the API.</p>
       <div className="toolbar" style={{padding: '0 0 12px', border: 0, flexWrap: 'wrap'}}>
         <button className="btn primary" onClick={() => create('item')}><Plus size={14} /> New task template</button>
-        <button className="btn" onClick={() => create('project')}><Plus size={14} /> New project template</button>
+        <button className="btn" onClick={() => create('project')}><Plus size={14} /> New space template</button>
         <select className="plain-select" value="" onChange={e => saveProject(e.target.value)}>
-          <option value="">Save a project as a template...</option>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <option value="">Save a space as a template...</option>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <span className="spacer" />
         <button className="btn" onClick={() => file.current?.click()}><Upload size={14} /> Import pack</button>
@@ -95,7 +95,7 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
       {items.map(row)}
       {!items.length && <Empty title="No task templates yet">Press New task template, add one from the gallery, or open any item and press the template icon to save it with its subitems.</Empty>}
 
-      <h3 style={{marginTop: 24}}>Project templates <span className="count">{projects.length}</span></h3>
+      <h3 style={{marginTop: 24}}>Space templates <span className="count">{projects.length}</span></h3>
       {projects.map(row)}
       {!projects.length && <p className="muted small">None yet. Press New project template, or save an existing project's setup.</p>}
 
@@ -144,12 +144,12 @@ function UseTemplate({t, store, open, onError}: {t: Template; store: Store; open
       <button className="btn small primary" onClick={() => setShow(s => !s)}>Use</button>
       <Popover open={show} onClose={() => setShow(false)} className="wide">
         <div className="use-tpl">
-          {t.kind !== 'view' && <><div className="pop-label">{t.kind === 'project' ? 'New project name' : 'Name (fills {name} in the title)'}</div>
+          {t.kind !== 'view' && <><div className="pop-label">{t.kind === 'project' ? 'New space name' : 'Name (fills {name} in the title)'}</div>
           <input className="inline" autoFocus value={title} placeholder={t.name} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} /></>}
           {t.kind === 'view' && <><div className="pop-label">Add this view to</div>
             <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></>}
           {t.kind === 'item' && <>
-            <div className="pop-label">Project</div>
+            <div className="pop-label">Space</div>
             <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
             <div className="pop-label">Dates</div>
             <div className="seg"><button className={when === 'start' ? 'on' : ''} onClick={() => setWhen('start')}>Starts on</button><button className={when === 'due' ? 'on' : ''} onClick={() => setWhen('due')}>Due by</button></div>
@@ -209,7 +209,7 @@ export function RoutinesPage({store, open}: {store: Store; open: (id: string) =>
       {!routines.length && <Empty title="No routines yet">Add some from below, or open any item and press Make it repeat.</Empty>}
       <h3 style={{marginTop: 28}}>Add a routine from your templates</h3>
       <div className="toolbar" style={{padding: '0 0 8px', border: 0}}>
-        <span className="small muted">Into project</span>
+        <span className="small muted">Into space</span>
         <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <a className="btn ghost small" href="#/templates">More in Templates</a>
       </div>

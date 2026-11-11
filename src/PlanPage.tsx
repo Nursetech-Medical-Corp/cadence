@@ -23,7 +23,7 @@ export function PlanPage({store}: {store: Store}) {
       <h1><Sparkles size={20} /> Plan and forecast</h1>
       <p className="muted">Suggestions you review first: nothing changes until you approve. AI agents can run the same steps through the API and MCP.</p>
       <div className="toolbar" style={{padding: '0 0 12px', border: 0}}>
-        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <div className="seg">
           <button className={tab === 'replan' ? 'on' : ''} onClick={() => setTab('replan')}><CalendarClock size={13} /> Replan</button>
           <button className={tab === 'estimates' ? 'on' : ''} onClick={() => setTab('estimates')}>Estimates</button>

@@ -41,7 +41,7 @@ const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'o
 
 export function guarded(tasks: Tasks, actor: string): Tasks {
   const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true);
-  const need = (projectId: string, cap: Cap) => { if (!caps(projectId).has(cap)) throw new Forbidden(`Not allowed: needs "${cap}" in project ${tasks.project(projectId).key}`); };
+  const need = (projectId: string, cap: Cap) => { if (!caps(projectId).has(cap)) throw new Forbidden(`Not allowed: needs "${cap}" in space ${tasks.project(projectId).key}`); };
   const sees = (projectId: string) => { try { return caps(projectId).has('view'); } catch { return false; } };
   const projOfItem = (id: string) => tasks.findItem(id).projectId;
   const isAdmin = () => !!(tasks.db.prepare('select admin from people where id = ?').get(actor) as {admin: number} | undefined)?.admin;
@@ -64,8 +64,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     markRead: (person) => self(person, 'read notifications'),
     updateView: (vid, patch) => { need(tasks.view(vid).projectId, 'views'); if (patch?.config?.privateTo && patch.config.privateTo !== actor) throw new Forbidden('A view can only be made private to yourself'); },
     deleteView: (vid) => need(tasks.view(vid).projectId, 'views'),
-    deleteProject: () => { if (!isAdmin()) throw new Forbidden('Only admins delete projects'); },
-    createRollup: () => { if (!isAdmin()) throw new Forbidden('Only admins add rollup projects'); },
+    deleteProject: () => { if (!isAdmin()) throw new Forbidden('Only admins delete spaces'); },
+    createRollup: () => { if (!isAdmin()) throw new Forbidden('Only admins add rollup spaces'); },
     importItems: (pid) => need(pid, 'create'),
     exportItems: (pid) => need(pid, 'export'),
     exportWorkspace: () => { if (!isAdmin()) throw new Forbidden('Only admins export the whole workspace'); },
@@ -75,9 +75,9 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     updateSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
     deleteSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
     rolloverSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
-    updateProject: (pid, patch) => { need(pid, 'settings'); if (patch?.settings?.access && !isAdmin()) throw new Forbidden('Only admins change project access'); },
-    createProject: () => { if (!isAdmin()) throw new Forbidden('Only admins create projects'); },
-    createProjectFromTemplate: () => { if (!isAdmin()) throw new Forbidden('Only admins create projects'); },
+    updateProject: (pid, patch) => { need(pid, 'settings'); if (patch?.settings?.access && !isAdmin()) throw new Forbidden('Only admins change space access'); },
+    createProject: () => { if (!isAdmin()) throw new Forbidden('Only admins create spaces'); },
+    createProjectFromTemplate: () => { if (!isAdmin()) throw new Forbidden('Only admins create spaces'); },
     saveItemTemplate: (id) => need(projOfItem(id), 'templates'),
     saveProjectTemplate: (pid) => need(pid, 'settings'),
     useItemTemplate: (_t, pid) => need(pid, 'create'),
@@ -110,9 +110,9 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     approvalState: (id) => need(projOfItem(id), 'view'),
     currentSprint: (pid) => need(pid, 'view'),
     burndown: (sid) => need(tasks.sprint(sid).projectId, 'view'),
-    estimateMissing: (pid) => { if (!pid) throw new Forbidden('Pass a project'); need(pid, 'view'); },
-    replan: (o) => { if (!o?.projectId) throw new Forbidden('Pass a project'); need(o.projectId, 'view'); },
-    forecast: (o) => { if (!o?.projectId) throw new Forbidden('Pass a project'); need(o.projectId, 'view'); },
+    estimateMissing: (pid) => { if (!pid) throw new Forbidden('Pass a space'); need(pid, 'view'); },
+    replan: (o) => { if (!o?.projectId) throw new Forbidden('Pass a space'); need(o.projectId, 'view'); },
+    forecast: (o) => { if (!o?.projectId) throw new Forbidden('Pass a space'); need(o.projectId, 'view'); },
     exportPack: (ids: string[]) => { for (const id of ids) checks.getTemplate(id); },
   };
   const filters: Record<string, (r: any) => any> = {

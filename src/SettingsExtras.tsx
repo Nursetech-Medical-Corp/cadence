@@ -155,7 +155,7 @@ export function TemplatesCard({store, project, templates, reload}: {store: Store
       <div className="set-add" style={{flexWrap: 'wrap'}}>
         <input className="plain-select" style={{flex: 1, minWidth: 180}} value={name} onChange={e => setName(e.target.value)} />
         <label className="small"><input type="checkbox" checked={withItems} onChange={e => setWithItems(e.target.checked)} /> include items</label>
-        <button className="btn" onClick={async () => { await api('/templates', {method: 'POST', body: {kind: 'project', projectId: project.id, name, includeItems: withItems}}).catch(store.fail); reload(); }}><Copy size={14} /> Save this project as a template</button>
+        <button className="btn" onClick={async () => { await api('/templates', {method: 'POST', body: {kind: 'project', projectId: project.id, name, includeItems: withItems}}).catch(store.fail); reload(); }}><Copy size={14} /> Save this space as a template</button>
       </div>
     </section>
   );
@@ -165,8 +165,8 @@ export function IntegrationsCard({store, project}: {store: Store; project: Proje
   const [url, setUrl] = useState('');
   const base = location.origin;
   const feeds = [
-    {label: 'This project', href: `${base}/api/calendar.ics?project=${project.id}&ws=${wsId()}`},
-    ...store.people.map(p => ({label: `${p.name}'s work, all projects`, href: `${base}/api/calendar.ics?person=${p.id}&ws=${wsId()}`})),
+    {label: 'This space', href: `${base}/api/calendar.ics?project=${project.id}&ws=${wsId()}`},
+    ...store.people.map(p => ({label: `${p.name}'s work, all spaces`, href: `${base}/api/calendar.ics?person=${p.id}&ws=${wsId()}`})),
   ];
   const hooks = project.settings.webhooks;
   return (

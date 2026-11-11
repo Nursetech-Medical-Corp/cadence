@@ -1,8 +1,10 @@
 # Connecting AI agents (MCP)
 
-Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
+Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your spaces and projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
 
 There are two ways to connect. Both act as one person in the workspace, and can do only what that person's role allows.
+
+In the app, a workspace holds **spaces** (a team or area like Engineering, QA or Sales). The API and these tools call a space a *project* (`projectId`, `create_project`). Inside a space, work has levels; the default is Project > Phase > Task > Subtask.
 
 ## 1. Same computer (stdio)
 
@@ -52,7 +54,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
 | Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
 | Inbox | `my_notifications`, `mark_notifications_read` |
-| Projects | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations` |
+| Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations` |
 | Sprints | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report` |
 | Planning | `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |

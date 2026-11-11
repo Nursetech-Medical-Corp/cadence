@@ -125,7 +125,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       </section>}
 
       <section className="set-card">
-        <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every project unless the project sets its own. Admins can do everything.</span></div>
+        <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every space unless the space sets its own. Admins can do everything.</span></div>
         {people.map(p => (
           <div key={p.id} className={'set-item team-row' + (p.active ? '' : ' off')}>
             <Avatar person={{id: p.id, name: p.name, email: p.email, color: p.color}} size={26} />
@@ -148,7 +148,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       </section>
 
       <section className="set-card">
-        <div className="set-card-head"><h3>Roles and what they can do</h3><span className="muted small">Tick what each role may do. Projects can give a person a different role there.</span></div>
+        <div className="set-card-head"><h3>Roles and what they can do</h3><span className="muted small">Tick what each role may do. Spaces can give a person a different role there.</span></div>
         <div className="role-grid" style={{gridTemplateColumns: `200px repeat(${roles.length}, minmax(90px, 1fr)) 30px`}}>
           <div />
           {roles.map(r => <div key={r.id} className="role-head">
@@ -182,7 +182,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         <ol className="small steps">
           <li>In Google Cloud console, create an OAuth client of type Web application.</li>
           <li>Add this authorized redirect URI: <code>{redirect}</code> <button className="icon" onClick={() => navigator.clipboard.writeText(redirect)}><Copy size={12} /></button></li>
-          <li>Enable the Gmail API for that project if you want email notifications.</li>
+          <li>Enable the Gmail API for that space if you want email notifications.</li>
           <li>Paste the client ID and secret here.</li>
         </ol>
         <div className="set-add" style={{flexWrap: 'wrap'}}>

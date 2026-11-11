@@ -52,10 +52,10 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 
 ### Work and structure
 - Workspaces for each company or for personal life, each with its own data, files, backups and sign-in. Switch from the top of the sidebar or with Alt+1..9.
-- Projects with your own levels (Initiative, Workstream, Task, Subtask, or Epic, Feature, Story, Task), statuses grouped into to do, doing and done, and custom fields.
-- Rollup project: one project that shows work from all projects, or the ones you pick, in every view.
+- Workspaces hold spaces (a team or area: Engineering, QA, Sales). Each space picks its levels when created: General (Project, Phase, Task, Subtask), Simple, Jira style (Project, Epic, Story, Subtask), Azure DevOps (Epic, Feature, User Story, Task), or your own. Statuses grouped into to do, doing and done, and custom fields. (The API calls a space a project.)
+- Rollup space: one space that shows work from all spaces, or the ones you pick, in every view.
 - Unlimited nesting, dependencies, multiple assignees, priorities, tags, estimates, start and due dates.
-- Sidebar: search, favorites, drag to reorder, an icon and color kit per project.
+- Sidebar: search, favorites, drag to reorder, an icon and color kit per space; an arrow shows a space's views.
 
 ### Views
 - List: an outline with nesting. Enter adds the next item, Tab indents, a hover gutter adds above or below and drags.
@@ -67,7 +67,7 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 
 ### Columns and fields
 - Text, number, money, select, multi-select, date, person, checkbox, URL, phone, email, rating, files.
-- Relation (link items across projects), rollup (count, sum, average, min, max, progress, earliest or latest due, over subitems or related items), and formula (math, text, logic and date functions over other columns).
+- Relation (link items across spaces), rollup (count, sum, average, min, max, progress, earliest or latest due, over subitems or related items), and formula (math, text, logic and date functions over other columns).
 - Automatic: created time, last edited time, created by.
 
 ### Writing fast
@@ -78,13 +78,13 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 ### Files
 - Attach images, PDFs, Office documents and text to any item. Paste screenshots straight into descriptions.
 - Drop files onto a List, Board or Files view to turn each file into its own task.
-- A Files view per project (gallery or table) and a Files column.
+- A Files view per space (gallery or table) and a Files column.
 - Quick view for images, PDFs and Google Drive, Docs, Sheets and Slides links.
 
 ### Repeating work and templates
 - Repeat on a schedule or after completion: daily, weekdays, weekly on chosen days, monthly by date or nth weekday, quarterly, twice a year, yearly, every 2, 3 or 5 years; stop after a date or a count.
 - A Routines page groups all repeating work, from daily to every few years.
-- Templates like ClickUp: task templates at any level and project templates (levels, statuses, views, starting items). Create them from scratch, or save any item or project.
+- Templates like ClickUp: task templates at any level and space templates (levels, statuses, views, starting items). Create them from scratch, or save any item or space.
 - Relative dates in templates: a step starts N days after its parent, or after the step before it, or has no date. Created items keep that link, so moving the parent moves its steps.
 - A template gallery (vendor onboarding, compliance routines, new hire onboarding, AI agency work, a training checklist) and portable template packs you can export and import.
 
@@ -95,7 +95,7 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
 
 ### Teams, security and approvals
-- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, email invites with one-time links, roles with fine-grained permissions and per-project access.
+- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, email invites with one-time links, roles with fine-grained permissions and per-space access.
 - Approvals and e-signatures: request a review or approval, sign with a password re-check, and keep a fingerprint of what was signed. Workflow rules per item type (allowed moves, required fields, approval before done).
 - Protections: CSRF and origin checks, rate-limited sign-in, hashed tokens and passwords, safe webhooks, CSV formula injection guards.
 
@@ -105,7 +105,7 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - History of every change, with revert.
 
 ### Integrations
-- Google: sign in, send notification emails through Gmail, connect personal calendars (read events, add events) and Gmail (search). A calendar feed (ICS) for any person or project.
+- Google: sign in, send notification emails through Gmail, connect personal calendars (read events, add events) and Gmail (search). A calendar feed (ICS) for any person or space.
 - Webhooks, email to task, and a CRM-ready sync API (external ids, changes since a time).
 - Automations: when an item is created, changes status, is completed, is assigned or passes its due date, then set fields, assign, notify, apply a template or close the parent.
 

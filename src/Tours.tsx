@@ -27,7 +27,7 @@ export const TOURS: Tour[] = [
     {go: firstView(s, 'list'), sel: '.add-row', title: 'Add a task', text: 'Click here and type a title. Enter saves it and opens the next line, so you can keep typing a whole list.'},
     {sel: '.add-row', title: 'Fill details while typing', text: 'Add @name to assign, !high for priority, due:fri for a date, #tag, ~2h for an estimate, every:w to repeat. Example: Call vendor @sam !high due:fri'},
     {sel: '.list', title: 'Nest and reorder', text: 'Tab nests a line under the one above, Shift+Tab moves it back out. Drag rows to reorder.'},
-    {title: 'Capture from anywhere', text: 'Press C on any page to open Quick capture: add tasks to any project, one per line, typed or dictated.'},
+    {title: 'Capture from anywhere', text: 'Press C on any page to open Quick capture: add tasks to any space, one per line, typed or dictated.'},
   ]},
   {id: 'done', title: 'Complete tasks and find them later', minutes: 1, summary: 'Checking off, where finished work goes, and how to undo.', steps: s => [
     {go: firstView(s, 'list'), sel: '.list .row .check', title: 'Check it off', text: 'Click the circle to mark a task done. It stays in place, struck through, so nothing vanishes.'},
@@ -35,10 +35,10 @@ export const TOURS: Tour[] = [
     {go: '/mywork', sel: '.free-grid', title: 'Your day', text: 'My work shows what is due, overdue and finished today. Add widgets and drag them where you want.'},
     {go: '/history', sel: '.history', title: 'Undo anything', text: 'Ctrl+Z undoes your last change. History keeps every change by everyone; press Revert on any line.'},
   ]},
-  {id: 'projects', title: 'Projects, views and settings', minutes: 2, summary: 'Create a project, add views like Board or Timeline, and make the names your own.', steps: s => [
-    {go: '/mywork', sel: '.nav-section', title: 'New project', text: 'Press + next to Projects. Pick level names (General, Quality and regulatory, Operations...) or start from a template.'},
+  {id: 'projects', title: 'Spaces, views and settings', minutes: 2, summary: 'Create a space, add views like Board or Timeline, and make the names your own.', steps: s => [
+    {go: '/mywork', sel: '.nav-section', title: 'New space', text: 'Press + next to Spaces. Pick level names (General, Quality and regulatory, Operations...) or start from a template.'},
     {go: firstView(s, 'list'), sel: '.tabs', title: 'Views', text: 'Each tab is a saved view of the same work: List, Table, Board, Timeline, Calendar, Workload, Backlog, Sprint. Each keeps its own filters, sort and columns.'},
-    {sel: '.tabs .tab:last-child', title: 'Settings', text: 'Rename statuses, levels (Initiative, Workstream, Task), add custom fields, automations, access and integrations.'},
+    {sel: '.tabs .tab:last-child', title: 'Settings', text: 'Rename statuses, levels (Project, Phase, Task, Subtask), add custom fields, automations, access and integrations.'},
     {sel: '.toolbar', title: 'Filter, sort, export', text: 'Filter with AND/OR rules, sort by several fields, export what you see as CSV.'},
   ]},
   {id: 'people', title: 'Assign work and keep track of people', minutes: 1, summary: 'Assignees, workload, and the manager view.', steps: s => [
@@ -167,7 +167,7 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
         <div className="tour-top"><span className="muted small">{tour.title}, {n + 1} of {steps.length}</span><span className="spacer" /><button className="icon" onClick={close} title="End tour (Esc)"><X size={14} /></button></div>
         <b>{step.title}</b>
         <p>{step.text}</p>
-        {missing && <p className="small">No project has a {VIEW_LABELS[step.need!] ?? step.need} view yet. <button className="btn small" onClick={addView}>Add one to {missing.name}</button></p>}
+        {missing && <p className="small">No space has a {VIEW_LABELS[step.need!] ?? step.need} view yet. <button className="btn small" onClick={addView}>Add one to {missing.name}</button></p>}
         <div className="tour-dots">{steps.map((_, k) => <span key={k} className={k === n ? 'on' : ''} />)}</div>
         <div className="tour-actions">
           {n > 0 && <button className="btn small" onClick={() => setN(n - 1)}>Back</button>}

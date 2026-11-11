@@ -79,7 +79,7 @@ export function WorkspaceSwitcher({store, me}: {store: Store; me: string}) {
           <button className="pop-row" onClick={() => { setName(''); setIcon(''); setColor(COLORS[list.length % COLORS.length]); setMode('new'); }}><Plus size={14} /> New workspace</button>
           {cur && <button className="pop-row" onClick={() => { setName(cur.name); setIcon(cur.icon); setColor(cur.color); setMode('edit'); }}><Settings2 size={14} /> Rename or recolor {cur.name}</button>}
           {cur && cur.id !== 'main' && <button className="pop-row danger-row" onClick={async () => {
-            const typed = prompt(`Delete the workspace "${cur.name}"? Its projects, people and files are moved to a deleted folder on this computer and disappear from the app. Type the name to confirm.`);
+            const typed = prompt(`Delete the workspace "${cur.name}"? Its spaces, people and files are moved to a deleted folder on this computer and disappear from the app. Type the name to confirm.`);
             if (typed === null) return;
             try { await api(`/workspaces/${cur.id}?confirm=${encodeURIComponent(typed)}`, {method: 'DELETE'}); switchWorkspace('main'); } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
           }}><Trash2 size={14} /> Delete {cur.name}</button>}

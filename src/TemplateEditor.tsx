@@ -95,7 +95,7 @@ function StepTree({root, onChange, types, hideRoot}: {root: Step; onChange: (r: 
               </select>
               <input className="inline num" type="number" min={0} step={0.25} value={n.estimate ?? ''} placeholder="-" onChange={e => set(path, {estimate: e.target.value === '' ? null : Math.max(0, Number(e.target.value))})} />
               <span className="tpl-when">
-                {isRoot ? <span className="muted small">Day 0, the date you pick</span> : top ? <span className="muted small">Set when the project is made</span> : <>
+                {isRoot ? <span className="muted small">Day 0, the date you pick</span> : top ? <span className="muted small">Set when the space is made</span> : <>
                   <select className="plain-select" value={a} onChange={e => set(path, {anchor: e.target.value as Step['anchor'], offset: n.offset ?? 0})}>
                     <option value="start">Days after parent starts</option>
                     <option value="after">After the step above</option>
@@ -172,7 +172,7 @@ export function TemplateEditor({store, id}: {store: Store; id: string}) {
     <div className="page" style={{maxWidth: 1200}}>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <button className="btn ghost" onClick={back}><ArrowLeft size={14} /> Templates</button>
-        <span className="tag">{t.kind === 'project' ? 'Project template' : t.kind === 'view' ? 'View template' : 'Task template'}</span>
+        <span className="tag">{t.kind === 'project' ? 'Space template' : t.kind === 'view' ? 'View template' : 'Task template'}</span>
         <span className="spacer" />
         {msg && <span className={'small' + (msg === 'Saved.' ? ' muted' : '')} style={msg === 'Saved.' ? {} : {color: 'var(--danger)'}}>{msg}</span>}
         <button className="btn primary" disabled={!dirty} onClick={save}><Save size={14} /> Save</button>
@@ -194,11 +194,11 @@ function ProjectTemplateForm({data, onChange, types}: {data: ProjectData; onChan
   const addStatus = () => { let id = 'new', n = 2; while (data.statuses.some(s => s.id === id)) id = `new-${n++}`; up({statuses: [...data.statuses, {id, name: 'New status', category: 'doing', color: '#8b8b8b'}]}); };
   const move = <T,>(list: T[], i: number, d: number) => { const l = [...list]; const j = i + d; if (j < 0 || j >= l.length) return l; [l[i], l[j]] = [l[j], l[i]]; return l; };
   return <>
-    <p className="muted small">Everything a new project starts with. Use it from the sidebar + or the Templates page.</p>
+    <p className="muted small">Everything a new space starts with. Use it from the sidebar + or the Templates page.</p>
     <div className="tpl-grid">
       <div className="chart-card">
         <h4>Levels, top first</h4>
-        <p className="muted small">The hierarchy, like Initiative, Workstream, Task, Subtask.</p>
+        <p className="muted small">The hierarchy, like Project, Phase, Task, Subtask.</p>
         {data.types.map((ty, i) => <div key={i} className="tpl-line">
           <input className="inline" value={ty} onChange={e => up({types: data.types.map((x, k) => k === i ? e.target.value : x)})} />
           <button className="icon" title="Move up" onClick={() => up({types: move(data.types, i, -1)})}><ArrowUp size={13} /></button>
@@ -222,7 +222,7 @@ function ProjectTemplateForm({data, onChange, types}: {data: ProjectData; onChan
       </div>
       <div className="chart-card">
         <h4>Views</h4>
-        <p className="muted small">The tabs the project opens with.</p>
+        <p className="muted small">The tabs the space opens with.</p>
         {data.views.map((v, i) => <div key={i} className="tpl-line">
           <input className="inline" value={v.name} onChange={e => up({views: data.views.map((x, k) => k === i ? {...x, name: e.target.value} : x)})} />
           <select className="plain-select" value={v.kind} onChange={e => up({views: data.views.map((x, k) => k === i ? {...x, kind: e.target.value, config: {}} : x)})}>

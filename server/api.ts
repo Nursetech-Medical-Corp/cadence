@@ -173,7 +173,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
       const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
-      const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this project`); };
+      const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
       const canSee = (projectId: string) => caps(actor, projectId, !!bearer).has('view');
       const seesItem = (itemId: string) => { try { return canSee(tasks.item(itemId).projectId); } catch { return false; } };

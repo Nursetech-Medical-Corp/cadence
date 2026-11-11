@@ -26,7 +26,8 @@ export const DEFAULT_STATUSES: Status[] = [
   {id: 'done', name: 'Done', category: 'done', color: '#22c55e'},
 ];
 // Azure-style levels, top to bottom. Projects can rename or add their own.
-export const DEFAULT_TYPES = ['Initiative', 'Workstream', 'Task', 'Subtask'];
+/** Levels a new space starts with, top to bottom (a space is a team or area; a Project is its biggest piece of work). */
+export const DEFAULT_TYPES = ['Project', 'Phase', 'Task', 'Subtask'];
 export const SOFTWARE_TYPES = ['Epic', 'Feature', 'Story', 'Task', 'Bug'];
 export const DEFAULT_VIEWS: {name: string; kind: ViewKind; config?: ViewConfig}[] = [
   {name: 'List', kind: 'list'}, {name: 'Table', kind: 'table'}, {name: 'Board', kind: 'board'},
@@ -193,7 +194,7 @@ export class Tasks {
   }
   project(pid: string) {
     const r = this.db.prepare('select * from projects where id = ?').get(pid);
-    if (!r) throw new NotFound(`Project ${pid} not found`);
+    if (!r) throw new NotFound(`Space ${pid} not found`);
     return toProject(r);
   }
   createProject(input: {name: string; key?: string; statuses?: Status[]; types?: string[]; fields?: FieldDef[]; settings?: Partial<ProjectSettings>; noViews?: boolean}): Project {
@@ -215,7 +216,7 @@ export class Tasks {
     return p;
   }
   /** A project whose views show work from other projects together (All projects, or the ones chosen in its settings). */
-  createRollup(name = 'All projects') {
+  createRollup(name = 'All spaces') {
     const min = Math.min(0, ...this.listProjects().map(p => p.sort));
     const p = this.createProject({name, key: 'ALL', settings: {rollup: {include: null}}, noViews: true});
     ([['List', 'list'], ['Table', 'table'], ['Board', 'board'], ['Timeline', 'gantt'], ['Calendar', 'calendar'], ['Workload', 'workload']] as [string, ViewKind][])
@@ -225,15 +226,15 @@ export class Tasks {
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
-    if (patch.key !== undefined && this.listProjects().some(x => x.id !== pid && x.key.toUpperCase() === String(p.key).toUpperCase())) throw new Invalid(`Key ${p.key} is already used by another project`);
-    if (patch.name !== undefined && (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200)) throw new Invalid('Project names need 1 to 200 characters');
+    if (patch.key !== undefined && this.listProjects().some(x => x.id !== pid && x.key.toUpperCase() === String(p.key).toUpperCase())) throw new Invalid(`Key ${p.key} is already used by another space`);
+    if (patch.name !== undefined && (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200)) throw new Invalid('Space names need 1 to 200 characters');
     if (patch.name !== undefined) p.name = p.name.trim();
     if (patch.sort !== undefined && !Number.isFinite(p.sort)) throw new Invalid('Sort must be a number');
     if (p.settings.color !== undefined && p.settings.color !== null && !isColor(p.settings.color)) throw new Invalid('Color must look like #10b981');
     if (p.settings.icon !== undefined && p.settings.icon !== null && (typeof p.settings.icon !== 'string' || p.settings.icon.length > 40)) throw new Invalid('Icons are an emoji or a short icon name');
     if (p.statuses.some(s => !isColor(s.color))) throw new Invalid('Status colors must look like #10b981');
-    if (!p.statuses.length) throw new Invalid('A project needs at least one status');
-    if (!p.statuses.some(s => s.category === 'done')) throw new Invalid('A project needs at least one status in the Done group');
+    if (!p.statuses.length) throw new Invalid('A space needs at least one status');
+    if (!p.statuses.some(s => s.category === 'done')) throw new Invalid('A space needs at least one status in the Done group');
     if (new Set(p.types).size !== p.types.length || !p.types.length) throw new Invalid('Item types must be unique and not empty');
     this.db.prepare('update projects set name=?, key=?, statuses=?, types=?, fields=?, sort=?, settings=? where id=?')
       .run(p.name, p.key, JSON.stringify(p.statuses), JSON.stringify(p.types), JSON.stringify(p.fields), p.sort, JSON.stringify(p.settings), pid);
@@ -281,7 +282,7 @@ export class Tasks {
     if (input.start && input.due && input.start > input.due) throw new Invalid('Start must be on or before due');
     const title = String(input.title).trim();
     if (!title) throw new Invalid('Title is required');
-    if (p.settings.rollup) throw new Invalid(`${p.name} shows work from other projects. Add the item to one of those projects.`);
+    if (p.settings.rollup) throw new Invalid(`${p.name} shows work from other spaces. Add the item to one of those spaces.`);
     if (input.parentId) input = this.inherit(p, input);
     const status = input.status ?? p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
     this.checkStatus(p, status);
@@ -432,7 +433,7 @@ export class Tasks {
     return kids.flatMap(k => [k, ...this.descendants(k)]);
   }
   private checkStatus(p: Project, status: string) {
-    if (!p.statuses.some(s => s.id === status)) throw new Invalid(`Status "${status}" is not in project ${p.key}. Valid: ${p.statuses.map(s => s.id).join(', ')}`);
+    if (!p.statuses.some(s => s.id === status)) throw new Invalid(`Status "${status}" is not in space ${p.key}. Valid: ${p.statuses.map(s => s.id).join(', ')}`);
   }
   private checkParent(iid: string, parentId: string) {
     if (parentId === iid || this.descendants(iid).includes(parentId)) throw new Invalid('An item cannot be nested under itself');
@@ -895,7 +896,7 @@ export class Tasks {
   /** A new template from scratch: a blank one, or data written by a person in the editor or by an agent. */
   createTemplate(input: {kind: 'item' | 'project' | 'view'; name: string; data?: unknown; projectId?: string | null}): Template {
     const kind = input.kind === 'project' || input.kind === 'view' ? input.kind : 'item';
-    const name = String(input.name ?? '').trim() || (kind === 'project' ? 'New project template' : 'New template');
+    const name = String(input.name ?? '').trim() || (kind === 'project' ? 'New space template' : 'New template');
     const data = input.data ?? (kind === 'view' ? {name: input.name || 'Board', kind: 'board', config: {}} : kind === 'project'
       ? {statuses: DEFAULT_STATUSES, types: DEFAULT_TYPES, fields: [], settings: {}, views: DEFAULT_VIEWS.map(v => ({name: v.name, kind: v.kind, config: v.config ?? {}})), items: []}
       : {type: 'Task', title: name, children: []});
@@ -960,7 +961,7 @@ export class Tasks {
       const deletedItems = Array.isArray(a.before) ? a.before as Item[] : (a.before as {items: Item[]}).items;
       for (const it of deletedItems) {
         if (this.db.prepare('select 1 from items where id = ?').get(it.id)) continue;
-        if (!this.db.prepare('select 1 from projects where id = ?').get(it.projectId)) throw new Invalid('Its project no longer exists');
+        if (!this.db.prepare('select 1 from projects where id = ?').get(it.projectId)) throw new Invalid('Its space no longer exists');
         this.db.prepare(`insert into items (id,project_id,parent_id,number,type,title,body,status,priority,assignees,start,due,estimate,tags,sprint,sort,recur,fields,created_by,created,updated,completed,deps)
           values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
           it.id, it.projectId, it.parentId, it.number, it.type, it.title, it.body, it.status, it.priority, JSON.stringify(it.assignees), it.start, it.due,

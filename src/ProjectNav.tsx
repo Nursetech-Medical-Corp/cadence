@@ -91,16 +91,16 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
   return <>
     {favList.length > 0 && !q && <><div className="nav-section">Favorites</div>{favList.map(p => row(p, true))}</>}
     {(searching || ordered.length > 8) && <div className="proj-search">
-      <Search size={12} /><input placeholder={`Find among ${ordered.length} projects`} value={q} autoFocus={searching} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Escape' && (setQ(''), setSearching(false))} />
+      <Search size={12} /><input placeholder={`Find among ${ordered.length} spaces`} value={q} autoFocus={searching} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Escape' && (setQ(''), setSearching(false))} />
       {q && <button className="icon" onClick={() => setQ('')}><X size={12} /></button>}
     </div>}
     {shown.map(p => row(p, false))}
-    {q && !shown.length && <div className="muted small" style={{padding: '4px 12px'}}>No project matches.</div>}
+    {q && !shown.length && <div className="muted small" style={{padding: '4px 12px'}}>No space matches.</div>}
     <SearchToggle onClick={() => setSearching(s => !s)} hidden={ordered.length > 8} />
   </>;
 }
 function SearchToggle({onClick, hidden}: {onClick: () => void; hidden: boolean}) {
-  return hidden ? null : <button className="proj-find" onClick={onClick}><Search size={12} /> Find a project</button>;
+  return hidden ? null : <button className="proj-find" onClick={onClick}><Search size={12} /> Find a space</button>;
 }
 
 /** Merges the included projects' statuses, levels and fields so the views can show them together. */
@@ -121,8 +121,8 @@ export function RollupCard({store, project}: {store: Store; project: Project}) {
   const set = (include: string[] | null) => store.updateProject(project.id, {settings: {...project.settings, rollup: {include}}});
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3>Projects in this rollup</h3><span className="muted small">Every view here shows work from these projects together. Each item still belongs to its own project.</span></div>
-      <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!inc} onChange={e => set(e.target.checked ? null : others.map(p => p.id))} /> <b>All projects</b> <span className="muted small">new projects join automatically</span></label>
+      <div className="set-card-head"><h3>Spaces in this rollup</h3><span className="muted small">Every view here shows work from these spaces together. Each item still belongs to its own space.</span></div>
+      <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!inc} onChange={e => set(e.target.checked ? null : others.map(p => p.id))} /> <b>All spaces</b> <span className="muted small">new spaces join automatically</span></label>
       {others.map((p, n) => (
         <label key={p.id} className="row" style={{cursor: 'pointer', opacity: inc ? 1 : .6}}>
           <input type="checkbox" disabled={!inc} checked={!inc || inc.includes(p.id)} onChange={e => set(e.target.checked ? [...(inc ?? []), p.id] : (inc ?? []).filter(x => x !== p.id))} />
@@ -145,7 +145,7 @@ function ProjectMenu({project}: {project: Project}) {
   };
   return (
     <span className="picker" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
-      <button className="proj-more" title="Project options" onClick={() => setOpen(o => !o)} onKeyDown={e => e.stopPropagation()}><MoreHorizontal size={13} /></button>
+      <button className="proj-more" title="Space options" onClick={() => setOpen(o => !o)} onKeyDown={e => e.stopPropagation()}><MoreHorizontal size={13} /></button>
       <Popover open={open} onClose={() => setOpen(false)}>
         <button className="pop-row" onClick={() => { setOpen(false); location.hash = `/p/${project.id}/settings`; }}><Settings size={14} /> Settings</button>
         {!isRollup(project) && <>

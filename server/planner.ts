@@ -49,7 +49,7 @@ export function estimateMissing(tasks: Tasks, projectId?: string) {
     if (similar.length >= 2) { hours = median(similar.map(actual)); basis = `median of ${similar.length} similar finished ${i.type.toLowerCase()}s`; confidence = similar.length >= 4 ? 'high' : 'medium'; }
     else {
       const sameType = done.filter(d => d.type === i.type).map(actual).concat(open.filter(o => o.type === i.type && o.estimate).map(o => o.estimate!));
-      if (sameType.length >= 2) { hours = median(sameType); basis = `typical ${i.type.toLowerCase()} in this project (${sameType.length} examples)`; confidence = 'low'; }
+      if (sameType.length >= 2) { hours = median(sameType); basis = `typical ${i.type.toLowerCase()} in this space (${sameType.length} examples)`; confidence = 'low'; }
       else { hours = 2; basis = 'no history yet, default 2h'; confidence = 'low'; }
     }
     return {itemId: i.id, title: i.title, hours: Math.max(0.25, Math.round(hours * 4) / 4), basis, confidence};

@@ -32,10 +32,10 @@ export const GALLERY: Pack[] = [
   {
     app: 'cadence', kind: 'pack', version: 1, name: 'Learn Cadence: training checklist',
     description: 'A step-by-step checklist that walks a new person through every guided tour and the main features. Use it once per person, assign it to them, and each step follows the one before.',
-    templates: [{name: 'Learn Cadence: training checklist', tree: {type: 'Workstream', title: 'Learn Cadence: {name}', worker: 'human', days: 21, tags: ['training'], body: 'Work top to bottom. Each step starts after the one above, so dates slide if a step runs late. Open Help in the sidebar for the guided tours.', children: [
+    templates: [{name: 'Learn Cadence: training checklist', tree: {type: 'Phase', title: 'Learn Cadence: {name}', worker: 'human', days: 21, tags: ['training'], body: 'Work top to bottom. Each step starts after the one above, so dates slide if a step runs late. Open Help in the sidebar for the guided tours.', children: [
         {type: 'Task', title: 'Take the tour: Add tasks fast', body: 'Help, Add tasks fast. Then add three tasks in any List using @person, !high and due:fri. Type @ or ! to pick from a list.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Take the tour: Complete tasks and find them later', body: 'Help, Complete tasks. Check off a task, find it under Show done, and undo with Ctrl+Z.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
-        {type: 'Task', title: 'Take the tour: Projects, views and settings', body: 'Help, Projects, views and settings. Create a practice project, add a Board and a Timeline view, rename a status in Settings.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
+        {type: 'Task', title: 'Take the tour: Spaces, views and settings', body: 'Help, Spaces, views and settings. Create a practice space, add a Board and a Timeline view, rename a status in Settings.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Take the tour: Assign work and keep track of people', body: 'Help, Assign work. Assign two tasks, open the Workload view, then Team insights.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Take the tour: Timeline (Gantt)', body: 'Help, Timeline. Drag a bar to move it, drag its edge to change length, drag from one bar to another to link a dependency.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Take the tour: Sprints', body: 'Help, Sprints. Create a sprint, drag tasks into it from the Backlog, look at the burndown.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
@@ -46,8 +46,8 @@ export const GALLERY: Pack[] = [
         {type: 'Task', title: 'Take the tour: Keyboard shortcuts', body: 'Help, Keyboard shortcuts. Try Ctrl+K search, Q for quick capture, and arrow keys in a List.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Request and sign an approval', body: 'Open a task, Approvals, request an approval from a teammate (or yourself), then sign it on the Approvals page.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Check data, backups and history', body: 'Data and backups: take a manual snapshot and download an export. History: revert one change.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
-        {type: 'Task', title: 'Review team roles and permissions', body: "Team and permissions: see each role's rights and a project's access settings. Admins only.", worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
-        {type: 'Task', title: 'Plan and forecast', body: 'Plan and forecast: set your weekly hours, run Replan on one project, and read the hiring forecast. Approve nothing yet.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
+        {type: 'Task', title: 'Review team roles and permissions', body: "Team and permissions: see each role's rights and a space's access settings. Admins only.", worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
+        {type: 'Task', title: 'Plan and forecast', body: 'Plan and forecast: set your weekly hours, run Replan on one space, and read the hiring forecast. Approve nothing yet.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Connect an AI agent (optional)', body: 'Team page, Tokens: create a token for an AI worker. Point Claude or another MCP client at /mcp with it, and ask it to list your tasks.', worker: 'either', estimate: 0.5, anchor: 'after', offset: 0, days: 0},
         {type: 'Task', title: 'Done: tell your admin what was confusing', body: 'Comment on this task with anything unclear. It helps improve the guides.', worker: 'human', estimate: 0.25, anchor: 'after', offset: 0, days: 0},
     ]}}],
@@ -55,7 +55,7 @@ export const GALLERY: Pack[] = [
   {
     app: 'cadence', kind: 'pack', version: 1, name: 'Vendor onboarding',
     description: 'Everything to set up a new supplier, from paperwork to the first reorder reminder. AI drafts and checks, people approve and sign.',
-    templates: [{name: 'New vendor onboarding', tree: {type: 'Workstream', title: 'Onboard vendor: {name}', worker: 'either', days: 14, children: [
+    templates: [{name: 'New vendor onboarding', tree: {type: 'Phase', title: 'Onboard vendor: {name}', worker: 'either', days: 14, children: [
       t('Request W-9, COI and banking details', 'ai', 0.5, 0, {body: 'Draft the request email with the document checklist. A person sends it if the agent cannot.'}),
       t('Run vendor due diligence (registration, sanctions, reviews)', 'ai', 1, 1),
       t('Supplier qualification questionnaire and quality agreement', 'human', 2, 2, {tags: ['quality']}),
@@ -91,7 +91,7 @@ export const GALLERY: Pack[] = [
   {
     app: 'cadence', kind: 'pack', version: 1, name: 'New hire onboarding',
     description: 'From signed offer to first-month check-in.',
-    templates: [{name: 'Onboard new hire', tree: {type: 'Workstream', title: 'Onboard {name}', worker: 'either', days: 30, children: [
+    templates: [{name: 'Onboard new hire', tree: {type: 'Phase', title: 'Onboard {name}', worker: 'either', days: 30, children: [
       t('Send offer paperwork and collect I-9 documents', 'either', 1, 0, {tags: ['hr']}),
       t('Set up accounts, email and devices', 'either', 2, 2),
       t('Assign required training and SOP reads', 'ai', 0.5, 3, {tags: ['quality']}),
@@ -103,7 +103,7 @@ export const GALLERY: Pack[] = [
     app: 'cadence', kind: 'pack', version: 1, name: 'AI agency client work',
     description: 'A delivery flow where AI agents research and draft, people review and deliver, with a weekly AI status report.',
     templates: [
-      {name: 'Client deliverable', tree: {type: 'Workstream', title: 'Deliverable: {name}', worker: 'either', days: 10, children: [
+      {name: 'Client deliverable', tree: {type: 'Phase', title: 'Deliverable: {name}', worker: 'either', days: 10, children: [
         t('Intake: goals, audience, constraints', 'human', 1, 0),
         t('Research and source list', 'ai', 2, 1),
         t('First draft', 'ai', 3, 3),
@@ -159,7 +159,7 @@ export function checkTemplateData(kind: 'item' | 'project' | 'view', d: unknown)
     return;
   }
   const x = d as {statuses?: {id?: string; name?: string; category?: string}[]; types?: unknown[]; views?: {name?: string; kind?: string}[]; items?: Node[]};
-  if (!x || typeof x !== 'object') throw new Invalid('Project template data must be an object');
+  if (!x || typeof x !== 'object') throw new Invalid('Space template data must be an object');
   if (!Array.isArray(x.statuses) || !x.statuses.length || x.statuses.some(s => !s?.id || !s?.name || !['todo', 'doing', 'done'].includes(s.category ?? '')))
     throw new Invalid('Each status needs an id, a name and a category: todo, doing or done');
   if (new Set(x.statuses.map(s => s.id)).size !== x.statuses.length) throw new Invalid('Status ids must be unique');
@@ -167,5 +167,5 @@ export function checkTemplateData(kind: 'item' | 'project' | 'view', d: unknown)
   if (!Array.isArray(x.types) || !x.types.length || x.types.some(t => typeof t !== 'string' || !t.trim())) throw new Invalid('Add at least one level, like Task');
   if (!Array.isArray(x.views) || x.views.some(v => !v?.name || !VIEW_KINDS.includes(v.kind ?? ''))) throw new Invalid(`Each view needs a name and a kind: ${VIEW_KINDS.join(', ')}`);
   if (x.items !== undefined && !Array.isArray(x.items)) throw new Invalid('Starting items must be a list');
-  if ((x.items ?? []).reduce((a, n) => a + checkTree(n), 0) > 5000) throw new Invalid('Project templates are limited to 5000 starting items');
+  if ((x.items ?? []).reduce((a, n) => a + checkTree(n), 0) > 5000) throw new Invalid('Space templates are limited to 5000 starting items');
 }

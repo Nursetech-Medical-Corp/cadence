@@ -72,9 +72,9 @@ export function HistoryPage({store, open}: {store: Store; open: (id: string) => 
       <h1>History</h1>
       <p className="muted">Every change is saved with who made it. Revert any one of them, even after a reload. Ctrl+Z still undoes your own recent changes in this tab.</p>
       <select className="plain-select" value={project} onChange={e => setProject(e.target.value)} style={{marginBottom: 10}}>
-        <option value="">All projects</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        <option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
-      {store.projects.length ? <ActivityList store={store} projectId={project || undefined} limit={200} open={open} /> : <Empty title="No projects" />}
+      {store.projects.length ? <ActivityList store={store} projectId={project || undefined} limit={200} open={open} /> : <Empty title="No spaces" />}
     </div>
   );
 }

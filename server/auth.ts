@@ -15,9 +15,9 @@ import {Invalid} from './errors.ts';
 export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
 export type Cap = typeof CAPS[number];
 export const CAP_LABELS: Record<Cap, string> = {
-  view: 'See the project', comment: 'Comment', create: 'Create items', edit: 'Edit items', delete: 'Delete items',
+  view: 'See the space', comment: 'Comment', create: 'Create items', edit: 'Edit items', delete: 'Delete items',
   sprints: 'Manage sprints', views: 'Create and change views', templates: 'Use and save templates',
-  settings: 'Project settings (statuses, fields, automations)', export: 'Export data',
+  settings: 'Space settings (statuses, fields, automations)', export: 'Export data',
 };
 export type Role = {id: string; name: string; caps: Cap[]};
 export const DEFAULT_ROLES: Role[] = [
