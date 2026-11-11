@@ -134,6 +134,8 @@ export type ViewConfig = {
   /** Timeline: highlight the critical path; saved baselines (dates at a moment) and which one to show. */
   /** Board: show the first image attachment on each card. */
   covers?: boolean;
+  /** Conditional colors: the first matching rule tints the row or card. */
+  colors?: {rule: FilterRule; color: string}[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
   zoom?: 'day' | 'week' | 'month'; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };

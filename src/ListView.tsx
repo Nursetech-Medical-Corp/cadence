@@ -1,4 +1,5 @@
 import {Fragment, useState} from 'react';
+import {colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Repeat} from 'lucide-react';
 import type {Item, Project} from './types.ts';
@@ -63,6 +64,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
         <Fragment key={i.id}>
           {insert?.beforeId === i.id && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} />}
           <div onClickCapture={e => { if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); e.stopPropagation(); toggle(i.id, e, [...document.querySelectorAll<HTMLElement>('.list .row[data-id]')].map(r => r.dataset.id!)); } }} data-id={i.id}
+            style={tint(colorOf(i, config.colors, {project, today: store.today}))}
             className={'row' + (selected.has(i.id) ? ' sel' : '') + (i.completed ? ' done' : '') + (dragId === i.id ? ' dragging' : '') + (overId === i.id && dragId !== i.id ? ' drop-before' : '')} draggable
             onDragStart={e => { if ((e.target as HTMLElement).closest('input')) { e.preventDefault(); return; } setDragId(i.id); }} onDragEnd={() => { setDragId(null); setOverId(null); }}
             onDragOver={e => { e.preventDefault(); setOverId(i.id); }} onDrop={() => { dropOn(i); setOverId(null); }}>

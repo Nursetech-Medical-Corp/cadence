@@ -1,7 +1,8 @@
-import {useEffect, useRef, useState} from 'react';
+import {Fragment, useEffect, useRef, useState} from 'react';
+import {colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, EyeOff, MoreHorizontal, Plus, Trash2, Pencil} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
-import {fmtMinutes, type Store} from './store.ts';
+import {between, fmtMinutes, type Store} from './store.ts';
 import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
@@ -21,6 +22,8 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   // New rows: type a title in the draft row, Enter adds it and opens another draft, Tab adds it and moves to the next cell.
   // New rows stay pinned at the bottom (ignoring sort and filters) until you press Done or leave the view.
   const [drafting, setDrafting] = useState(false);
+  // Adding a row in between: the row it goes next to.
+  const [insertAt, setInsertAt] = useState<{id: string; above: boolean} | null>(null);
   const [draft, setDraft] = useState('');
   const [pinned, setPinned] = useState<string[]>([]);
   const [dragCol, setDragCol] = useState<string | null>(null);
@@ -154,7 +157,17 @@ export function TableView({store, project, items, allItems, sprints, open, confi
         </tr></thead>
         <tbody>
           {first > 0 && <tr aria-hidden style={{height: first * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
-          {visibleRows.map(i => <tr key={i.id} data-id={i.id} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}><td className="sel-col"><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>{shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button></td></tr>)}
+          {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, config.colors, {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
+            <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
+            {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button></td></tr>
+            {insertAt?.id === i.id && <InsertRow cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
+              // Between this row and the one shown next to it.
+              const sibs = rows, at = sibs.findIndex(x => x.id === i.id);
+              const sort = insertAt.above ? between(sibs[at - 1]?.sort, i.sort) : between(i.sort, sibs[at + 1]?.sort);
+              const made = await store.quickAdd(project.id, text, {parentId: i.parentId, sort});
+              if (made) setInsertAt({id: made.id, above: false});
+            }} />}
+          </Fragment>)}
           {last < rows.length && <tr aria-hidden style={{height: (rows.length - last) * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
           {fresh.map(i => <tr key={i.id} data-id={i.id} className={'fresh' + (i.completed ? ' done' : '')}><td className="sel-col" />{shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><span className="new-tag">new</span></td></tr>)}
           {drafting ? (
@@ -295,4 +308,14 @@ function ContactCell({value, href, onChange}: {value: string; href: (v: string) 
   const [edit, setEdit] = useState(false);
   if (edit || !value) return <InlineText value={value} placeholder="-" onSave={v => { setEdit(false); const t = v.trim(); if (t !== value) onChange(t || null); }} />;
   return <span className="title-cell"><a className="link" href={href(value)}>{value}</a><button className="icon cell-edit" title="Edit" onClick={() => setEdit(true)}><Pencil size={12} /></button></span>;
+}
+
+/** An inline row for adding a task between two rows. Enter adds and opens another below it, Esc stops. */
+function InsertRow({cols, onAdd, onDone}: {cols: number; onAdd: (text: string) => Promise<void>; onDone: () => void}) {
+  const [text, setText] = useState('');
+  return <tr className="draft insert-row"><td className="sel-col" /><td colSpan={cols + 1}>
+    <span className="title-cell"><span className="check ghost" /><input autoFocus className="inline" placeholder="New row here. Enter to add, Esc to stop" value={text}
+      onChange={e => setText(e.target.value)} onBlur={() => { if (!text.trim()) onDone(); }}
+      onKeyDown={async e => { if (e.key === 'Escape') onDone(); if (e.key === 'Enter' && text.trim()) { e.preventDefault(); const t = text; setText(''); await onAdd(t); } }} /></span>
+  </td></tr>;
 }

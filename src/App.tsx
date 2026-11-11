@@ -1,4 +1,5 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {ColorRulesButton} from './ColorRules.tsx';
 import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
@@ -273,7 +274,6 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
           </>}
         </Popover>
       </span>
-      <button className="nav-btn" onClick={onCapture}><PenLine size={15} /> Quick capture <kbd>C</kbd></button>
       <button className="nav-btn" onClick={openPalette}><Search size={15} /> Search <kbd>Ctrl K</kbd></button>
       <button className={'nav-btn' + (route.page === 'mywork' ? ' active' : '')} onClick={() => go({page: 'mywork'})}><Sun size={15} /> My work</button>
       {wsCount > 1 && <button className={'nav-btn' + (route.page === 'today' ? ' active' : '')} onClick={() => go({page: 'today'})}><Layers size={15} /> Everything</button>}
@@ -523,6 +523,7 @@ function Toolbar({store, project, view, config, setConfig, openItem}: {store: St
         </select>
       )}
       {view.kind === 'table' && <ColumnsMenu store={store} project={project} config={config} setConfig={setConfig} />}
+      {['list', 'table', 'board'].includes(view.kind) && <ColorRulesButton store={store} project={project} config={config} setConfig={setConfig} />}
       {(view.kind === 'gantt' || view.kind === 'board') && <button className="btn" onClick={() => store.createSprint(project.id)}><Plus size={13} /> New sprint</button>}
       {view.kind === 'gantt' && (
         <select className="plain-select" value={config.colorBy ?? 'type'} onChange={e => setConfig({colorBy: e.target.value as ViewConfig['colorBy']})} title="Bar colors">

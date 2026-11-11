@@ -1025,3 +1025,13 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .comment.assigned { background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: 8px; }
 .comment.resolved { opacity: .7; }
 .comment-assign { margin-left: 6px; font-size: 11.5px; background: var(--hover); border-radius: 4px; padding: 1px 6px; display: inline-flex; gap: 6px; align-items: center; }
+
+.color-rule { align-items: center; gap: 4px; flex-wrap: wrap; padding: 3px 2px; }
+.swatches { display: inline-flex; gap: 2px; }
+.swatches .ws-color { width: 14px; height: 14px; }
+
+.grid .sel-col { position: relative; }
+.row-add { position: absolute; left: -2px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; border: 0; border-radius: 4px; background: var(--hover); color: var(--text2); display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.grid tr:hover .row-add { display: inline-flex; }
+.grid tr:hover .sel-col input { margin-left: 14px; }
+.insert-row td { background: color-mix(in srgb, var(--accent) 5%, transparent); }

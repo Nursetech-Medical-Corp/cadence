@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {CardCover} from './FilesCell.tsx';
 import {GripVertical, Link2, Repeat} from 'lucide-react';
@@ -13,7 +14,7 @@ type Group = {id: string; name: string; color: string; icon?: React.ReactNode; m
 
 export function BoardView({store, project, items, allItems, sprints, open, config}: ViewProps) {
   const lane = config.swimlane ?? 'none';
-  if (lane === 'none') return <Board store={store} project={project} items={items} allItems={allItems} sprints={sprints} open={open} groupBy={config.groupBy ?? 'status'} sorts={sortsOf(config)} covers={config.covers} />;
+  if (lane === 'none') return <Board store={store} project={project} items={items} allItems={allItems} sprints={sprints} open={open} groupBy={config.groupBy ?? 'status'} sorts={sortsOf(config)} covers={config.covers} colors={config.colors} />;
   // Swimlanes: one board per lane; adding a card in a lane sets that lane's value.
   const lanes: {id: string; name: string; match: (i: Item) => boolean; extra: ItemPatch}[] =
     lane === 'assignee' ? [...store.people.map(p => ({id: p.id, name: p.name, match: (i: Item) => i.assignees[0] === p.id, extra: {assignees: [p.id]}})), {id: '', name: 'Unassigned', match: (i: Item) => !i.assignees.length, extra: {}}]
@@ -27,15 +28,15 @@ export function BoardView({store, project, items, allItems, sprints, open, confi
     if (!mine.length && lane === 'parent') return null;
     return <details key={l.id} className="lane" open>
       <summary><b>{l.name}</b> <span className="muted small">{mine.length}</span></summary>
-      <Board store={store} project={project} items={mine} allItems={allItems} sprints={sprints} open={open} groupBy={config.groupBy ?? 'status'} sorts={sortsOf(config)} createExtra={l.extra} compact covers={config.covers} />
+      <Board store={store} project={project} items={mine} allItems={allItems} sprints={sprints} open={open} groupBy={config.groupBy ?? 'status'} sorts={sortsOf(config)} createExtra={l.extra} compact covers={config.covers} colors={config.colors} />
     </details>;
   })}</div>;
 }
 
 /** Shared by the Board view and the Sprint view. */
-export function Board({store, project, items, allItems, sprints, open, groupBy, createExtra = {}, sorts = [], compact, covers}: {
+export function Board({store, project, items, allItems, sprints, open, groupBy, createExtra = {}, sorts = [], compact, covers, colors}: {
   store: Store; project: ViewProps['project']; items: Item[]; allItems: Item[]; sprints: Sprint[]; open: (id: string) => void;
-  groupBy: NonNullable<ViewProps['config']['groupBy']>; createExtra?: ItemPatch; sorts?: SortRule[]; compact?: boolean; covers?: boolean;
+  groupBy: NonNullable<ViewProps['config']['groupBy']>; createExtra?: ItemPatch; sorts?: SortRule[]; compact?: boolean; covers?: boolean; colors?: ViewProps['config']['colors'];
 }) {
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<{group: string; before: string | null} | null>(null);
@@ -102,7 +103,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
               const kids = allItems.filter(k => k.parentId === i.id);
               const blocked = i.deps.some(d => !allItems.find(x => x.id === d)?.completed);
               return (
-                <div key={i.id} data-id={i.id} className={'card' + (drag === i.id ? ' dragging' : '') + (i.completed ? ' done' : '') + (over?.before === i.id && drag !== i.id ? ' drop-before' : '')} draggable
+                <div key={i.id} data-id={i.id} style={tint(colorOf(i, colors, {project, today: store.today}))} className={'card' + (drag === i.id ? ' dragging' : '') + (i.completed ? ' done' : '') + (over?.before === i.id && drag !== i.id ? ' drop-before' : '')} draggable
                   onDragStart={() => setDrag(i.id)} onDragEnd={() => { setDrag(null); setOver(null); }}
                   onDragOver={e => { e.preventDefault(); e.stopPropagation(); setOver({group: g.id, before: i.id}); }}
                   onClick={() => open(i.id)}>

@@ -27,7 +27,7 @@ export function filterFields(project: Project, store: Store, sprints: Sprint[]):
   ];
 }
 
-const OPS: Record<FieldSpec['kind'], {op: FilterRule['op']; label: string}[]> = {
+export const OPS: Record<FieldSpec['kind'], {op: FilterRule['op']; label: string}[]> = {
   text: [{op: 'contains', label: 'contains'}, {op: 'is', label: 'is'}, {op: 'is-not', label: 'is not'}, {op: 'empty', label: 'is empty'}, {op: 'not-empty', label: 'is not empty'}],
   choice: [{op: 'is', label: 'is'}, {op: 'is-not', label: 'is not'}, {op: 'empty', label: 'is empty'}, {op: 'not-empty', label: 'is set'}],
   date: [{op: 'before', label: 'is before'}, {op: 'after', label: 'is after'}, {op: 'is', label: 'is on'}, {op: 'empty', label: 'is empty'}, {op: 'not-empty', label: 'is set'}],
