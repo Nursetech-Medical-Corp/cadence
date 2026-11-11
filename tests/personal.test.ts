@@ -88,3 +88,16 @@ test('my data: export holds only what I can see; import restores personal spaces
     assert.equal(admin.admin, true);
   } finally { server.close(); }
 });
+
+test('people without the views permission can still keep private views of their own', async () => {
+  const {server, call, member, m, tasks} = await harness();
+  try {
+    const p = tasks.listProjects().find(x => !x.settings.rollup)!;
+    assert.equal((await call('/views', {method: 'POST', body: {projectId: p.id, name: 'Team view', kind: 'list'}, cookie: m})).status, 403);
+    const v = await call('/views', {method: 'POST', body: {projectId: p.id, name: 'Mine', kind: 'list', config: {privateTo: member.id}}, cookie: m});
+    assert.equal(v.status, 201);
+    assert.equal((await call(`/views/${v.json.id}`, {method: 'PATCH', body: {name: 'Mine 2', config: {...v.json.config, privateTo: member.id}}, cookie: m})).status, 200);
+    assert.equal((await call(`/views/${v.json.id}`, {method: 'PATCH', body: {config: {...v.json.config, privateTo: undefined}}, cookie: m})).status, 403, 'cannot publish it to everyone');
+    assert.equal((await call(`/views/${v.json.id}`, {method: 'DELETE', cookie: m})).status, 200);
+  } finally { server.close(); }
+});

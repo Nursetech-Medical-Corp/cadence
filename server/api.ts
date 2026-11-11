@@ -522,9 +522,11 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
 
       if (a === 'views') {
         if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
-        if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
+        // Anyone who can see a space may keep their own private views there; shared views need "views".
+        const ownView = (cfg: {privateTo?: string} | undefined) => !!actor && cfg?.privateTo === actor;
+        if (!b && m === 'POST') { need(body.projectId, ownView(body.config) ? 'view' : 'views'); return send(res, 201, tasks.createView(body)); }
         if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); if (areaLocked(tasks.db, 'viewOrder')) needAdmin(); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
-        if (b) need(tasks.view(b).projectId, 'views');
+        if (b) { const v = tasks.view(b); need(v.projectId, ownView(v.config) && (!body.config || ownView(body.config)) ? 'view' : 'views'); }
         // Only the owner can make a view private to themselves; nobody can make it private to someone else.
         if (b && m === 'PATCH') { if (body.config && areaLocked(tasks.db, 'viewSettings') && settingsChanged(tasks.view(b).config, body.config)) needAdmin(); if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
