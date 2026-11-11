@@ -82,12 +82,16 @@ function prune(dir: string) {
 
 /** Takes an auto snapshot when the newest one is older than the interval. Call on start and periodically. */
 /** Copies uploaded files not yet in the backup folder. Files are written once and never changed, so this is complete. */
-export function mirrorFiles(filesDir: string, dir = DIR()) {
+/** Copies new or changed files (attachments, header pictures) into the backup folder under the same name. */
+export function mirrorFiles(filesDir: string, dir = DIR(), as = 'files') {
   if (!existsSync(filesDir)) return 0;
-  const to = join(dir, 'files');
+  const to = join(dir, as);
   mkdirSync(to, {recursive: true});
   let n = 0;
-  for (const f of readdirSync(filesDir)) if (!existsSync(join(to, f))) { copyFileSync(join(filesDir, f), join(to, f)); n++; }
+  for (const f of readdirSync(filesDir)) {
+    const src = join(filesDir, f), dst = join(to, f);
+    if (!existsSync(dst) || statSync(src).mtimeMs > statSync(dst).mtimeMs) { copyFileSync(src, dst); n++; }
+  }
   return n;
 }
 export function maybeSnapshot(db: Db, dir = DIR()) {

@@ -101,7 +101,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
-  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorFiles(join(tasks.dataDir, 'files'), bdir); } catch (e) { console.error('Snapshot failed', e); } };
+  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorFiles(join(tasks.dataDir, 'files'), bdir); mirrorFiles(join(tasks.dataDir, 'covers'), bdir, 'covers'); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
   setInterval(auto, 10 * 60 * 1000).unref();
   // Due-date automations and sprint rollover, checked on start and hourly.
