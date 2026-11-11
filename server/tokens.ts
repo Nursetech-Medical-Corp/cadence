@@ -60,6 +60,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     saveItemTemplate: (id) => need(projOfItem(id), 'templates'),
     saveProjectTemplate: (pid) => need(pid, 'settings'),
     useItemTemplate: (_t, pid) => need(pid, 'create'),
+    useViewTemplate: (_t, pid) => need(pid, 'views'),
+    saveViewTemplate: (_v, _n, pid) => { if (pid) need(pid, 'templates'); },
     createTemplate: (i) => { if (i?.projectId) need(i.projectId, 'templates'); else if (!isAdmin()) throw new Forbidden('Only admins make workspace-wide templates; pass a project'); },
     updateTemplate: (tid) => { const t = tasks.getTemplate(tid); if (t.projectId && tasks.listProjects().some(p => p.id === t.projectId)) need(t.projectId, 'templates'); else if (!isAdmin()) throw new Forbidden('Only admins change workspace-wide templates'); },
     deleteTemplate: (tid) => { const t = tasks.getTemplate(tid); if (t.projectId && tasks.listProjects().some(p => p.id === t.projectId)) need(t.projectId, 'templates'); else if (!isAdmin()) throw new Forbidden('Only admins delete workspace-wide templates'); },

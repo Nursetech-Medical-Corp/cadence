@@ -13,7 +13,13 @@ export default defineConfig(({mode}) => {
         server.middlewares.use(apiMiddleware());
         // The API runs inside this process; restart it when server code changes so edits take effect.
         server.watcher.add('server');
-        server.watcher.on('all', (_event, file) => { if (/[\\/]server[\\/].+\.ts$/.test(file)) server.restart(); });
+        // Several files often change at once; restart once, after the last one.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        server.watcher.on('all', (_event, file) => {
+          if (!/[\\/]server[\\/].+\.ts$/.test(file)) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => server.restart(), 400);
+        });
       },
     }],
   };

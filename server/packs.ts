@@ -149,8 +149,15 @@ export function checkTree(n: Node, depth = 0): number {
 
 const VIEW_KINDS = ['list', 'table', 'board', 'gantt', 'backlog', 'sprint', 'calendar', 'workload', 'files'];
 /** Validates template data before it is saved, from the editor, the API or an agent. */
-export function checkTemplateData(kind: 'item' | 'project', d: unknown) {
+export function checkTemplateData(kind: 'item' | 'project' | 'view', d: unknown) {
   if (kind === 'item') { if (checkTree(d as Node) > 2000) throw new Invalid('Templates are limited to 2000 steps'); return; }
+  if (kind === 'view') {
+    const v = d as {name?: unknown; kind?: unknown; config?: unknown};
+    if (!v || typeof v.name !== 'string' || !v.name.trim() || v.name.length > 100) throw new Invalid('A view template needs a name');
+    if (!VIEW_KINDS.includes(String(v.kind))) throw new Invalid(`View kind must be one of: ${VIEW_KINDS.join(', ')}`);
+    if (v.config !== undefined && (typeof v.config !== 'object' || v.config === null || Array.isArray(v.config))) throw new Invalid('View settings must be an object');
+    return;
+  }
   const x = d as {statuses?: {id?: string; name?: string; category?: string}[]; types?: unknown[]; views?: {name?: string; kind?: string}[]; items?: Node[]};
   if (!x || typeof x !== 'object') throw new Invalid('Project template data must be an object');
   if (!Array.isArray(x.statuses) || !x.statuses.length || x.statuses.some(s => !s?.id || !s?.name || !['todo', 'doing', 'done'].includes(s.category ?? '')))

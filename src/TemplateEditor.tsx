@@ -172,13 +172,13 @@ export function TemplateEditor({store, id}: {store: Store; id: string}) {
     <div className="page" style={{maxWidth: 1200}}>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <button className="btn ghost" onClick={back}><ArrowLeft size={14} /> Templates</button>
-        <span className="tag">{t.kind === 'project' ? 'Project template' : 'Task template'}</span>
+        <span className="tag">{t.kind === 'project' ? 'Project template' : t.kind === 'view' ? 'View template' : 'Task template'}</span>
         <span className="spacer" />
         {msg && <span className={'small' + (msg === 'Saved.' ? ' muted' : '')} style={msg === 'Saved.' ? {} : {color: 'var(--danger)'}}>{msg}</span>}
         <button className="btn primary" disabled={!dirty} onClick={save}><Save size={14} /> Save</button>
       </div>
       <input className="inline tpl-name" value={name} onChange={e => { setName(e.target.value); setDirty(true); }} placeholder="Template name" />
-      {t.kind === 'item' ? <>
+      {t.kind === 'view' ? <ViewTemplateForm data={data as {name: string; kind: string; config?: Record<string, unknown>}} onChange={change} /> : t.kind === 'item' ? <>
         <p className="muted small">The first row is what gets created; the rows under it become its subitems. Pick a start or due date when you use it and every step's date follows.
           Steps set to <b>Days after parent starts</b> move when the parent moves. Steps set to <b>After the step above</b> slide when that step runs late. <b>No date</b> stays as you set it.</p>
         <StepTree root={data as Step} onChange={change} types={types} />
@@ -244,4 +244,17 @@ function ProjectTemplateForm({data, onChange, types}: {data: ProjectData; onChan
 export function stepCount(d: unknown): number {
   const n = d as Step | null;
   return n ? 1 + (n.children ?? []).reduce((a, c) => a + stepCount(c), 0) : 0;
+}
+
+/** A view template: the view's name and layout; its filters, sort, grouping and columns come from the saved view. */
+function ViewTemplateForm({data, onChange}: {data: {name: string; kind: string; config?: Record<string, unknown>}; onChange: (d: unknown) => void}) {
+  const keys = Object.keys(data.config ?? {}).filter(k => data.config![k] !== undefined);
+  return (
+    <div className="chart-card" style={{maxWidth: 520}}>
+      <div className="tpl-line"><span style={{width: 110}}>View name</span><input className="inline" value={data.name} onChange={e => onChange({...data, name: e.target.value})} /></div>
+      <div className="tpl-line"><span style={{width: 110}}>Layout</span>
+        <select className="plain-select" value={data.kind} onChange={e => onChange({...data, kind: e.target.value})}>{VIEW_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+      <p className="muted small">Saved settings: {keys.length ? keys.join(', ') : 'none'}. To change filters or columns, adjust a view in a project and save it as a template again.</p>
+    </div>
+  );
 }

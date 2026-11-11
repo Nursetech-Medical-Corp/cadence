@@ -1,11 +1,11 @@
 // Sidebar project list: search, favorites, drag to reorder (grip on hover), icon and color kit,
 // and the rollup project that shows work from many projects together.
 import {useMemo, useState} from 'react';
-import {GripVertical, Layers, Search, X, type LucideIcon} from 'lucide-react';
+import {GripVertical, LayoutTemplate, Layers, MoreHorizontal, Search, Settings, X, type LucideIcon} from 'lucide-react';
 // Only the icons offered in the kit are bundled (importing the whole icon set would add about 1 MB).
 import {Rocket, Briefcase, House, Heart, Star, Flag, Target, Megaphone, ShoppingCart, Truck, Package, Wrench, Code, Cpu, Database, Shield, Stethoscope, HeartPulse, Pill, Syringe, FlaskConical, BookOpen, GraduationCap, Users, DollarSign, PiggyBank, Scale, Gavel, FileText, ClipboardList, Calendar, Camera, Music, Palette, Plane, Leaf, Lightbulb, Zap, Globe, Bot, Sparkles, Coffee} from 'lucide-react';
 import type {Project} from './types.ts';
-import {wsId, type Store} from './store.ts';
+import {api, wsId, type Store} from './store.ts';
 import {Popover} from './components.tsx';
 
 export const PROJECT_COLORS = ['#6d5dfc', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#ef4444', '#64748b', '#0f172a'];
@@ -53,7 +53,7 @@ export function IconKit({store, project, index, big}: {store: Store; project: Pr
 
 const favKey = () => `fav:${wsId()}`;
 
-export function ProjectList({store, activeId, render}: {store: Store; activeId: string | null; render: (p: Project, index: number, extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode}) => React.ReactNode}) {
+export function ProjectList({store, activeId, render}: {store: Store; activeId: string | null; render: (p: Project, index: number, extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode; menu: React.ReactNode}) => React.ReactNode}) {
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [favs, setFavs] = useState<string[]>(() => JSON.parse(localStorage.getItem(favKey()) ?? '[]'));
@@ -74,12 +74,13 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     const grip = !q && !fav ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
     const star = <button className={'proj-star' + (favs.includes(p.id) ? ' on' : '')} title={favs.includes(p.id) ? 'Remove from favorites' : 'Add to favorites'} onClick={e => { e.stopPropagation(); toggleFav(p.id); }} onKeyDown={e => e.stopPropagation()}><Star size={12} /></button>;
     const icon = <IconKit store={store} project={p} index={n} />;
+    const menu = <ProjectMenu project={p} />;
     return (
       <div key={(fav ? 'f' : '') + p.id} className={'proj-row' + (drag === p.id ? ' dragging' : '') + (over?.id === p.id ? (over.after ? ' drop-after' : ' drop-before') : '') + (p.id === activeId ? ' current' : '')}
         draggable={!q && !fav} onDragStart={e => { setDrag(p.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => { setDrag(null); setOver(null); }}
         onDragOver={e => { if (!drag || fav) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setOver({id: p.id, after: e.clientY > r.top + Math.min(r.height, 32) / 2}); }}
         onDrop={e => { e.preventDefault(); if (over) drop(over.id, over.after); setDrag(null); setOver(null); }}>
-        {render(p, n, {grip, star, icon})}
+        {render(p, n, {grip, star, icon, menu})}
       </div>
     );
   };
@@ -126,5 +127,30 @@ export function RollupCard({store, project}: {store: Store; project: Project}) {
         </label>
       ))}
     </section>
+  );
+}
+
+/** Project ... menu in the sidebar: settings and Save as template (setup only, or with its items). */
+function ProjectMenu({project}: {project: Project}) {
+  const [open, setOpen] = useState(false);
+  const save = async (includeItems: boolean) => {
+    setOpen(false);
+    try {
+      const t = await api<{id: string}>('/templates', {method: 'POST', body: {kind: 'project', projectId: project.id, name: `${project.name}${includeItems ? '' : ' setup'}`, includeItems}});
+      location.hash = `/templates/${t.id}`;
+    } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
+  };
+  return (
+    <span className="picker" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>
+      <button className="proj-more" title="Project options" onClick={() => setOpen(o => !o)} onKeyDown={e => e.stopPropagation()}><MoreHorizontal size={13} /></button>
+      <Popover open={open} onClose={() => setOpen(false)}>
+        <button className="pop-row" onClick={() => { setOpen(false); location.hash = `/p/${project.id}/settings`; }}><Settings size={14} /> Settings</button>
+        {!isRollup(project) && <>
+          <div className="pop-sep" />
+          <button className="pop-row" onClick={() => save(false)}><LayoutTemplate size={14} /> Save as template (setup only)</button>
+          <button className="pop-row" onClick={() => save(true)}><LayoutTemplate size={14} /> Save as template with its items</button>
+        </>}
+      </Popover>
+    </span>
   );
 }

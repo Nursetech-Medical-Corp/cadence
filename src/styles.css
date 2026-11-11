@@ -991,3 +991,6 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .cell-edit { opacity: 0; } td:hover .cell-edit { opacity: .7; }
 .ext-img { margin: 4px 0; }
 @media (max-width: 900px) { .app:not(.side-hidden) .sidebar { width: 200px !important; } }
+
+.proj-more { background: none; border: 0; padding: 2px; color: var(--text3, #aaa); opacity: 0; cursor: pointer; display: inline-flex; }
+.proj-nav:hover .proj-more, .proj-more:focus-visible { opacity: 1; }

@@ -8,6 +8,7 @@ import {stepCount} from './TemplateEditor.tsx';
 import {describeRecur} from './recur.ts';
 import {useTemplates} from './SettingsExtras.tsx';
 
+const VIEW_LABEL: Record<string, string> = {list: 'List', table: 'Table', board: 'Board', gantt: 'Timeline', calendar: 'Calendar', workload: 'Workload', backlog: 'Backlog', sprint: 'Sprint', files: 'Files'};
 type GalleryPack = {name: string; description: string; templates: {name: string; steps: number; repeats: boolean}[]; automations: number};
 
 export function TemplatesPage({store, open}: {store: Store; open: (id: string) => void}) {
@@ -40,7 +41,7 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
     a.href = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], {type: 'application/json'}));
     a.download = `${name.replace(/[^\w-]+/g, '-')}.tasks-pack.json`; a.click();
   };
-  const items = mine.filter(t => t.kind === 'item'), projects = mine.filter(t => t.kind === 'project');
+  const items = mine.filter(t => t.kind === 'item'), projects = mine.filter(t => t.kind === 'project'), viewTemplates = mine.filter(t => t.kind === 'view');
   const isRepeat = (t: Template) => !!(t.data as {recur?: unknown})?.recur;
   const workerSummary = (t: Template) => {
     const count = {ai: 0, human: 0};
@@ -56,7 +57,7 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
         {isRepeat(t) ? <Repeat size={14} className="muted" /> : <LayoutTemplate size={14} className="muted" />}
         <div className="grow tpl-name-cell">
           <button className="link-btn" onClick={() => edit(t)} title="Edit">{t.name}</button>
-          <div className="muted small">{t.kind === 'item' ? `${d.type ?? 'Task'}, ${stepCount(t.data) - 1} steps${d.days ? `, ${d.days} days` : ''}` : `${d.statuses?.length ?? 0} statuses, ${d.items?.length ?? 0} starting items`}
+          <div className="muted small">{t.kind === 'item' ? `${d.type ?? 'Task'}, ${stepCount(t.data) - 1} steps${d.days ? `, ${d.days} days` : ''}` : t.kind === 'view' ? `${VIEW_LABEL[(t.data as {kind: string}).kind] ?? 'View'} view with its filters, sort and columns` : `${d.statuses?.length ?? 0} statuses, ${d.items?.length ?? 0} starting items`}
             {t.projectId && store.projects.some(p => p.id === t.projectId) ? `, from ${store.projects.find(p => p.id === t.projectId)!.name}` : ''}</div>
         </div>
         <span className="tpl-tags">
@@ -98,6 +99,10 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
       {projects.map(row)}
       {!projects.length && <p className="muted small">None yet. Press New project template, or save an existing project's setup.</p>}
 
+      <h3 style={{marginTop: 24}}>View templates <span className="count">{viewTemplates.length}</span></h3>
+      {viewTemplates.map(row)}
+      {!viewTemplates.length && <p className="muted small">None yet. Open a view's ... menu and press Save as template; add it to any project from + View.</p>}
+
       <h3 style={{marginTop: 24}}>Gallery</h3>
       <div className="gallery">
         {gallery.map(g => (
@@ -126,6 +131,10 @@ function UseTemplate({t, store, open, onError}: {t: Template; store: Store; open
         const p = await api<{id: string}>(`/templates/${t.id}/use`, {method: 'POST', body: {name: title || t.name}});
         setShow(false); location.hash = `/p/${p.id}/`; return;
       }
+      if (t.kind === 'view') {
+        const v = await api<{id: string}>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project}});
+        setShow(false); location.hash = `/p/${project}/${v.id}`; return;
+      }
       const it = await api<{id: string}>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project, title: title || undefined, [when]: date || undefined}});
       setShow(false); open(it.id);
     } catch (e) { onError(e); }
@@ -135,8 +144,10 @@ function UseTemplate({t, store, open, onError}: {t: Template; store: Store; open
       <button className="btn small primary" onClick={() => setShow(s => !s)}>Use</button>
       <Popover open={show} onClose={() => setShow(false)} className="wide">
         <div className="use-tpl">
-          <div className="pop-label">{t.kind === 'project' ? 'New project name' : 'Name (fills {name} in the title)'}</div>
-          <input className="inline" autoFocus value={title} placeholder={t.name} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+          {t.kind !== 'view' && <><div className="pop-label">{t.kind === 'project' ? 'New project name' : 'Name (fills {name} in the title)'}</div>
+          <input className="inline" autoFocus value={title} placeholder={t.name} onChange={e => setTitle(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} /></>}
+          {t.kind === 'view' && <><div className="pop-label">Add this view to</div>
+            <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></>}
           {t.kind === 'item' && <>
             <div className="pop-label">Project</div>
             <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>

@@ -242,6 +242,7 @@ export class Tasks {
   }
   /** Accepts an id or a key like "WEB-12". */
   findItem(ref: string) {
+    if (typeof ref !== 'string' || !ref) throw new NotFound('Item not found');
     const m = /^([a-z]+)-(\d+)$/i.exec(ref);
     if (m) {
       const r = this.db.prepare('select i.* from items i join projects p on p.id = i.project_id where upper(p.key) = ? and i.number = ?').get(m[1].toUpperCase(), Number(m[2]));
@@ -650,7 +651,22 @@ export class Tasks {
   }
 
   // Templates. Item templates keep a tree of items (no ids); project templates keep the setup and optionally the items.
-  listTemplates(kind?: 'item' | 'project'): Template[] {
+  /** Saves a view's layout and settings as a template (dated or project-specific bits like sprint and baselines are left out). */
+  saveViewTemplate(viewId: string, name: string, projectId: string | null): Template {
+    const v = this.db.prepare('select * from views where id = ?').get(viewId) as Row | undefined;
+    if (!v) throw new NotFound('View not found');
+    const {sprint: _s, baselines: _b, baseline: _bl, ...config} = j<ViewConfig>(v.config, {});
+    return this.createTemplate({kind: 'view', name: name.trim() || (v.name as string), projectId, data: {name: v.name, kind: v.kind, config}});
+  }
+  /** Adds a view from a view template to a project. */
+  useViewTemplate(templateId: string, projectId: string): View {
+    const t = this.getTemplate(templateId);
+    if (t.kind !== 'view') throw new Invalid('That is not a view template');
+    this.project(projectId);
+    const d = t.data as {name: string; kind: ViewKind; config?: ViewConfig};
+    return this.createView({projectId, name: d.name, kind: d.kind, config: d.config ?? {}, sort: this.listViews(projectId).length});
+  }
+  listTemplates(kind?: 'item' | 'project' | 'view'): Template[] {
     return (kind ? this.db.prepare('select * from templates where kind = ? order by name').all(kind) : this.db.prepare('select * from templates order by name').all())
       .map(r => ({id: r.id as string, kind: r.kind as Template['kind'], name: r.name as string, projectId: (r.project_id as string) ?? null, data: j(r.data, null), created: r.created as string}));
   }
@@ -772,10 +788,10 @@ export class Tasks {
     return t;
   }
   /** A new template from scratch: a blank one, or data written by a person in the editor or by an agent. */
-  createTemplate(input: {kind: 'item' | 'project'; name: string; data?: unknown; projectId?: string | null}): Template {
-    const kind = input.kind === 'project' ? 'project' : 'item';
+  createTemplate(input: {kind: 'item' | 'project' | 'view'; name: string; data?: unknown; projectId?: string | null}): Template {
+    const kind = input.kind === 'project' || input.kind === 'view' ? input.kind : 'item';
     const name = String(input.name ?? '').trim() || (kind === 'project' ? 'New project template' : 'New template');
-    const data = input.data ?? (kind === 'project'
+    const data = input.data ?? (kind === 'view' ? {name: input.name || 'Board', kind: 'board', config: {}} : kind === 'project'
       ? {statuses: DEFAULT_STATUSES, types: DEFAULT_TYPES, fields: [], settings: {}, views: DEFAULT_VIEWS.map(v => ({name: v.name, kind: v.kind, config: v.config ?? {}})), items: []}
       : {type: 'Task', title: name, children: []});
     checkTemplateData(kind, data);

@@ -545,3 +545,15 @@ test('QA3: AI cannot fake review or create done work; rollups take no items; rul
   t.updateItem(parent.id, {start: '2026-11-12', due: '2026-11-20'}, null, {keep: true});
   assert.equal(t.item(child.id).due, '2026-11-20', 'stretching the parent leaves children in place');
 });
+
+test('view templates: save a view with its settings, add it to another project, reject bad data', () => {
+  const {t, p} = setup();
+  const v = t.createView({projectId: p.id, name: 'My board', kind: 'board', config: {groupBy: 'assignee', hideDone: true, sprint: 'x', baselines: []}});
+  const tpl = t.saveViewTemplate(v.id, 'Team board', p.id);
+  assert.deepEqual((tpl.data as {config: object}).config, {groupBy: 'assignee', hideDone: true});
+  const other = t.createProject({name: 'Ops'});
+  const made = t.useViewTemplate(tpl.id, other.id);
+  assert.equal(made.kind, 'board');
+  assert.equal(made.config.groupBy, 'assignee');
+  assert.throws(() => t.createTemplate({kind: 'view', name: 'x', data: {name: 'x', kind: 'spreadsheet'}}), /View kind/);
+});

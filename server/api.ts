@@ -398,6 +398,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (b && !c && m === 'PATCH') { manage(tasks.getTemplate(b)); return send(res, 200, tasks.updateTemplate(b, {name: body.name, data: body.data})); }
         if (b && c === 'duplicate' && m === 'POST') { manage(tasks.getTemplate(b)); return send(res, 201, tasks.duplicateTemplate(b)); }
         if (!b && m === 'POST') {
+          if (body.kind === 'view') { const v = tasks.listViews(String(body.projectId ?? '')).find(x => x.id === body.viewId); if (!v) throw new NotFound('View not found'); need(v.projectId, 'templates'); return send(res, 201, tasks.saveViewTemplate(v.id, body.name ?? '', v.projectId)); }
           if (body.kind === 'project') { need(body.projectId, 'settings'); return send(res, 201, tasks.saveProjectTemplate(body.projectId, body.name ?? '', !!body.includeItems)); }
           need(tasks.findItem(body.itemId).projectId, 'templates');
           return send(res, 201, tasks.saveItemTemplate(body.itemId, body.name ?? ''));
@@ -407,6 +408,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           if (!t) throw new NotFound('Template not found');
           if (t.projectId && tasks.listProjects().some(p => p.id === t.projectId)) need(t.projectId, 'view');
           if (t.kind === 'project') { needAdmin(); return send(res, 201, tasks.createProjectFromTemplate(b, body.name ?? t.name, actor)); }
+          if (t.kind === 'view') { need(body.projectId, 'views'); return send(res, 201, tasks.useViewTemplate(b, body.projectId)); }
           need(body.projectId, 'create');
           return send(res, 201, tasks.useItemTemplate(b, body.projectId, body.parentId ?? null, actor, {title: body.title, due: body.due || undefined, start: body.start || undefined}));
         }

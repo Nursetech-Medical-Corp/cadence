@@ -299,7 +299,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
 }
 /** Click opens the project, double-click renames it in place. */
 /** Click opens the project, double-click renames it in place. Grip, icon kit and star show on hover. */
-function ProjectNavButton({store, project, active, extra, onOpen}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode}; onOpen: () => void}) {
+function ProjectNavButton({store, project, active, extra, onOpen}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode; menu: React.ReactNode}; onOpen: () => void}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
   const done = () => { setEditing(false); if (name.trim() && name !== project.name) store.updateProject(project.id, {name: name.trim()}); else setName(project.name); };
@@ -311,7 +311,7 @@ function ProjectNavButton({store, project, active, extra, onOpen}: {store: Store
         ? <input autoFocus className="nav-edit" value={name} onChange={e => setName(e.target.value)} onBlur={done} onClick={e => e.stopPropagation()}
             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') { setName(project.name); setEditing(false); } }} />
         : <span className="grow proj-label">{project.name}</span>}
-      {extra.star}
+      {extra.menu}{extra.star}
     </div>
   );
 }
@@ -421,6 +421,12 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
       <Popover open={menu} onClose={() => setMenu(false)}>
         <button className="pop-row" onClick={() => { setMenu(false); setEditing(true); }}><Pencil size={14} /> Rename</button>
         <button className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(project.id, view.name + ' copy', view.kind, view.config); if (v) go({page: 'project', id: project.id, view: v.id}); }}><Copy size={14} /> Duplicate</button>
+        <button className="pop-row" onClick={async () => {
+          setMenu(false);
+          const n = prompt('Template name', `${view.name} view`);
+          if (n === null) return;
+          try { await api('/templates', {method: 'POST', body: {kind: 'view', viewId: view.id, projectId: project.id, name: n}}); alert(`Saved "${n || view.name}" as a view template. Add it to any project from + View.`); } catch (e) { store.fail(e); }
+        }}><LayoutTemplate size={14} /> Save as template</button>
         {store.projects.length > 1 && <>
           <div className="pop-label">Copy to project</div>
           {store.projects.filter(p => p.id !== project.id).map(p => (
@@ -444,6 +450,7 @@ function AddView({store, project}: {store: Store; project: Project}) {
       <button data-pop-trigger className="tab" onClick={() => setOpen(o => !o)}><Plus size={14} /> View</button>
       <Popover open={open} onClose={() => setOpen(false)} className="wide">
         <div className="pop-label">Add a view</div>
+        <ViewTemplatesList store={store} project={project} close={() => setOpen(false)} />
         {VIEW_KINDS.map(k => (
           <button key={k.kind} className="pop-row" onClick={async () => { setOpen(false); const v = await store.createView(project.id, k.label, k.kind, k.kind === 'gantt' ? {zoom: 'week'} : {}); if (v) go({page: 'project', id: project.id, view: v.id}); }}>
             <k.icon size={16} /><span className="grow"><div>{k.label}</div><div className="muted small">{k.hint}</div></span>
@@ -641,4 +648,18 @@ function FindProject({id}: {id: string}) {
   if (where === undefined) return <Empty title="Looking for this project...">Checking your other workspaces.</Empty>;
   if (!where) return <Empty title="Project not found">It may have been deleted. Pick a project in the sidebar.</Empty>;
   return <Empty title={`This project is in ${where.name}`}><button className="btn primary" onClick={() => switchWorkspace(where.id, location.hash.slice(1))}>Open {where.name}</button></Empty>;
+}
+
+/** Saved view templates, offered at the top of + View. */
+function ViewTemplatesList({store, project, close}: {store: Store; project: Project; close: () => void}) {
+  const [list, setList] = useState<{id: string; name: string; data: {kind: ViewKind}}[]>([]);
+  useEffect(() => { api<typeof list>('/templates?kind=view').then(setList).catch(() => {}); }, []);
+  if (!list.length) return null;
+  return <>
+    {list.map(t => { const Icon = viewIcon(t.data.kind); return (
+      <button key={t.id} className="pop-row" onClick={async () => { close(); try { const v = await api<View>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project.id}}); go({page: 'project', id: project.id, view: v.id}); } catch (e) { store.fail(e); } }}>
+        <Icon size={16} /><span className="grow"><div>{t.name}</div><div className="muted small">Saved view template</div></span>
+      </button>); })}
+    <div className="pop-sep" />
+  </>;
 }

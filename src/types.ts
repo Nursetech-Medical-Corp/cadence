@@ -80,7 +80,7 @@ export type Action =
   | {kind: 'parent-status'; value: string}; // set the parent's status (e.g. close story when all tasks close)
 export type Rule = {id: string; name: string; enabled: boolean; trigger: Trigger; conditions: Condition[]; actions: Action[]; allChildrenDone?: boolean};
 
-export type Template = {id: string; kind: 'item' | 'project'; name: string; projectId: string | null; data: unknown; created: string};
+export type Template = {id: string; kind: 'item' | 'project' | 'view'; name: string; projectId: string | null; data: unknown; created: string};
 
 export type Item = {
   id: string; projectId: string; parentId: string | null; number: number;

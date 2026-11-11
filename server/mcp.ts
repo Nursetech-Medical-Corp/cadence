@@ -102,7 +102,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
       if (!l) throw new Error('No connected Google account with Gmail access. Connect one on the Team page.');
       return gmailSearch(tasks.db, actor, l.id, i.q, i.max ?? 10);
     });
-  tool('list_templates', 'Item templates (a task with its subtasks) and project templates (statuses, types, fields, views, optional items).', {kind: z.enum(['item', 'project']).optional()}, true,
+  tool('list_templates', 'Item templates (a task with its subtasks), project templates (statuses, types, fields, views, optional items) and view templates (a saved layout with filters, sort and columns).', {kind: z.enum(['item', 'project', 'view']).optional()}, true,
     i => tasks.listTemplates(i.kind).map(t => ({id: t.id, kind: t.kind, name: t.name})));
   tool('save_template', 'Save an item (with its subitems) or a whole project setup as a template.', {name: z.string(), item: z.string().optional(), project: z.string().optional(), includeItems: z.boolean().optional()}, false,
     i => i.item ? tasks.saveItemTemplate(tasks.findItem(i.item).id, i.name) : tasks.saveProjectTemplate(projectId(i.project ?? ''), i.name, !!i.includeItems));
@@ -112,8 +112,8 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   const findTemplate = (ref: string) => { const t = tasks.listTemplates().find(x => x.id === ref || x.name.toLowerCase() === ref.toLowerCase()); if (!t) throw new Error(`Unknown template "${ref}"`); return t; };
   tool('get_template', 'Read a template in full: for item templates the step tree, for project templates the statuses, levels, views and starting items. Edit the result and pass it to update_template.', {template: z.string().describe('Template id or name')}, true,
     i => tasks.getTemplate(findTemplate(i.template).id));
-  tool('create_template', 'Create a template from scratch. kind "item": data is the top step (a task, workstream or initiative with substeps). kind "project": data is {statuses: [{id, name, category: todo|doing|done, color}], types: [levels, top first], views: [{name, kind: list|table|board|gantt|calendar|backlog|sprint|workload}], items?: [steps]}. Leave data out for a blank one. ' + STEP_DOC, {
-    kind: z.enum(['item', 'project']), name: z.string(), data: z.any().optional(), project: z.string().optional().describe('Limit it to one project; leave out for all projects'),
+  tool('create_template', 'Create a template from scratch. kind "view": data is {name, kind: list|table|board|gantt|calendar|backlog|sprint|workload|files, config: {filter, sorts, groupBy, hidden, ...}}. kind "item": data is the top step (a task, workstream or initiative with substeps). kind "project": data is {statuses: [{id, name, category: todo|doing|done, color}], types: [levels, top first], views: [{name, kind: list|table|board|gantt|calendar|backlog|sprint|workload}], items?: [steps]}. Leave data out for a blank one. ' + STEP_DOC, {
+    kind: z.enum(['item', 'project', 'view']), name: z.string(), data: z.any().optional(), project: z.string().optional().describe('Limit it to one project; leave out for all projects'),
   }, false, i => tasks.createTemplate({kind: i.kind, name: i.name, data: i.data, projectId: i.project ? projectId(i.project) : null}));
   tool('update_template', 'Rename a template or replace its data (same shape as get_template returns). ' + STEP_DOC, {template: z.string(), name: z.string().optional(), data: z.any().optional()}, false,
     i => tasks.updateTemplate(findTemplate(i.template).id, {name: i.name, data: i.data}));
@@ -125,6 +125,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     const t = tasks.listTemplates().find(x => x.id === i.template || x.name.toLowerCase() === i.template.toLowerCase());
     if (!t) throw new Error(`Unknown template "${i.template}"`);
     if (t.kind === 'project') return tasks.createProjectFromTemplate(t.id, i.newProjectName ?? t.name, actor);
+    if (t.kind === 'view') { if (!i.project) throw new Error('project is required for view templates'); return tasks.useViewTemplate(t.id, projectId(i.project)); }
     if (!i.project) throw new Error('project is required for item templates');
     return tasks.useItemTemplate(t.id, projectId(i.project), i.parent ? tasks.findItem(i.parent).id : null, actor, {title: i.title, due: i.due, start: i.start});
   });
