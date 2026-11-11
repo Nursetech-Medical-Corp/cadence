@@ -20,6 +20,7 @@ import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks,
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
 import {handleMcpHttp} from './mcp-http.ts';
+import {accessGrant, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
 import {devLogMode, googleSignInCallback, googleSignInReady, googleSignInStart, logSignIn, clientIp, publicUrl, sendSmtp, smtpReady, staffGoogleOnly, type SignInMethod} from './signin.ts';
 import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
@@ -82,7 +83,7 @@ export function apiMiddleware(single?: Tasks): Handler {
   if (process.env.TASKS_DEMO === '1') seedSampleWorkspaces(w => open(w).tasks);
   return (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://local');
-    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/google/')) return next();
+    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/google/') && !isOAuthPath(url.pathname)) return next();
     const asked = String(req.headers['x-workspace'] ?? '') || url.searchParams.get('ws') || '';
     const list = listWorkspaces();
     const w = list.find(x => x.id === (asked || cookieValue(req.headers.cookie, 'tasks_ws') || 'main')) ?? (asked ? null : list[0]);
@@ -101,6 +102,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateApprovals(tasks);
   migrateInvites(tasks.db);
   migrateGoogleLinks(tasks.db);
+  migrateOAuth(accounts.db);
   if (info.main) tasks.seedIfEmpty();
   migrate(tasks.db); // marks the first person as admin once people exist
   // Every workspace gets an All projects rollup at the top, once. Deleting it is respected.
@@ -189,6 +191,15 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const legacyHashes = (email: string) => () => all().flatMap(w => w.tasks.db.prepare('select password from people where lower(email) = ? and active = 1 and password is not null').all(email).map(r => r.password as string));
   /** People rows keep a copy of the account's password hash, for re-checking it when signing approvals. */
   const syncHash = (email: string, hash: string | null) => { for (const w of all()) w.tasks.db.prepare('update people set password = ? where lower(email) = ?').run(hash, email); };
+  // Sign-in for apps (OAuth, oauth.ts): a grant acts as one person in one workspace, while that person is active with that account.
+  const grantAlive = (g: Grant) => { const w = all().find(x => x.id === g.workspace); return !!w && memberId(w.tasks, g.email) === g.person; };
+  const oauthCtx = (): OAuthContext => ({accounts, alive: grantAlive, workspaceIds: () => all().map(w => w.id), signInOn: getWorkspace(tasks.db).requireLogin,
+    memberships: emails => all().flatMap(w => {
+      const email = emails.find(e => memberId(w.tasks, e));
+      if (!email) return [];
+      const person = memberId(w.tasks, email)!;
+      return [{id: w.id, name: w.name, email, person, personName: (w.tasks.db.prepare('select name from people where id = ?').get(person) as {name: string}).name}];
+    })});
   const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, password is not null as has_password from people order by name').all()
     .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human'}));
 
@@ -201,8 +212,18 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       return googleSignInCallback(req, res, url, {hasAccount: e => accounts.has(e), log: (e, r) => logAttempt(req, e, 'google', r),
         signIn: e => accountCookie(accounts.startSession(e), secureCb)});
     }
-    // MCP over HTTP for remote AI apps: token required, every tool permission-checked.
-    if (url.pathname === '/mcp') return handleMcpHttp(tasks, req, res);
+    if (isOAuthPath(url.pathname)) return handleOAuth(req, res, url, oauthCtx());
+    // MCP over HTTP for remote AI apps: a Team page token or an OAuth access token, every tool permission-checked.
+    if (url.pathname === '/mcp') {
+      const resourceMetadata = publicUrl() ? resourceMetadataUrl(url.searchParams.get('ws') ? info.id : null) : null;
+      if (isOAuthAccess(req.headers.authorization)) {
+        // The grant names its workspace; the person must still be an active member with the account that approved.
+        const g = accessGrant(accounts.db, req.headers.authorization!.replace(/^Bearer\s+/i, ''));
+        const w = g && grantAlive(g) ? all().find(x => x.id === g.workspace) : undefined;
+        return handleMcpHttp(w?.tasks ?? tasks, req, res, {as: w ? g!.person : null, resourceMetadata});
+      }
+      return handleMcpHttp(tasks, req, res, {resourceMetadata});
+    }
     if (!url.pathname.startsWith('/api/')) return next();
     const parts = url.pathname.slice(5).split('/').filter(Boolean);
     const m = req.method ?? 'GET';
@@ -346,6 +367,15 @@ If you did not ask for it, ignore this email.`)
             return send(res, 200, {linked: accounts.group(account).slice(1)});
           }
           if (m === 'DELETE' && c) { accounts.unlink(account, decodeURIComponent(c).toLowerCase()); return send(res, 200, {linked: accounts.group(account).slice(1)}); }
+        }
+        // Apps this account connected by signing in (claude.ai connectors), with Disconnect. mcpUrl is what people paste.
+        if (b === 'apps' && account && !bearer) {
+          if (!c && m === 'GET') {
+            const names = new Map(all().map(w => [w.id, w.name]));
+            return send(res, 200, {mcpUrl: publicUrl() ? mcpResource() : null, workspaceUrl: publicUrl() ? mcpResource(info.id) : null,
+              apps: listConnections(accounts.db, emails).map(x => ({...x, workspaceName: names.get(x.workspace) ?? x.workspace}))});
+          }
+          if (c && m === 'DELETE') { disconnect(accounts.db, emails, decodeURIComponent(c), q('workspace')); return send(res, 200, {ok: true}); }
         }
         if (b === 'logout' && m === 'POST') { accounts.endSession(token); res.setHeader('set-cookie', accountCookie('', secure)); return send(res, 200, {ok: true}); }
         if (b === 'google' && c === 'start') {
@@ -507,7 +537,9 @@ If you did not ask for it, ignore this email.`)
             const email = String(body.email).trim().toLowerCase();
             if (email && !/^[^\s@<>",;:]+@[^\s@<>",;:]+\.[a-z]{2,}$/i.test(email)) throw new Invalid('That email address does not look valid');
             if (email && tasks.db.prepare('select 1 from people where lower(email) = ? and id != ?').get(email, b)) throw new Invalid('Another person already uses that email');
+            const before = (tasks.db.prepare('select email from people where id = ?').get(b) as {email: string | null} | undefined)?.email?.toLowerCase() ?? '';
             tasks.db.prepare('update people set email = ? where id = ?').run(email || null, b);
+            if (before !== email) revokePerson(accounts.db, info.id, b);
           }
           if (body.name !== undefined) {
             const name = String(body.name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
@@ -516,6 +548,8 @@ If you did not ask for it, ignore this email.`)
           if (body.role !== undefined) tasks.db.prepare('update people set role = ? where id = ?').run(body.role, b);
           if (body.admin !== undefined) tasks.db.prepare('update people set admin = ? where id = ?').run(body.admin ? 1 : 0, b);
           if (body.active !== undefined) tasks.db.prepare('update people set active = ? where id = ?').run(body.active ? 1 : 0, b);
+          // Apps they connected by signing in stop working once they are deactivated (or, above, their email changes).
+          if (body.active === false) revokePerson(accounts.db, info.id, b);
           if (body.kind !== undefined) { needAdmin(); tasks.db.prepare('update people set kind = ? where id = ?').run(body.kind === 'ai' ? 'ai' : 'human', b); }
           if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
           if (body.password) {

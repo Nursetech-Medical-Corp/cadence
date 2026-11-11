@@ -5,6 +5,7 @@ import {Check as CheckIcon, CircleUser, Copy, KeyRound, LogIn, Mail, Plus, Shiel
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
+import {ConnectedAppsCard, pendingConnect} from './ConnectedApps.tsx';
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
@@ -80,6 +81,7 @@ export function SignIn({google, emailLink, signup}: {google: boolean; emailLink:
   return (
     <AuthCard>
       <h1 style={{margin: '8px 0 4px'}}>{mode === 'in' ? 'Sign in' : 'Create your account'}</h1>
+      {pendingConnect() && <div className="muted small">Sign in to finish connecting your AI app to Cadence.</div>}
       <div className="seg auth-tabs"><button className={mode === 'in' ? 'on' : ''} onClick={() => go('in')}>Sign in</button><button className={mode === 'new' ? 'on' : ''} onClick={() => go('new')}>Create account</button></div>
       {mode === 'new' && signup !== 'open' ? <div className="muted small">Accounts here are by invitation. Ask a workspace admin to invite your email.</div> : <>
         {google && mode === 'in' && <><a className="btn google-btn" href="/auth/google/start"><GoogleMark /> Continue with Google</a>{(emailLink || usePassword) && <div className="or"><span>or</span></div>}</>}
@@ -161,6 +163,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           </div>
         </section>}
         {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
+        {me.account && <ConnectedAppsCard />}
         {self && <TokensCard people={[self]} admin={false} me={self.id} />}
         {me.person && <MyDataCard />}
       </div>
@@ -242,6 +245,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       </section>}
 
       {me.person && <GoogleCard me={me.person.id} ready={!!ws?.google.clientId && !!ws?.google.hasSecret} />}
+      {me.account && <ConnectedAppsCard />}
       <TokensCard people={people} admin={isAdmin} me={me.person?.id ?? null} />
 
       {ws && <section className="set-card">
@@ -349,7 +353,7 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
   const mcpUrl = `${location.origin}/mcp?ws=${wsId()}`;
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3>AI agents and tokens</h3><span className="muted small">An AI agent is a person marked AI agent above, with the role you choose. Give it a token; it can then use the API or MCP and do only what its role allows.</span></div>
+      <div className="set-card-head"><h3>AI agents and tokens (advanced)</h3><span className="muted small">For Claude, Connect Claude above is simpler. An AI agent is a person marked AI agent above, with the role you choose. Give it a token; it can then use the API or MCP and do only what its role allows.</span></div>
       <div className="set-add" style={{flexWrap: 'wrap'}}>
         <select className="plain-select" value={who} onChange={e => setWho(e.target.value)}>{people.filter(p => admin || p.id === me).map(p => <option key={p.id} value={p.id}>{p.name}{p.kind === 'ai' ? ' (AI)' : ''}</option>)}</select>
         <input className="plain-select" style={{flex: 1, minWidth: 140}} placeholder="Token name, e.g. Claude Desktop" value={name} onChange={e => setName(e.target.value)} />

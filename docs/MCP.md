@@ -2,7 +2,7 @@
 
 Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your spaces and projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
 
-There are two ways to connect. Both act as one person in the workspace, and can do only what that person's role allows.
+There are three ways to connect. All act as one person in the workspace, and can do only what that person's role allows.
 
 In the app, a workspace holds **spaces** (a team or area like Engineering, QA or Sales). The API and these tools call a space a *project* (`projectId`, `create_project`). Inside a space, work has levels; the default is Project > Phase > Task > Subtask.
 
@@ -28,7 +28,19 @@ claude mcp add cadence-personal -- pnpm --dir /path/to/cadence mcp -- --as "secr
 {"mcpServers": {"cadence": {"command": "pnpm", "args": ["--dir", "/path/to/cadence", "mcp", "--", "--as", "secretary-bot-1"]}}}
 ```
 
-## 2. Over the network (HTTP)
+## 2. Claude (claude.ai, Cowork, Claude Desktop): sign in, no token
+
+The easiest way. Needs `PUBLIC_URL` set on the server (the address people use, over HTTPS) and sign-in turned on.
+
+1. In Claude, open Settings, Connectors, Add custom connector.
+2. Name it Cadence and paste `https://<your-cadence-host>/mcp`. (Team page, Connect Claude shows the exact address. For a workspace other than the first, the address ends in `?ws=<workspace id>`.)
+3. Click Connect. Sign in to Cadence if asked (password, Google or an emailed link), check the app and the workspace, and click Allow.
+
+Claude then acts as you, with your role's permissions. See and disconnect connected apps on the Team page (My account), under Connect Claude. Deactivating a person cuts off the apps they connected.
+
+Under the hood this is OAuth 2.1 as the MCP authorization spec describes: `/mcp` answers 401 with `WWW-Authenticate: Bearer resource_metadata=...`, metadata at `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server`, dynamic client registration at `/oauth/register` (https redirect URIs, or http on localhost), `/oauth/authorize` with PKCE S256, `/oauth/token` (1 hour access tokens, rotating 30 day refresh tokens) and `/oauth/revoke`. Codes and tokens are stored hashed in `accounts.db`. See `server/oauth.ts`.
+
+## 3. Over the network with a token (advanced)
 
 1. Open Team and permissions. Under People, mark the agent as "AI agent" (or use your own person) and give it a role.
 2. Under AI agents and tokens, create a token. It is shown once and starts with `tt_`.

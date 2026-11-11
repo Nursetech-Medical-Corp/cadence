@@ -29,6 +29,7 @@ import {ProjectList, includedIn, isRollup, rollupProject} from './ProjectNav.tsx
 import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
 import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
+import {resumeConnect} from './ConnectedApps.tsx';
 
 // Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
 const GanttView = lazy(() => import('./GanttView.tsx').then(m => ({default: m.GanttView})));
@@ -91,7 +92,11 @@ export function App() {
   const [me, setMeState] = useState(getMe);
   // Sign-in state. When sign-in is required the server decides who you are.
   const [auth, setAuth] = useState<Me | null>(null);
-  useEffect(() => { api<Me>('/auth/me').then(a => { setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); } }).catch(() => {}); }, []);
+  useEffect(() => { api<Me>('/auth/me').then(a => {
+    // Signed in on the way to connecting an AI app (server/oauth.ts): go back to its consent page, whichever way they signed in.
+    if (a.account && resumeConnect()) return;
+    setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); }
+  }).catch(() => {}); }, []);
   const store = useStore(me);
   const storeRef = useRef(store);
   storeRef.current = store;
