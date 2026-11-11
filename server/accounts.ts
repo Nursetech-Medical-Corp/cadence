@@ -21,7 +21,8 @@ export const ACCOUNT_COOKIE = 'cadence_session';
 export class Accounts {
   constructor(readonly db: Db) {
     db.exec(`create table if not exists accounts (email text primary key, password text, created text not null);
-      create table if not exists account_sessions (hash text primary key, email text not null, created text not null, expires text not null);`);
+      create table if not exists account_sessions (hash text primary key, email text not null, created text not null, expires text not null);
+      create table if not exists account_links (a text not null, b text not null, created text not null, primary key (a, b));`);
   }
   count() { return (this.db.prepare('select count(*) as n from accounts').get() as {n: number}).n; }
   has(email: string) { return !!this.db.prepare('select 1 from accounts where email = ?').get(email); }
@@ -56,6 +57,20 @@ export class Accounts {
     return r && r.expires > new Date().toISOString() ? r.email : null;
   }
   endSession(token: string | undefined) { if (token) this.db.prepare('delete from account_sessions where hash = ?').run(sha(token)); }
+
+  // Linked accounts: one person's accounts (for example a work and a personal email). Linking needs both
+  // passwords (the API checks the other one), so it is always the person's own choice; either side can unlink.
+  link(a: string, b: string) {
+    const ins = this.db.prepare('insert into account_links (a, b, created) values (?, ?, ?) on conflict do nothing'), t = new Date().toISOString();
+    ins.run(a, b, t); ins.run(b, a, t);
+  }
+  unlink(a: string, b: string) { this.db.prepare('delete from account_links where (a = ? and b = ?) or (a = ? and b = ?)').run(a, b, b, a); }
+  /** This account first, then every account linked to it, directly or through another. */
+  group(email: string): string[] {
+    const seen = [email], next = this.db.prepare('select b from account_links where a = ?');
+    for (let n = 0; n < seen.length && seen.length < 20; n++) for (const r of next.all(seen[n])) if (!seen.includes(r.b as string)) seen.push(r.b as string);
+    return seen;
+  }
 }
 
 /** HttpOnly session cookie; Secure when the request came over HTTPS (directly or through a proxy). */

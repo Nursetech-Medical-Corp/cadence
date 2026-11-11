@@ -232,3 +232,35 @@ test('headers: JPEG pictures only, your own personal headers only, removable', a
     assert.equal((await call(`/covers/mywork-${a.id}`)).status, 404);
   } finally { server.close(); }
 });
+
+test('linked accounts: a work and a personal account share one sign-in, only with both passwords', async () => {
+  process.env.CADENCE_REQUIRE_LOGIN = '1';
+  const tasks = new Tasks(openDb(':memory:'), () => '2026-11-10');
+  const mw = apiMiddleware(tasks);
+  const server = createServer((req, res) => mw(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as {port: number}).port}/api`;
+  const call = async (path: string, init: {method?: string; body?: unknown; cookie?: string} = {}) => {
+    const r = await fetch(base + path, {method: init.method ?? 'GET', headers: {'content-type': 'application/json', ...(init.cookie ? {cookie: init.cookie} : {})}, body: init.body === undefined ? undefined : JSON.stringify(init.body)});
+    return {status: r.status, json: await r.json().catch(() => null), cookie: r.headers.get('set-cookie')?.split(';')[0]};
+  };
+  try {
+    // The owner's account is the personal one in this workspace.
+    const o = (await call('/auth/setup', {method: 'POST', body: {name: 'Dana', email: 'dana@home.test', password: 'personal pass'}})).cookie!;
+    const sam = tasks.listPeople().find(p => p.name !== 'Dana' && p.kind !== 'ai')!;
+    await call(`/team/${sam.id}`, {method: 'PATCH', body: {email: 'dana@work.test', password: 'work password'}, cookie: o});
+    await call(`/team/${sam.id}`, {method: 'PATCH', body: {active: false}, cookie: o}); // the work account is not a member here
+    const w = (await call('/auth/login', {method: 'POST', body: {email: 'dana@work.test', password: 'work password'}})).cookie!;
+    assert.equal((await call('/bootstrap', {cookie: w})).status, 403, 'the work account alone is not a member');
+    assert.equal((await call('/auth/link', {method: 'POST', body: {email: 'dana@home.test', password: 'wrong one!'}, cookie: w})).status, 401);
+    assert.equal((await call('/auth/link', {method: 'POST', body: {email: 'dana@home.test', password: 'personal pass'}})).status, 401, 'signed out cannot link');
+    const linked = await call('/auth/link', {method: 'POST', body: {email: 'dana@home.test', password: 'personal pass'}, cookie: w});
+    assert.deepEqual(linked.json.linked, ['dana@home.test']);
+    const boot = await call('/bootstrap', {cookie: w});
+    assert.equal(boot.status, 200, 'the linked personal account opens its workspace');
+    assert.equal((await call('/auth/me', {cookie: w})).json.person.name, 'Dana');
+    assert.equal((await call('/auth/link', {method: 'POST', body: {email: 'dana@home.test', password: 'personal pass'}, cookie: w})).status, 400, 'already linked');
+    await call(`/auth/link/${encodeURIComponent('dana@home.test')}`, {method: 'DELETE', cookie: w});
+    assert.equal((await call('/bootstrap', {cookie: w})).status, 403, 'unlinked again');
+  } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
+});

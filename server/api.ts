@@ -139,7 +139,12 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict);
   const memberId = (t: Tasks, email: string) => (t.db.prepare('select id from people where lower(email) = ? and active = 1').get(email) as {id: string} | undefined)?.id ?? null;
   /** Workspaces where this account is an active member. */
-  const memberships = (email: string) => all().filter(w => memberId(w.tasks, email)).map(({id, name}) => ({id, name}));
+  /** Who a set of linked accounts is in a workspace: the first of them (the signed-in one first) that is a member. */
+  const memberIn = (t: Tasks, emails: string[]) => { for (const e of emails) { const id = memberId(t, e); if (id) return id; } return null; };
+  /** Workspaces where any of these linked accounts is an active member, with the account used there. */
+  const memberships = (emails: string[]) => all().map(w => ({id: w.id, name: w.name, as: emails.find(e => memberId(w.tasks, e))})).filter(w => w.as);
+  /** Password hashes an older install kept per workspace (accounts.verify moves them to the account). */
+  const legacyHashes = (email: string) => () => all().flatMap(w => w.tasks.db.prepare('select password from people where lower(email) = ? and active = 1 and password is not null').all(email).map(r => r.password as string));
   /** People rows keep a copy of the account's password hash, for re-checking it when signing approvals. */
   const syncHash = (email: string, hash: string | null) => { for (const w of all()) w.tasks.db.prepare('update people set password = ? where lower(email) = ?').run(hash, email); };
   const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, password is not null as has_password from people order by name').all()
@@ -156,12 +161,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     const ws = getWorkspace(tasks.db);
     const token = cookieValue(req.headers.cookie, ACCOUNT_COOKIE);
     const account = ws.requireLogin ? accounts.sessionEmail(token) : null;
+    const emails = account ? accounts.group(account) : [];
     const secure = req.headers['x-forwarded-proto'] === 'https' || 'encrypted' in req.socket;
     const signIn = (email: string) => accountCookie(accounts.startSession(email), secure);
     // A bearer token (AI agents, other systems) wins; then the session; then, in open mode, the x-person header.
     const bearer = tokenPerson(tasks.db, req.headers.authorization);
     if (req.headers.authorization && !bearer) return send(res, 401, {error: 'Invalid or revoked token'});
-    const actor = bearer ?? (ws.requireLogin ? (account ? memberId(tasks, account) : null) : ((req.headers['x-person'] as string) || null));
+    const actor = bearer ?? (ws.requireLogin ? (account ? memberIn(tasks, emails) : null) : ((req.headers['x-person'] as string) || null));
     const [a, b, c] = parts;
     try {
       // Cross-site protection: writes must be JSON from this app's own origin. Browsers cannot send
@@ -184,7 +190,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (b === 'me' && m === 'GET') {
           const me = actor ? tasks.listPeople().find(p => p.id === actor) ?? null : null;
           return send(res, 200, {required: ws.requireLogin, forced: loginForced(), account, setup: ws.requireLogin && !accounts.count(),
-            memberOf: account && !me ? memberships(account) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
+            linked: emails.slice(1), memberOf: account && !me ? memberships(emails) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
             caps: Object.fromEntries(tasks.listProjects().map(p => [p.id, [...caps(actor, p.id)]]))});
         }
         // First run of a hosted server: the first account becomes admin of every workspace.
@@ -213,11 +219,23 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const key = `${email}|${req.socket.remoteAddress}`;
           const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
           if (tries.length >= 8) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
-          const legacy = () => all().flatMap(w => w.tasks.db.prepare('select password from people where lower(email) = ? and active = 1 and password is not null').all(email).map(r => r.password as string));
-          if (!accounts.verify(email, String(body.password ?? ''), legacy)) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
+          if (!accounts.verify(email, String(body.password ?? ''), legacyHashes(email))) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
           loginTries.delete(key);
           res.setHeader('set-cookie', signIn(email));
-          return send(res, 200, {ok: true, memberOf: memberships(email)});
+          return send(res, 200, {ok: true, memberOf: memberships(accounts.group(email))});
+        }
+        // Link another of your accounts (its email and password), or unlink one.
+        if (b === 'link' && account) {
+          if (m === 'POST') {
+            const other = String(body.email ?? '').trim().toLowerCase(), key = `link|${account}|${req.socket.remoteAddress}`;
+            const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
+            if (tries.length >= 8) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
+            if (emails.includes(other)) throw new Invalid('That account is already yours here');
+            if (!accounts.verify(other, String(body.password ?? ''), legacyHashes(other))) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
+            accounts.link(account, other);
+            return send(res, 200, {linked: accounts.group(account).slice(1)});
+          }
+          if (m === 'DELETE' && c) { accounts.unlink(account, decodeURIComponent(c).toLowerCase()); return send(res, 200, {linked: accounts.group(account).slice(1)}); }
         }
         if (b === 'logout' && m === 'POST') { accounts.endSession(token); res.setHeader('set-cookie', accountCookie('', secure)); return send(res, 200, {ok: true}); }
         if (b === 'google' && c === 'start') {
@@ -307,7 +325,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'workspaces') {
         if (!b && m === 'GET') {
           // Signed in, you see only the workspaces you belong to.
-          const mine = ws.requireLogin && account ? new Set(memberships(account).map(w => w.id)) : null;
+          const mine = ws.requireLogin && account ? new Set(memberships(emails).map(w => w.id)) : null;
           return send(res, 200, {current: info.id, list: listWorkspaces().filter(w => !mine || mine.has(w.id)).map(publicInfo)});
         }
         if (!b && m === 'POST') {
@@ -380,7 +398,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
             if (!email) throw new Invalid('Add an email first, then set a password');
             if (accounts.has(email)) {
               const cur = accounts.hash(email);
-              if (account !== email) throw new Invalid('Only the account owner can change this password. The server owner can reset it with pnpm reset-password.');
+              if (!emails.includes(email)) throw new Invalid('Only the account owner can change this password. The server owner can reset it with pnpm reset-password.');
               if (cur && !checkPassword(String(body.currentPassword ?? ''), cur)) throw new Invalid('Your current password is wrong');
             }
             const hash = hashPassword(String(body.password));

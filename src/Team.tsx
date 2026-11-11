@@ -9,7 +9,7 @@ import {Avatar} from './components.tsx';
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
 type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'};
-export type Me = {required: boolean; forced?: boolean; account?: string | null; setup?: boolean; memberOf?: {id: string; name: string}[];
+export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; setup?: boolean; memberOf?: {id: string; name: string}[];
   person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; caps: Record<string, string[]>};
 
 /** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
@@ -105,6 +105,8 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
     <div className="page settings">
       <h1><Shield size={20} /> Team and permissions</h1>
       {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
+
+      {me.account && <AccountCard me={me} />}
 
       {ws && <section className="set-card">
         <div className="set-card-head"><h3>Customization</h3><span className="muted small">The team setup is what everyone starts from. Choose who changes each part, and which features are on.</span></div>
@@ -393,6 +395,31 @@ function GoogleCard({me, ready}: {me: string; ready: boolean}) {
       ))}
       {links.some(l => l.scopes.includes('calendar')) && <button className="btn small" disabled={busy} onClick={() => run('Your events in the next 7 days', async () => (await api<{title: string; start: string; account: string}[]>(`/google/events?from=${today}&to=${week}`)).map(e => `${e.start.replace('T', ' ').slice(0, 16)}  ${e.title}  (${e.account})`))}>Test: events in the next 7 days</button>}
       {out && <div className="g-out"><b className="small">{out.title}</b>{out.rows.slice(0, 20).map((r, n) => <div key={n} className="small">{r}</div>)}</div>}
+    </section>
+  );
+}
+
+/** Your sign-in, and other accounts of yours (say work and personal) linked so one sign-in shows all their workspaces. */
+function AccountCard({me}: {me: Me}) {
+  const [linked, setLinked] = useState(me.linked ?? []);
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [msg, setMsg] = useState('');
+  const link = async () => {
+    try { const r = await api<{linked: string[]}>('/auth/link', {method: 'POST', body: {email, password: pw}}); setLinked(r.linked); setEmail(''); setPw(''); setMsg('Linked. Its workspaces are in the switcher and on Everything.'); }
+    catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+  };
+  const unlink = async (e: string) => { if (!confirm(`Unlink ${e}? Its workspaces leave this sign-in; the account itself stays.`)) return; const r = await api<{linked: string[]}>(`/auth/link/${encodeURIComponent(e)}`, {method: 'DELETE'}); setLinked(r.linked); };
+  return (
+    <section className="set-card">
+      <div className="set-card-head"><h3>Your account</h3><span className="muted small">Signed in as <b>{me.account}</b>. Link your other accounts (for example a personal email) to see all their workspaces with one sign-in.</span></div>
+      {linked.map(e => <div key={e} className="set-item"><span className="grow">{e}</span><button className="btn ghost small" onClick={() => unlink(e)}>Unlink</button></div>)}
+      <div className="set-item" style={{gap: 6, flexWrap: 'wrap'}}>
+        <input className="search" style={{flex: '1 1 200px'}} placeholder="Other account's email" value={email} onChange={e => setEmail(e.target.value)} />
+        <input className="search" style={{flex: '1 1 160px'}} type="password" placeholder="Its password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && link()} />
+        <button className="btn" disabled={!email.trim() || !pw} onClick={link}>Link account</button>
+      </div>
+      {msg && <div className="small muted">{msg}</div>}
     </section>
   );
 }
