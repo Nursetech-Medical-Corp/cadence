@@ -38,6 +38,14 @@ claude mcp add cadence-personal -- pnpm --dir /path/to/cadence mcp -- --as "secr
 claude mcp add --transport http cadence "http://127.0.0.1:5190/mcp?ws=main" --header "Authorization: Bearer tt_your_token"
 ```
 
+**Claude.ai / Cowork custom connector** (cannot send headers): Settings, Connectors, Add custom connector, and paste the URL with the token as `key`:
+
+```
+https://<your-cadence-host>/mcp?ws=<workspace id>&key=tt_your_token
+```
+
+Treat that URL like a password. Revoke the token on the Team page to cut it off.
+
 Tokens are stored hashed, can be revoked at any time, and every tool call goes through the same permission checks as the app. Tokens cannot sign approvals and cannot change access rules.
 
 ## First call

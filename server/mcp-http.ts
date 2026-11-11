@@ -1,5 +1,6 @@
 // MCP over HTTP (Streamable HTTP, stateless) at /mcp, for AI apps that connect over the network.
-// Requires "Authorization: Bearer tt_..." from Team > AI agents and tokens. Every tool runs through the
+// Requires "Authorization: Bearer tt_..." from Team > AI agents and tokens, or ?key=tt_... in the URL for
+// clients that cannot send headers (claude.ai and Cowork custom connectors). Every tool runs through the
 // permission guard, so an agent can do exactly what its person's role allows.
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -8,12 +9,13 @@ import {createMcpServer} from './mcp.ts';
 import {guarded, tokenPerson} from './tokens.ts';
 
 export async function handleMcpHttp(tasks: Tasks, req: IncomingMessage, res: ServerResponse) {
-  const person = tokenPerson(tasks.db, req.headers.authorization);
+  const key = new URL(req.url ?? '/', 'http://local').searchParams.get('key');
+  const person = tokenPerson(tasks.db, req.headers.authorization ?? (key ? `Bearer ${key}` : undefined));
   if (!person) {
     res.statusCode = 401;
     res.setHeader('content-type', 'application/json');
     res.setHeader('www-authenticate', 'Bearer');
-    res.end(JSON.stringify({error: 'Send Authorization: Bearer <token>. Create one on the Team page under AI agents and tokens.'}));
+    res.end(JSON.stringify({error: 'Send Authorization: Bearer <token> or add ?key=<token> to the URL. Create one on the Team page under AI agents and tokens.'}));
     return;
   }
   let body: unknown;
