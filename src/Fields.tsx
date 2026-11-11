@@ -1,7 +1,7 @@
 // Column kinds beyond plain values: formula, relation, rollup, and automatic ones (created, edited, created by),
 // plus phone and email. Also the column picker, the property visibility panel and column totals.
 import {useMemo, useState} from 'react';
-import {AtSign, DollarSign, Paperclip, Star, Calculator, Calendar, CheckSquare, Clock, Eye, EyeOff, GripVertical, Hash, Link2, List, ListChecks, Phone, Plus, Search, Sigma, Text, User, UserPlus, Workflow, X} from 'lucide-react';
+import {AtSign, DollarSign, Paperclip, Star, Calculator, Calendar, CheckSquare, Clock, Eye, EyeOff, GripVertical, Hash, Link2, List, ListChecks, Phone, Plus, Search, Sigma, Text, User, UserPlus, Workflow, X, Timer} from 'lucide-react';
 import type {FieldDef, FieldKind, Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
 import {Popover, itemKey} from './components.tsx';
@@ -32,9 +32,10 @@ export const FIELD_KINDS: {group: string; kinds: Kind[]}[] = [
     {kind: 'created', label: 'Created time', icon: Clock, hint: 'When the item was made'},
     {kind: 'updated', label: 'Last edited time', icon: Clock, hint: 'When it last changed'},
     {kind: 'creator', label: 'Created by', icon: UserPlus, hint: 'Who made it'},
+    {kind: 'time', label: 'Time tracked', icon: Timer, hint: 'Start and stop a timer, or log time'},
   ]},
 ];
-export const COMPUTED: FieldKind[] = ['formula', 'rollup', 'created', 'updated', 'creator'];
+export const COMPUTED: FieldKind[] = ['formula', 'rollup', 'created', 'updated', 'creator', 'time'];
 export const kindIcon = (k: FieldKind) => FIELD_KINDS.flatMap(g => g.kinds).find(x => x.kind === k)?.icon ?? Text;
 
 import {evalFormula, type Val} from './formula.ts';
@@ -66,6 +67,7 @@ export function valueOf(f: FieldDef, item: Item, project: Project, store: Store,
     case 'created': return item.created;
     case 'updated': return item.updated;
     case 'creator': return store.people.find(p => p.id === item.createdBy)?.name ?? null;
+    case 'time': return store.timeTotals.get(item.id) ?? 0; // minutes
     case 'formula': return evalFormula(f.formula ?? '', reader(item, project, store, depth), store.today);
     case 'rollup': {
       const r = f.rollup;

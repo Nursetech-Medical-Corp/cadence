@@ -63,7 +63,7 @@ export const validProject = (store: {projects: Project[]}, id: string | null) =>
 export const realProjects = (ps: Project[]) => ps.filter(p => !p.settings.rollup).sort((a, b) => a.sort - b.sort);
 export type Store = ReturnType<typeof useStore>;
 
-type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]};
+type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]; time?: Record<string, number>};
 
 export function useStore(me: string) {
   const [people, setPeople] = useState<Person[]>([]);
@@ -76,6 +76,7 @@ export function useStore(me: string) {
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0); // bumps on any server event so panels refetch comments/time
   const [running, setRunning] = useState<TimeEntry | null>(null);
+  const [timeTotals, setTimeTotals] = useState<Map<string, number>>(new Map()); // logged minutes per item
   const lastEvent = useRef<ChangeEvent | null>(null);
   const projectsRef = useRef<Project[]>([]);
   const itemsRef = useRef<Map<string, Item>>(new Map());
@@ -103,7 +104,7 @@ export function useStore(me: string) {
 
   const load = useCallback(async () => {
     const b = await api<Boot>('/bootstrap');
-    setPeople(b.people); setProjects(b.projects); setToday(b.today); setSprints(b.sprints); setViews(b.views);
+    setPeople(b.people); setProjects(b.projects); setToday(b.today); setSprints(b.sprints); setViews(b.views); setTimeTotals(new Map(Object.entries(b.time ?? {})));
     setItems(new Map(b.items.map(i => [i.id, i])));
     setReady(true);
   }, []);
@@ -124,6 +125,7 @@ export function useStore(me: string) {
       else if (e.kind === 'project') setProjects(prev => prev.some(p => p.id === e.project.id) ? prev.map(p => p.id === e.project.id ? e.project : p) : [...prev, e.project]);
       else if (e.kind === 'project-deleted') setProjects(prev => prev.filter(p => p.id !== e.id));
       else if (e.kind === 'people') api<Person[]>('/people').then(setPeople);
+      else if (e.kind === 'time') api<Record<string, number>>(`/time/totals?itemId=${e.itemId}`).then(r => setTimeTotals(prev => new Map(prev).set(e.itemId, r[e.itemId] ?? 0))).catch(() => {});
       else if (e.kind === 'sprint') loadSprints();
       else if (e.kind === 'view') loadViews();
       else if (e.kind === 'refresh') load();
@@ -286,7 +288,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {people, projects, items, sprints, views, today, error, ready, tick, running, lastEvent, notice, ...actions};
+  return {people, projects, items, sprints, views, today, error, ready, tick, running, timeTotals, lastEvent, notice, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.

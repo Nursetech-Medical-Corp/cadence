@@ -1,4 +1,5 @@
 import {Fragment, useState} from 'react';
+import {TimeCell} from './TimeTracker.tsx';
 import {colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Repeat} from 'lucide-react';
@@ -12,6 +13,7 @@ import {countRules} from './FilterBuilder.tsx';
 type Insert = {parentId: string | null; afterSort: number | undefined; beforeSort: number | undefined; depth: number; afterId: string | null; beforeId?: string};
 
 export function ListView({store, project, items: shown, allItems: items, open, selected, toggle, config}: ViewProps) {
+  const hasTime = project.fields.some(f => f.kind === 'time');
   const flat = !!(config.types?.length || countRules(config.filter) || config.text || config.assignee);
   const sorts = sortsOf(config);
   const shownIds = new Set(shown.map(i => i.id));
@@ -88,6 +90,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             <TagEditor tags={i.tags} onChange={tags => store.updateItem(i.id, {tags})} />
             <span className="spacer" />
             <span className="row-meta">
+              {hasTime && <TimeCell item={i} store={store} />}
               <PrioritySelect value={i.priority} onChange={priority => store.updateItem(i.id, {priority})} />
               <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => store.updateItem(i.id, {due})} placeholder="Due" />
               <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>

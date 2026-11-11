@@ -1055,3 +1055,31 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 /* Column header menu: order and sort level */
 .pop-seg { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; font-size: 12px; color: var(--text2); }
 .pop-seg .seg button { padding: 2px 8px; font-size: 12px; }
+
+/* Time tracking */
+.time-cell { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.time-play { width: 20px; height: 20px; border-radius: 50%; border: 0; display: inline-grid; place-items: center; background: color-mix(in srgb, var(--text2) 22%, transparent); color: var(--card, #fff); cursor: pointer; flex: none; padding: 0; }
+.time-play:hover { background: var(--accent); }
+.time-play.on { background: var(--danger, #e5484d); }
+.time-play.big { width: 26px; height: 26px; }
+.time-total { border: 0; background: none; font: inherit; cursor: pointer; padding: 2px 4px; border-radius: 4px; color: var(--text); font-variant-numeric: tabular-nums; }
+.time-total:hover { background: var(--hover, rgba(0,0,0,.05)); }
+.time-total.on { color: var(--danger, #e5484d); font-weight: 600; }
+.time-add { color: var(--text3, #999); }
+.row:hover .time-add, tr:hover .time-add { color: var(--text2); }
+.popover.time-pop { width: 400px; }
+.time-box { display: flex; flex-direction: column; gap: 8px; padding: 4px; }
+.time-head { display: flex; justify-content: space-between; align-items: baseline; }
+.time-form { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.time-dur { display: flex; align-items: center; gap: 8px; }
+.time-dur input { flex: 1; border: 0; background: none; font: inherit; font-size: 14px; padding: 6px 2px; outline: none; }
+.time-live { color: var(--danger, #e5484d); font-variant-numeric: tabular-nums; font-weight: 600; }
+.time-when { display: flex; align-items: center; gap: 6px; }
+.time-when input[type=date] { width: 132px; }
+.time-when select { flex: 1; min-width: 0; }
+.time-when input, .time-when select { font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--card); color: var(--text); }
+.time-note { font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; background: var(--card); color: var(--text); }
+.time-actions { display: flex; justify-content: flex-end; }
+.time-entries { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow: auto; }
+.time-person { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 0; background: none; font: inherit; padding: 4px 2px; cursor: pointer; color: var(--text); }
+.time-entry { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px; margin-left: 20px; border: 1px solid var(--line); border-radius: 6px; }

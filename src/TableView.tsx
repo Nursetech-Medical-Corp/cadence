@@ -1,4 +1,5 @@
 import {Fragment, useEffect, useRef, useState} from 'react';
+import {TimeCell} from './TimeTracker.tsx';
 import {colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, EyeOff, MoreHorizontal, Plus, Trash2, Pencil} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
@@ -205,6 +206,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
 
 /** One custom column's cell, for tables and the item panel. Worked-out kinds are read-only. */
 export function FieldCell({field, item, project, value, onChange, store}: {field: FieldDef; item: Item; project: Project; value: unknown; onChange: (v: unknown) => void; store: Store}) {
+  if (field.kind === 'time') return <TimeCell item={item} store={store} />;
   if (COMPUTED.includes(field.kind)) return <ComputedCell field={field} item={item} project={project} store={store} />;
   switch (field.kind) {
     case 'relation': return <RelationCell value={(value as string[]) ?? []} onChange={onChange} store={store} self={item.id} />;

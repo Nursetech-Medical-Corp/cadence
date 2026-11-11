@@ -343,6 +343,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const projects = tasks.listProjects().filter(p => canSee(p.id)), ids = new Set(projects.map(p => p.id));
         return send(res, 200, {
           people: tasks.listPeople(), projects, items: tasks.listItems().filter(i => ids.has(i.projectId)), today: tasks.today(),
+          time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => { try { return ids.has(tasks.item(iid).projectId); } catch { return false; } })),
           sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
         });
       }
@@ -562,6 +563,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const person = ws.requireLogin ? actor : (actor ?? q('person') ?? body.person);
         if (!b && m === 'GET') return send(res, 200, tasks.listTime({itemId: q('itemId'), person: q('person')}).filter(t => { try { return canSee(tasks.item(t.itemId).projectId); } catch { return false; } }));
         if (!b && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.logTime({...body, person: ws.requireLogin ? actor : body.person ?? person})); }
+        if (b === 'totals' && m === 'GET') { const iid = q('itemId') ?? ''; need(tasks.item(iid).projectId, 'view'); return send(res, 200, tasks.timeTotals(iid)); }
         if (b === 'running' && m === 'GET') return send(res, 200, person ? tasks.runningTimer(person) : null);
         if (b === 'start' && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.startTimer(body.itemId, ws.requireLogin ? actor! : body.person ?? person)); }
         if (b === 'stop' && m === 'POST') return send(res, 200, tasks.stopTimer(ws.requireLogin ? actor! : body.person ?? person));

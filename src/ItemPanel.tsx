@@ -1,10 +1,11 @@
 import {Fragment, useEffect, useState} from 'react';
+import {TimeBox} from './TimeTracker.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {FieldCell} from './TableView.tsx';
 import {COMPUTED} from './Fields.tsx';
-import {GripVertical, Link2, Pause, Play, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight, Pin, PinOff} from 'lucide-react';
-import type {Comment, Item, TimeEntry} from './types.ts';
-import {api, fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
+import {GripVertical, Link2, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight, Pin, PinOff} from 'lucide-react';
+import type {Comment, Item} from './types.ts';
+import {api, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
 import {BlockEditor} from './BlockEditor.tsx';
 import {WorkSection} from './AIWork.tsx';
@@ -17,14 +18,11 @@ type PanelNav = {back: () => void; forward: () => void; canBack: boolean; canFor
 export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: string; close: () => void; open: (id: string) => void; me: string; nav?: PanelNav}) {
   const item = store.items.get(id);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [time, setTime] = useState<TimeEntry[]>([]);
   const [comment, setComment] = useState('');
   const [commentFor, setCommentFor] = useState('');
   const [sub, setSub] = useState('');
   const qa = useQuickAssist(store, store.projects.find(p => p.id === item?.projectId)?.types ?? [], sub, setSub);
-  const [minutes, setMinutes] = useState('');
   const [depPick, setDepPick] = useState('');
-  const running = store.running?.itemId === id ? store.running : null;
   const layoutKey = 'panel-layout:' + (store.items.get(id)?.projectId ?? '');
   type Layout = {order: string[]; hidden: string[]; sections?: string[]; showEmpty?: boolean};
   const [layout, setLayoutState] = useState<Layout>(() => JSON.parse(localStorage.getItem(layoutKey) ?? '{"order":[],"hidden":[]}'));
@@ -32,12 +30,10 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
   // Drag a field or a section by its grip to reorder; the order is saved per project in this browser.
   const [dragProp, setDragProp] = useState<string | null>(null);
   const [dragSec, setDragSec] = useState<string | null>(null);
-  const now = useNow(!!running);
 
   useEffect(() => {
     api<Comment[]>(`/items/${id}/comments`).then(setComments).catch(() => {});
-    api<TimeEntry[]>(`/time?itemId=${id}`).then(setTime).catch(() => {});
-  }, [id, store.tick, store.running?.id]);
+  }, [id, store.tick]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input,textarea,select,.popover')) close(); };
     document.addEventListener('keydown', k);
@@ -54,7 +50,6 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
   const sprints = store.sprints.filter(s => s.projectId === project.id);
   const blockedBy = item.deps.map(d => store.items.get(d)).filter(Boolean) as Item[];
   const blocking = all.filter(i => i.deps.includes(item.id));
-  const logged = time.reduce((s, t) => s + (t.minutes ?? 0), 0) + (running ? (now - Date.parse(running.start)) / 60000 : 0);
   const person = (pid: string) => store.people.find(p => p.id === pid);
   const candidates = all.filter(i => i.projectId === project.id && i.id !== item.id && !item.deps.includes(i.id));
 
@@ -118,17 +113,8 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
       </select>
     </>,
     time: <>
-      <h4>Time <span className="muted">{fmtMinutes(logged)} logged{item.estimate ? ` of ${item.estimate}h` : ''}</span></h4>
-      <div className="time-row">
-        {running
-          ? <><span className="clock-big">{fmtClock(now - Date.parse(running.start))}</span><button className="btn danger" onClick={() => store.stopTimer()}><Pause size={14} /> Stop</button></>
-          : <button className="btn" disabled={!me} onClick={() => store.startTimer(item.id)}><Play size={14} /> Start timer</button>}
-        <span className="spacer" />
-        <input className="inline num" placeholder="min" value={minutes} onChange={e => setMinutes(e.target.value.replace(/[^0-9]/g, ''))}
-          onKeyDown={e => { if (e.key === 'Enter' && Number(minutes) > 0) { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); } }} />
-        <button className="btn" disabled={!(Number(minutes) > 0)} onClick={() => { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); }}>Log</button>
-      </div>
-      {time.slice(0, 6).map(t => <div key={t.id} className="small muted" style={{padding: '2px 0'}}>{person(t.person)?.name}: {t.minutes ? fmtMinutes(t.minutes) : 'running'} on {new Date(t.start).toLocaleDateString()}</div>)}
+      <h4>Time</h4>
+      <TimeBox item={item} store={store} />
     </>,
     history: <>
       <h4>History</h4>
@@ -199,7 +185,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
           ['tags', 'Tags', <TagEditor tags={item.tags} onChange={tags => up({tags})} />],
           ['repeat', 'Repeat', <RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} />],
           ['project', 'Project', <select className="plain-select" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
-          ...project.fields.map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)
+          ...project.fields.filter(f => f.kind !== 'time').map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)
             ? <FieldCell field={f} item={item} project={project} value={item.fields[f.id]} store={store} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />
             : <FieldValue kind={f.kind} options={f.options} value={item.fields[f.id]} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />] as [string, string, React.ReactNode]),
         ];

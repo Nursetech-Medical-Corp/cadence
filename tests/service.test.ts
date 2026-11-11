@@ -611,3 +611,16 @@ test('views: private views hidden from others, reorder in one call, templates dr
   const tpl = t.saveViewTemplate(mine.id, '', p.id);
   assert.deepEqual((tpl.data as {config: object}).config, {hideDone: true});
 });
+
+test('time: log by start and end, totals per item for the column, bad ranges refused', () => {
+  const {t, dave, p} = setup();
+  const i = t.createItem({projectId: p.id, title: 'Timed'}, dave.id);
+  const e = t.logTime({itemId: i.id, person: dave.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:30:00.000Z', note: 'review'});
+  assert.equal(e.minutes, 90);
+  t.logTime({itemId: i.id, person: dave.id, minutes: 30});
+  assert.deepEqual(t.timeTotals(i.id), {[i.id]: 120});
+  assert.equal(t.timeTotals()[i.id], 120);
+  assert.throws(() => t.logTime({itemId: i.id, person: dave.id, start: '2026-11-10T16:00:00Z', end: '2026-11-10T15:00:00Z'}), /end after the start/);
+  assert.throws(() => t.logTime({itemId: i.id, person: dave.id, start: 'soon', end: 'later'}), /must be times/);
+  assert.throws(() => t.logTime({itemId: i.id, person: dave.id, minutes: 0}), /positive/);
+});

@@ -576,14 +576,27 @@ export class Tasks {
     this.emit({kind: 'time', itemId: run.itemId});
     return {...run, end, minutes};
   }
-  logTime(input: {itemId: string; person: string; minutes: number; note?: string | null; date?: string}) {
+  /** Logs time by minutes (on a date), or by a start and an end (then minutes is the span). */
+  logTime(input: {itemId: string; person: string; minutes?: number; note?: string | null; date?: string; start?: string; end?: string}) {
     this.item(input.itemId); this.person(input.person);
-    if (!(input.minutes > 0)) throw new Invalid('Minutes must be positive');
-    const start = input.date ? new Date(input.date + 'T09:00:00').toISOString() : now();
-    const e: TimeEntry = {id: id(), itemId: input.itemId, person: input.person, start, end: start, minutes: input.minutes, note: input.note ?? null};
+    let start = input.date ? new Date(input.date + 'T09:00:00').toISOString() : now(), end = start, minutes = Number(input.minutes);
+    if (input.start !== undefined || input.end !== undefined) {
+      const s = Date.parse(String(input.start)), e = Date.parse(String(input.end));
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || e - s > 86400_000) throw new Invalid('start and end must be times, with the end after the start and within a day');
+      start = new Date(s).toISOString(); end = new Date(e).toISOString(); minutes = Math.round((e - s) / 60000);
+    }
+    if (!(minutes > 0)) throw new Invalid('Minutes must be positive');
+    const note = input.note == null ? null : String(input.note).slice(0, 500);
+    const e: TimeEntry = {id: id(), itemId: input.itemId, person: input.person, start, end, minutes, note};
     this.db.prepare('insert into time_entries (id,item_id,person,start,end,minutes,note) values (?,?,?,?,?,?,?)').run(e.id, e.itemId, e.person, e.start, e.end, e.minutes, e.note);
     this.emit({kind: 'time', itemId: input.itemId});
     return e;
+  }
+  /** Logged minutes per item (all people), for the Time tracked column. */
+  timeTotals(itemId?: string): Record<string, number> {
+    const rows = itemId ? this.db.prepare('select item_id, sum(minutes) as m from time_entries where item_id = ? and minutes > 0 group by item_id').all(itemId)
+      : this.db.prepare('select item_id, sum(minutes) as m from time_entries where minutes > 0 group by item_id').all();
+    return Object.fromEntries(rows.map(r => [r.item_id as string, r.m as number]));
   }
   /** One person's week: minutes per task per day (Monday first), from finished time entries. */
   timesheet(person: string, weekStart: string) {

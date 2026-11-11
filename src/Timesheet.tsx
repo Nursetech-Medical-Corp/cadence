@@ -1,27 +1,24 @@
 // Timesheet: one person's week. Tasks as rows, days as columns, hours in the cells. Filled from timers and
 // logged time; type in a cell to set that day's hours (it replaces the day's logged entries for that task).
+import {parseDuration} from './TimeTracker.tsx';
 import {useEffect, useMemo, useState} from 'react';
 import {ChevronLeft, ChevronRight, Clock, Plus} from 'lucide-react';
 import {api, getMe, type Store} from './store.ts';
 import {addDays, monday, parseDay} from './dates.ts';
 import {itemKey} from './components.tsx';
+import type {Item} from './types.ts';
 
 type Sheet = {weekStart: string; days: string[]; rows: {itemId: string; minutes: number[]}[]};
 const hrs = (m: number) => m ? String(+(m / 60).toFixed(2)) : '';
-/** "1.5", "1:30", "90m" all mean 90 minutes. */
-const parseHours = (v: string) => {
-  const t = v.trim().toLowerCase();
-  if (!t) return 0;
-  const hm = /^(\d+):(\d{1,2})$/.exec(t); if (hm) return Number(hm[1]) * 60 + Number(hm[2]);
-  const m = /^(\d+(?:\.\d+)?)m$/.exec(t); if (m) return Math.round(Number(m[1]));
-  const h = Number(t.replace(/h$/, '')); return Number.isFinite(h) && h >= 0 ? Math.round(h * 60) : NaN;
-};
 
 export function TimesheetPage({store, open}: {store: Store; open: (id: string) => void}) {
   const [week, setWeek] = useState(() => monday(store.today));
   const [person, setPerson] = useState(getMe());
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [extra, setExtra] = useState<string[]>([]);
+  // Tasks assigned to this person for the week (in a sprint that overlaps it, or with dates in it) show even with no time yet.
+  const [planned, setPlannedState] = useState(() => localStorage.getItem('timesheet-planned') !== '0');
+  const setPlanned = (v: boolean) => { setPlannedState(v); localStorage.setItem('timesheet-planned', v ? '1' : '0'); };
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const load = () => person && api<Sheet>(`/timesheet?person=${person}&week=${week}`).then(setSheet).catch(e => setErr(String(e instanceof Error ? e.message : e)));
@@ -29,12 +26,20 @@ export function TimesheetPage({store, open}: {store: Store; open: (id: string) =
   useEffect(() => { if (store.lastEvent.current?.kind === 'time') load(); }, [store.tick]);
   const rows = useMemo(() => {
     const have = new Map((sheet?.rows ?? []).map(r => [r.itemId, r.minutes]));
+    const end = addDays(week, 6);
+    const inWeek = (i: Item) => {
+      const s = i.sprint ? store.sprints.find(x => x.id === i.sprint) : undefined;
+      if (s && s.start <= end && s.end >= week) return true;
+      const a = i.start ?? i.due, b = i.due ?? i.start;
+      return !!a && !!b && a <= end && b >= week;
+    };
+    if (planned) for (const i of store.items.values()) if (!i.completed && i.assignees.includes(person) && inWeek(i) && !have.has(i.id)) have.set(i.id, [0, 0, 0, 0, 0, 0, 0]);
     for (const id of extra) if (!have.has(id)) have.set(id, [0, 0, 0, 0, 0, 0, 0]);
     return [...have.entries()].filter(([id]) => store.items.has(id));
-  }, [sheet, extra, store.items]);
+  }, [sheet, extra, store.items, store.sprints, planned, person, week]);
   const save = async (itemId: string, day: string, text: string) => {
-    const minutes = parseHours(text);
-    if (Number.isNaN(minutes) || minutes > 1440) { setErr('Use hours like 1.5, 1:30 or 90m'); return; }
+    const minutes = parseDuration(text);
+    if (Number.isNaN(minutes) || minutes > 1440) { setErr('Use hours like 1.5, 1:30, 90m or 1h 30m'); return; }
     setErr('');
     try { const next = await api<Sheet>('/timesheet', {method: 'PUT', body: {person, itemId, date: day, minutes}}); if (next.weekStart === week) setSheet(next); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
   };
@@ -52,6 +57,7 @@ export function TimesheetPage({store, open}: {store: Store; open: (id: string) =
         <b>{parseDay(week).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})} to {parseDay(addDays(week, 6)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'})}</b>
         <button className="icon" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
         <button className="btn ghost small" onClick={() => setWeek(monday(store.today))}>This week</button>
+        <label className="small" style={{display: 'flex', gap: 4, alignItems: 'center'}}><input type="checkbox" checked={planned} onChange={e => setPlanned(e.target.checked)} /> Show planned tasks</label>
         <span className="spacer" />
         <b>{hrs(total) || 0}h total</b>
       </div>
