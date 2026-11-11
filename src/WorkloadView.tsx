@@ -1,6 +1,7 @@
 // Workload: hours per person per day against capacity. Each item's estimate is spread evenly over the
 // weekdays from its start (or due) to its due date. Expand a person to see their items; drag one onto
 // another person to reassign it.
+import {hoursFor} from './hours.ts';
 import {useEffect, useMemo, useState} from 'react';
 import {api} from './store.ts';
 import {ChevronDown, ChevronLeft, ChevronRight} from 'lucide-react';
@@ -27,11 +28,11 @@ export function WorkloadView({store, project, items, allItems, open, config, set
   const open_ = items.filter(i => !i.completed && i.due && !parents.has(i.id));
 
   // Hours per day for one item, over its working days.
-  const spread = (i: Item) => {
+  const spread = (i: Item, personId: string) => {
     const s = i.start && i.start <= i.due! ? i.start : i.due!;
     const work = Array.from({length: daysBetween(s, i.due!) + 1}, (_, n) => addDays(s, n)).filter(d => !isWeekend(d));
     const span = work.length ? work : [i.due!];
-    const each = (i.estimate ?? 0) / span.length / Math.max(1, i.assignees.length);
+    const each = (personId ? hoursFor(i, personId) : i.estimate ?? 0) / span.length;
     return new Map(span.map(d => [d, each]));
   };
   const rows = useMemo(() => {
@@ -39,7 +40,7 @@ export function WorkloadView({store, project, items, allItems, open, config, set
     return people.map(r => {
       const mine = open_.filter(i => r.id ? i.assignees.includes(r.id) : !i.assignees.length);
       const hours = new Map<string, number>(), count = new Map<string, number>();
-      for (const i of mine) for (const [d, h] of spread(i)) { hours.set(d, (hours.get(d) ?? 0) + h); count.set(d, (count.get(d) ?? 0) + 1); }
+      for (const i of mine) for (const [d, h] of spread(i, r.id)) { hours.set(d, (hours.get(d) ?? 0) + h); count.set(d, (count.get(d) ?? 0) + 1); }
       return {...r, items: mine, hours, count};
     }).filter(r => r.id || r.items.length);
   }, [open_, store.people]);
@@ -107,7 +108,7 @@ export function WorkloadView({store, project, items, allItems, open, config, set
         })}
       </div>
       <div className="muted small" style={{padding: '10px 16px'}}>
-        Estimates are spread over weekdays from start to due and split between assignees. Parents with subitems are skipped so hours are not counted twice. Items without an estimate count as 0 hours. Green is under 80% of capacity, amber is near full, red is over. {open_.filter(i => !i.estimate).length} open items have no estimate.
+        Estimates are spread over weekdays from start to due; shared items use each person's own hours, or an even split. Parents with subitems are skipped so hours are not counted twice. Items without an estimate count as 0 hours. Green is under 80% of capacity, amber is near full, red is over. {open_.filter(i => !i.estimate).length} open items have no estimate.
       </div>
     </div>
   );

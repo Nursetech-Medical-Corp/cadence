@@ -12,7 +12,7 @@ import {WorkSection} from './AIWork.tsx';
 import {ApprovalsSection} from './Approvals.tsx';
 import {ActivityList} from './History.tsx';
 import {ApplyToChildrenButton, SaveTemplateButton} from './TemplateMenus.tsx';
-import {Avatar, Check, DateInput, InlineText, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TagEditor, TypeBadge, TypeSelect, itemKey, EstimateCell, estimateOf} from './components.tsx';
+import {Avatar, Check, DateInput, InlineText, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TagEditor, TypeBadge, TypeSelect, itemKey, EstimateCell, estimateOf, PersonHoursEditor} from './components.tsx';
 
 type PanelNav = {back: () => void; forward: () => void; canBack: boolean; canForward: boolean; pinned: boolean; togglePin: () => void};
 export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: string; close: () => void; open: (id: string) => void; me: string; nav?: PanelNav}) {
@@ -179,6 +179,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
             {item.deps.length > 0 && <option value="previous">Follow what it waits on</option>}
           </select>] as [string, string, React.ReactNode]] : []),
           ['estimate', 'Estimate', <EstimateCell item={item} items={store.items} onChange={estimate => up({estimate})} />],
+          ...(item.assignees.length > 1 && !estimateOf(item, store.items).rolled ? [['hours', 'Hours each', <PersonHoursEditor item={item} people={store.people} onChange={hours => up({fields: {...item.fields, hours}})} />] as [string, string, React.ReactNode]] : []),
           ['parent', 'Parent', <select className="plain-select" value={item.parentId ?? ''} onChange={e => up({parentId: e.target.value || null})}>
             <option value="">None</option>
             {all.filter(i => i.projectId === project.id && i.id !== item.id && project.types.indexOf(i.type) < Math.max(project.types.indexOf(item.type), 1)).map(i => <option key={i.id} value={i.id}>{i.type}: {i.title.slice(0, 50)}</option>)}

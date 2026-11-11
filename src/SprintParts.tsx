@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {hoursFor} from './hours.ts';
 import {Trash2, ArrowLeftFromLine, ChevronDown, ChevronRight} from 'lucide-react';
 import type {BurnPoint, Item, Person, Sprint} from './types.ts';
 import {api, type Store} from './store.ts';
@@ -17,8 +18,8 @@ export function Capacity({store, sprint, items}: {store: Store; sprint: Sprint; 
   if (!people.length && !unassigned) return <div className="muted small" style={{marginTop: 8}}>Assign work or set capacity to see load.</div>;
   return (
     <div className="cap">
-      {/* A shared item's estimate is split evenly between its assignees, as in the Workload view. */}
-      {people.map(p => <CapRow key={p.id} store={store} sprint={sprint} person={p} hours={+open.filter(i => i.assignees.includes(p.id)).reduce((a, i) => a + (i.estimate ?? 0) / i.assignees.length, 0).toFixed(1)} />)}
+      {/* Each person's own hours on shared items, or an even share (src/hours.ts), as in Workload. */}
+      {people.map(p => <CapRow key={p.id} store={store} sprint={sprint} person={p} hours={+open.filter(i => i.assignees.includes(p.id)).reduce((a, i) => a + hoursFor(i, p.id), 0).toFixed(1)} />)}
       {unassigned > 0 && <><span className="muted">Unassigned</span><span /><span className="muted">{unassigned}h</span></>}
     </div>
   );

@@ -743,3 +743,19 @@ test('export and restore: personal layouts and workspace settings come back; Goo
   assert.equal(getWorkspace(t.db).custom.viewSettings, 'locked');
   assert.equal(getWorkspace(t.db).google.clientSecret, 'shh', 'restore keeps the Google setup that is already there');
 });
+
+test('hours each: assignees set their own hours, the estimate is the total, removed people drop out', async () => {
+  const {hoursFor} = await import('../src/hours.ts');
+  const {t, dave, sam, p} = setup();
+  const i = t.createItem({projectId: p.id, title: 'Shared', assignees: [dave.id, sam.id], estimate: 10}, dave.id);
+  assert.equal(hoursFor(i, dave.id), 5, 'even split before anyone sets hours');
+  const a = t.updateItem(i.id, {fields: {hours: {[dave.id]: 3, [sam.id]: 5, nobody: 9}}}, dave.id);
+  assert.equal(a.estimate, 8);
+  assert.deepEqual(a.fields.hours, {[dave.id]: 3, [sam.id]: 5}, 'only assignees keep hours');
+  assert.equal(hoursFor(a, sam.id), 5);
+  const b = t.updateItem(i.id, {assignees: [dave.id]}, dave.id);
+  assert.deepEqual(b.fields.hours, {[dave.id]: 3});
+  assert.equal(b.estimate, 3);
+  const c = t.updateItem(i.id, {fields: {hours: null}}, dave.id);
+  assert.equal(c.fields.hours, undefined, 'clearing removes per-person hours');
+});

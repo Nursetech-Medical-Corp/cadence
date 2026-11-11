@@ -1037,7 +1037,7 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .grid .sel-col { position: relative; }
 .row-add { position: absolute; left: -2px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; border: 0; border-radius: 4px; background: var(--hover); color: var(--text2); display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
 .grid tr:hover .row-add { display: inline-flex; }
-.grid tr:hover .sel-col input { margin-left: 14px; }
+/* The + sits in the gap left of the checkbox, so the checkbox never moves on hover. */
 .insert-row td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .locked-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); padding: 4px 24px; background: var(--hover); }
 
@@ -1163,3 +1163,8 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 /* Estimates: Σ marks a parent's total of its subitems */
 .est-text { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .inline.est-input { width: 80px; }
+
+/* Hours each person set on a shared item */
+.person-hours { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.person-hours .ph { display: inline-flex; align-items: center; gap: 4px; }
+.person-hours .est-input { width: 70px; }

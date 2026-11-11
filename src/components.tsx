@@ -1,4 +1,5 @@
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
+import {personHours} from './hours.ts';
 import {parseDuration} from './dates.ts';
 import {createPortal} from 'react-dom';
 import {Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon, GripVertical} from 'lucide-react';
@@ -199,9 +200,28 @@ export function EstimateText({item, items}: {item: Item; items: Map<string, Item
 export function EstimateCell({item, items, onChange}: {item: Item; items: Map<string, Item>; onChange: (hours: number | null) => void}) {
   const e = estimateOf(item, items);
   if (e.rolled) return <EstimateText item={item} items={items} />;
+  if (personHours(item)) return <span className="muted est-text" title="Total of each person's hours (set them below)">{fmtHours(item.estimate ?? 0)}</span>;
   return <input className="inline num est-input" placeholder="-" defaultValue={item.estimate != null ? fmtHours(item.estimate) : ''} key={String(item.estimate)} title="Hours: 2h, 1h 30m, 90m or 1.5"
     onBlur={ev => { const m = parseDuration(ev.target.value); if (Number.isNaN(m)) { ev.target.value = item.estimate != null ? fmtHours(item.estimate) : ''; return; } const h = m ? Math.round(m / 60 * 100) / 100 : null; if (h !== item.estimate) onChange(h); }}
     onKeyDown={ev => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} />;
+}
+
+/** Each assignee's own hours on a shared item. Empty means not set; with none set, the estimate is shared evenly. */
+export function PersonHoursEditor({item, people, onChange}: {item: Item; people: Person[]; onChange: (hours: Record<string, number> | null) => void}) {
+  const h = personHours(item) ?? {};
+  const share = item.estimate != null && !personHours(item) ? fmtHours(item.estimate / Math.max(1, item.assignees.length)) : 'not set';
+  return <span className="person-hours">{item.assignees.map(pid => (
+    <span key={pid} className="ph" title={`${people.find(p => p.id === pid)?.name ?? 'Someone'}'s hours on this`}>
+      <Avatar person={people.find(p => p.id === pid)} size={18} />
+      <input className="inline num est-input" placeholder={share} defaultValue={h[pid] != null ? fmtHours(h[pid]) : ''} key={pid + String(h[pid])}
+        onBlur={ev => {
+          const v = ev.target.value.trim(), m = parseDuration(v);
+          if (Number.isNaN(m)) { ev.target.value = h[pid] != null ? fmtHours(h[pid]) : ''; return; }
+          const next = {...h};
+          if (!v) delete next[pid]; else next[pid] = Math.round(m / 60 * 100) / 100;
+          if (JSON.stringify(next) !== JSON.stringify(h)) onChange(Object.keys(next).length ? next : null);
+        }} onKeyDown={ev => ev.key === 'Enter' && (ev.target as HTMLInputElement).blur()} />
+    </span>))}</span>;
 }
 
 export function TypeBadge({type}: {type: string}) {

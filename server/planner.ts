@@ -8,6 +8,7 @@
 //
 // Planning data lives on people (weekly hours, skill, hourly rate, start/end, planned hire) and on items
 // (estimate, plus custom values fields.cost for non-labor spend and fields.skill for the skill needed).
+import {hoursFor} from '../src/hours.ts';
 import {Invalid} from './errors.ts';
 import type {Item, ItemPatch} from '../src/types.ts';
 import type {Tasks} from './service.ts';
@@ -105,7 +106,7 @@ export function replan(tasks: Tasks, opts: {projectId?: string; reassign?: boole
     if (!best) continue; // unassigned: nothing to schedule against
     const assignees = owners.length && owners.includes(best) ? i.assignees : [best.id];
     const sched = owners.length > 1 && assignees === i.assignees
-      ? owners.map(o => simulate(o, hours, earliest, true)).reduce((a, b) => ({start: a.start < b.start ? a.start : b.start, end: a.end > b.end ? a.end : b.end}))
+      ? owners.map(o => simulate(o, hoursFor(i, o.id), earliest, true)).reduce((a, b) => ({start: a.start < b.start ? a.start : b.start, end: a.end > b.end ? a.end : b.end}))
       : simulate(best, i.estimate ?? 0, earliest, true);
     finish.set(i.id, sched.end);
     const late = i.due ? Math.max(0, daysBetween(i.due, sched.end)) : 0;

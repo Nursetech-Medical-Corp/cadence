@@ -1,5 +1,6 @@
 // All reads and writes go through here: the HTTP API, MCP server and tests share it,
 // so anything a person can do in the UI an agent can do too.
+import {syncHours} from '../src/hours.ts';
 import {exportAll} from './backup.ts';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
@@ -302,6 +303,7 @@ export class Tasks {
       createdBy: actor, created: t, updated: t, deps: input.deps ?? [],
       completed: p.statuses.find(s => s.id === status)?.category === 'done' ? t : null,
     };
+    Object.assign(item, syncHours(item));
     if (item.parentId) this.item(item.parentId);
     if (item.sprint) this.sprint(item.sprint);
     for (const d of item.deps) this.item(d);
@@ -357,6 +359,8 @@ export class Tasks {
     if (isDone && !wasDone && actor && !p.settings.aiMayComplete && (this.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai')
       throw new Invalid('AI agents cannot mark work done here. Submit it for review (submit_work) and a person will approve it.');
     next.completed = isDone ? (before.completed ?? now()) : null;
+    // Per-person hours follow the assignees (removed people drop out) and set the estimate.
+    Object.assign(next, syncHours(next));
 
     this.db.prepare(`update items set project_id=?, parent_id=?, number=?, type=?, title=?, body=?, status=?, priority=?, assignees=?, start=?, due=?,
       estimate=?, tags=?, sprint=?, sort=?, recur=?, fields=?, updated=?, completed=?, deps=? where id=?`).run(
