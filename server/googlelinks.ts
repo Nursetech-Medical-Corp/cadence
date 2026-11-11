@@ -9,7 +9,10 @@ import {Invalid, NotFound} from './errors.ts';
 export const SCOPES = {
   calendar: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
   gmail: 'https://www.googleapis.com/auth/gmail.readonly',
+  // Full Calendar access: only needed to create a dedicated "Cadence" calendar for due dates.
+  'calendar-full': 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events',
 } as const;
+export type Want = keyof typeof SCOPES;
 export type Link = {id: string; person: string; email: string; scopes: string; created: string};
 
 export function migrateGoogleLinks(db: Db) {
@@ -24,7 +27,7 @@ export function saveLink(db: Db, person: string, email: string, refresh: string,
 }
 export const removeLink = (db: Db, person: string, id: string) => { db.prepare('delete from google_links where id = ? and person = ?').run(id, person); };
 
-async function access(db: Db, person: string, linkId: string, need: string) {
+export async function access(db: Db, person: string, linkId: string, need: string) {
   const r = db.prepare('select * from google_links where id = ? and person = ?').get(linkId, person) as {refresh_token: string; scopes: string; email: string} | undefined;
   if (!r) throw new NotFound('That Google account is not connected');
   if (!r.scopes.includes(need)) throw new Invalid(`${r.email} was connected without ${need.includes('gmail') ? 'Gmail' : 'Calendar'} access. Connect it again and allow it.`);

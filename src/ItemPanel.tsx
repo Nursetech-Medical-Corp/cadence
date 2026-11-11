@@ -172,6 +172,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
           ['sprint', 'Sprint', <SprintSelect projectId={project.id} sprints={sprints} value={item.sprint} onChange={sprint => up({sprint})} />],
           ['start', 'Start', <DateInput value={item.start} onChange={start => up({start})} placeholder="Set start" />],
           ['due', 'Due', <DateInput value={item.due} today={item.completed ? undefined : store.today} onChange={due => up({due})} placeholder="Set due" />],
+          ...(item.completed ? [['completed', 'Completed', <CompletedInput value={item.completed} onChange={completed => up({completed})} />] as [string, string, React.ReactNode]] : []),
           ...((item.parentId || item.deps.length) ? [['follow', 'Dates', <select className="plain-select" title="Dynamic dates: move with the parent, or follow the item this one waits on" value={(item.fields.follow as string) ?? ''}
             onChange={e => up({fields: {...item.fields, follow: e.target.value || undefined}})}>
             <option value="">Fixed, set by hand</option>
@@ -284,4 +285,13 @@ function RelatedLinks({store, item, open}: {store: Store; item: Item; open: (id:
     </div>
     {matches.map(m => <button key={m.id} className="pop-row" onClick={() => { save([...mine.filter(l => !(l.id === m.id && l.rel === rel)), {rel, id: m.id}]); setQ(''); }}><span className="muted small">{itemKey(m, store.projects)}</span> {m.title}</button>)}
   </>;
+}
+
+/** When done work was finished, in local time. People can correct it (for work marked done late). */
+function CompletedInput({value, onChange}: {value: string; onChange: (iso: string) => void}) {
+  const d = new Date(value);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return <input type="datetime-local" className="plain-input" value={local} max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+    title="When this was finished. Change it if it was marked done late."
+    onChange={e => { if (e.target.value) onChange(new Date(e.target.value).toISOString()); }} />;
 }

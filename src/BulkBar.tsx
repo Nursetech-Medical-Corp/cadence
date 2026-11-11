@@ -8,6 +8,7 @@ import {Avatar, Menu, PriorityIcon, StatusIcon, TypeBadge} from './components.ts
 
 export function BulkBar({store, project, sprints, selected, clear}: {store: Store; project: Project; sprints: Sprint[]; selected: Set<string>; clear: () => void}) {
   const [date, setDate] = useState('');
+  const [doneOn, setDoneOn] = useState('');
   if (!selected.size) return null;
   const ids = [...selected].filter(id => store.items.has(id));
   const apply = (patch: (id: string) => ItemPatch) => { for (const id of ids) store.updateItem(id, patch(id)); };
@@ -27,6 +28,8 @@ export function BulkBar({store, project, sprints, selected, clear}: {store: Stor
         options={[{value: null, label: 'Backlog'}, ...sprints.map(s => ({value: s.id as string | null, label: s.name}))]} />
       <label className="bulk-date"><CalendarDays size={13} /><input type="date" value={date} onChange={e => { setDate(e.target.value); if (e.target.value) apply(() => ({due: e.target.value})); }} title="Set due date" /></label>
       {doneId && <button className="btn" onClick={() => apply(() => ({status: doneId}))}>Mark done</button>}
+      {doneId && <label className="bulk-date" title="Mark done on a past date"><span className="small">Done on</span><input type="date" value={doneOn} max={store.today}
+        onChange={e => { setDoneOn(e.target.value); if (e.target.value) apply(() => ({status: doneId, completed: e.target.value})); }} /></label>}
       <button className="btn danger" onClick={() => { if (confirm(`Delete ${ids.length} items and their subitems?`)) { for (const id of ids) store.deleteItem(id); clear(); } }}><Trash2 size={13} /></button>
       <button className="icon" title="Clear selection (Esc)" onClick={clear}><X size={15} /></button>
     </div>

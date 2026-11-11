@@ -331,6 +331,18 @@ export class Tasks {
     }, actor);
   }
 
+  /** A person can set when done work was finished (to fix work marked done late). Date-only values mean midday UTC. */
+  private checkCompleted(v: unknown, isDone: boolean, created: string, actor: string | null) {
+    if (this.isAi(actor)) throw new Invalid('AI agents cannot change when work was completed. A person does that.');
+    if (v === null) { if (isDone) throw new Invalid('Done work needs a completed date. Reopen it to clear the date.'); return null; }
+    if (!isDone) throw new Invalid('Only done work has a completed date. Mark it done first.');
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/.test(v)) throw new Invalid('Completed must be a date like 2026-11-30 or a time like 2026-11-30T15:00:00Z');
+    const t = new Date(v.length === 10 ? v + 'T12:00:00Z' : v);
+    if (Number.isNaN(t.getTime())) throw new Invalid('Completed must be a real date');
+    if (t.getTime() > Date.now() + 60_000) throw new Invalid('Completed cannot be in the future');
+    if (t.toISOString().slice(0, 10) < created.slice(0, 10)) throw new Invalid('Completed cannot be before the item was created');
+    return t.toISOString();
+  }
   private isAi(actor: string | null) { return !!actor && (this.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai'; }
   /** opts.system: the review tools changing review state. opts.keep: change dates without moving followers. */
   updateItem(iid: string, patch: ItemPatch, actor: string | null = null, opts: {system?: boolean; keep?: boolean} = {}): Item {
@@ -359,6 +371,7 @@ export class Tasks {
     if (isDone && !wasDone && actor && !p.settings.aiMayComplete && (this.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai')
       throw new Invalid('AI agents cannot mark work done here. Submit it for review (submit_work) and a person will approve it.');
     next.completed = isDone ? (before.completed ?? now()) : null;
+    if (patch.completed !== undefined) next.completed = this.checkCompleted(patch.completed, isDone, next.created, actor);
     // Per-person hours follow the assignees (removed people drop out) and set the estimate.
     Object.assign(next, syncHours(next));
 

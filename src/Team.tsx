@@ -563,7 +563,54 @@ function GoogleCard({me, ready}: {me: string; ready: boolean}) {
       ))}
       {links.some(l => l.scopes.includes('calendar')) && <button className="btn small" disabled={busy} onClick={() => run('Your events in the next 7 days', async () => (await api<{title: string; start: string; account: string}[]>(`/google/events?from=${today}&to=${week}`)).map(e => `${e.start.replace('T', ' ').slice(0, 16)}  ${e.title}  (${e.account})`))}>Test: events in the next 7 days</button>}
       {out && <div className="g-out"><b className="small">{out.title}</b>{out.rows.slice(0, 20).map((r, n) => <div key={n} className="small">{r}</div>)}</div>}
+      {links.some(l => l.scopes.includes('calendar')) && <CalendarSync links={links.filter(l => l.scopes.includes('calendar'))} reconnect={start('calendar-full')} />}
     </section>
+  );
+}
+
+type CalSettings = {linkId: string | null; calendarId: string; pushTasks: 'none' | 'due'; tasksCalendarId: string | null; doneRule: 'mark' | 'delete'; syncCalendars: string[];
+  workStart: string; workEnd: string; tz: string; sync?: {calendar_id: string; last_sync: string | null; error: string | null; channel_expires: string | null}[]};
+/** Two-way Google Calendar sync: where meetings go, which calendars come in, task due dates, work hours. */
+function CalendarSync({links, reconnect}: {links: GLink[]; reconnect: string}) {
+  const [s, setS] = useState<CalSettings | null>(null);
+  const [cals, setCals] = useState<{id: string; name: string; primary: boolean; canWrite: boolean}[]>([]);
+  const [msg, setMsg] = useState('');
+  const load = () => api<CalSettings>('/calendar/settings').then(setS).catch(e => setMsg(String(e instanceof Error ? e.message : e)));
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (s?.linkId) api<typeof cals>(`/google/calendars?link=${s.linkId}`).then(setCals).catch(e => setMsg(String(e instanceof Error ? e.message : e))); }, [s?.linkId]);
+  if (!s) return null;
+  const save = async (patch: Partial<CalSettings>) => { try { setS(await api<CalSettings>('/calendar/settings', {method: 'PUT', body: patch})); setMsg('Saved.'); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } };
+  const calId = (c: {id: string; primary: boolean}) => c.primary ? 'primary' : c.id;
+  const full = !!links.find(l => l.id === s.linkId)?.scopes.split(/\s+/).includes('https://www.googleapis.com/auth/calendar');
+  return (
+    <div className="cal-sync">
+      <h4>Calendar sync (two-way)</h4>
+      <p className="small muted">Meetings you schedule in Cadence go to your Google calendar with invitations and a Meet link. Events in the calendars you pick below come into Cadence every few minutes (instantly when the server has a public https address). Events other people organize show read-only.</p>
+      <div className="time-row"><span className="small">Account</span>
+        <select className="plain-select" value={s.linkId ?? ''} onChange={e => save({linkId: e.target.value || null, calendarId: 'primary', syncCalendars: ['primary']})}>{links.map(l => <option key={l.id} value={l.id}>{l.email}</option>)}</select></div>
+      <div className="time-row"><span className="small">Meetings go to</span>
+        <select className="plain-select" value={s.calendarId} onChange={e => save({calendarId: e.target.value})}>{cals.filter(c => c.canWrite).map(c => <option key={c.id} value={calId(c)}>{c.name}{c.primary ? ' (primary)' : ''}</option>)}</select></div>
+      <div className="small">Bring these calendars into Cadence:</div>
+      <div className="cal-sync-list">{cals.map(c => <label key={c.id} className="small"><input type="checkbox" checked={s.syncCalendars.includes(calId(c))}
+        onChange={e => save({syncCalendars: e.target.checked ? [...s.syncCalendars, calId(c)] : s.syncCalendars.filter(x => x !== calId(c))})} /> {c.name}</label>)}</div>
+      <div className="time-row"><span className="small">Task due dates</span>
+        <select className="plain-select" value={s.pushTasks} onChange={e => save({pushTasks: e.target.value as CalSettings['pushTasks']})}><option value="none">Not on my calendar</option><option value="due">All-day event for each task assigned to me</option></select>
+        {s.pushTasks === 'due' && <>
+          <select className="plain-select" value={s.tasksCalendarId ?? s.calendarId} onChange={e => save({tasksCalendarId: e.target.value})}>{cals.filter(c => c.canWrite).map(c => <option key={c.id} value={calId(c)}>{c.name}</option>)}</select>
+          {full ? <button className="btn small" onClick={async () => { try { setS(await api<CalSettings>('/calendar/cadence-calendar', {method: 'POST'})); setMsg('Made a "Cadence" calendar for due dates.'); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}>Make a "Cadence" calendar</button>
+            : <a className="btn small ghost" href={reconnect} title="Reconnect with full Calendar permission so Cadence can make its own calendar">Allow making a Cadence calendar</a>}
+          <select className="plain-select" value={s.doneRule} onChange={e => save({doneRule: e.target.value as CalSettings['doneRule']})}><option value="mark">When done: mark [Done]</option><option value="delete">When done: remove</option></select>
+        </>}
+      </div>
+      <div className="time-row"><span className="small">Work hours (for Find a time)</span>
+        <input className="plain-input" type="time" value={s.workStart} onChange={e => save({workStart: e.target.value})} /> to <input className="plain-input" type="time" value={s.workEnd} onChange={e => save({workEnd: e.target.value})} />
+        <input className="plain-input" style={{width: 160}} value={s.tz} title="Time zone" onChange={e => setS({...s, tz: e.target.value})} onBlur={e => save({tz: e.target.value})} /></div>
+      <div className="time-row">
+        <button className="btn small" onClick={async () => { setMsg('Syncing...'); try { const r = await api<{calendar: string; changes: number}[]>('/calendar/sync', {method: 'POST'}); setMsg(`Synced: ${r.map(x => `${x.changes} changes from ${x.calendar}`).join(', ')}`); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}>Sync now</button>
+        {s.sync?.map(x => <span key={x.calendar_id} className={'small ' + (x.error ? 'danger-text' : 'muted')}>{x.calendar_id}: {x.error ? x.error : x.last_sync ? `synced ${new Date(x.last_sync).toLocaleString()}` : 'not synced yet'}{x.channel_expires ? ', live' : ''}</span>)}
+      </div>
+      {msg && <div className="small">{msg}</div>}
+    </div>
   );
 }
 

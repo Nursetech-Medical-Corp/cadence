@@ -17,6 +17,8 @@ import {exportMine, importMine} from './personal.ts';
 import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudbackup.ts';
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
+import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
+import {allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
 import {handleMcpHttp} from './mcp-http.ts';
@@ -32,7 +34,7 @@ import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
 type Next = (err?: unknown) => void;
-const ITEM_FIELDS = new Set(['parentId', 'type', 'title', 'body', 'status', 'priority', 'assignees', 'start', 'due', 'estimate', 'tags', 'sprint', 'sort', 'recur', 'fields', 'projectId', 'deps']);
+const ITEM_FIELDS = new Set(['parentId', 'type', 'title', 'body', 'status', 'priority', 'assignees', 'start', 'due', 'estimate', 'tags', 'sprint', 'sort', 'recur', 'fields', 'projectId', 'deps', 'completed']);
 const loginTries = new Map<string, number[]>();
 class Denied extends Error {}
 
@@ -102,7 +104,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateApprovals(tasks);
   migrateInvites(tasks.db);
   migrateGoogleLinks(tasks.db);
+  migrateEvents(tasks);
   migrateOAuth(accounts.db);
+  startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
   if (info.main) tasks.seedIfEmpty();
   migrate(tasks.db); // marks the first person as admin once people exist
   // Every workspace gets an All projects rollup at the top, once. Deleting it is respected.
@@ -239,6 +243,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     if (req.headers.authorization && !bearer) return send(res, 401, {error: 'Invalid or revoked token'});
     const actor = bearer ?? (ws.requireLogin ? (account ? memberIn(tasks, emails) : null) : ((req.headers['x-person'] as string) || null));
     const [a, b, c] = parts;
+    // Google Calendar push notifications: no session, no JSON. The channel id, resource id and secret token must match.
+    if (a === 'google' && b === 'push' && m === 'POST') { req.resume(); const ok = onPush(tasks, req.headers); return send(res, ok ? 200 : 404, {ok}); }
     try {
       // Cross-site protection: writes must be JSON from this app's own origin. Browsers cannot send
       // application/json cross-origin without a preflight, and the dev server answers no preflights.
@@ -384,7 +390,7 @@ If you did not ask for it, ignore this email.`)
           const mode = q('mode') === 'connect' ? 'connect' : 'link';
           // A browser link cannot send x-person, so in open mode the app passes ?as=.
           const who = actor ?? (!ws.requireLogin ? q('as') ?? null : null);
-          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' => w === 'calendar' || w === 'gmail'));
+          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' | 'calendar-full' => w === 'calendar' || w === 'gmail' || w === 'calendar-full'));
         }
         if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url);
       }
@@ -473,6 +479,83 @@ If you did not ask for it, ignore this email.`)
         if (b === 'events' && m === 'GET') return send(res, 200, await events(tasks.db, actor, q('from') ?? '', q('to') ?? ''));
         if (b === 'events' && m === 'POST') return send(res, 201, await addEvent(tasks.db, actor, String(body.link ?? ''), String(body.calendar ?? 'primary'), {title: String(body.title ?? ''), date: String(body.date ?? ''), description: body.description}));
         if (b === 'gmail' && m === 'GET') return send(res, 200, await gmailSearch(tasks.db, actor, q('link') ?? '', q('q') ?? 'in:inbox', num(q('max'), 10, 25)));
+      }
+      // ---- Meetings and calendar events (Google Calendar sync in server/gcal.ts). /api/events is the live update stream. ----
+      if (a === 'meetings') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        const visible = (e: CalEvent) => canSeeEvent(e, actor, canSee);
+        const withGoogle = async (e: CalEvent | {ok: boolean}) => {
+          const google = await flushGoogle(tasks);
+          const fresh = 'id' in e ? (() => { try { return getEvent(tasks, (e as CalEvent).id); } catch { return e; } })() : e;
+          return {...fresh, google};
+        };
+        if (!b && m === 'GET') {
+          const pid = q('project');
+          const rollup = pid ? !!tasks.project(pid).settings.rollup : false;
+          if (pid && !rollup) need(pid, 'view');
+          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee));
+        }
+        if (!b && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          if (body.itemId) need(tasks.item(body.itemId).projectId, 'view');
+          return send(res, 201, await withGoogle(createEvent(tasks, body, actor)));
+        }
+        if (b === 'free' && m === 'POST') {
+          const people = tasks.listPeople();
+          const ids: string[] = [], emails: string[] = [];
+          for (const a0 of (Array.isArray(body.attendees) ? body.attendees : []).slice(0, 50)) {
+            const p = people.find(x => x.id === a0 || x.name.toLowerCase() === String(a0).toLowerCase() || x.email?.toLowerCase() === String(a0).toLowerCase());
+            if (p) ids.push(p.id); else if (/@/.test(String(a0))) emails.push(String(a0).toLowerCase());
+          }
+          if (!ids.includes(actor)) ids.unshift(actor);
+          const from = String(body.from ?? tasks.today()), to = String(body.to ?? from);
+          const s0 = calendarSettings(tasks, actor);
+          const busy = await allBusy(tasks, ids, emails, actor, from, to);
+          return send(res, 200, {slots: freeSlots(busy, {from, to, durationMin: Number(body.duration ?? 30), tz: s0.tz, workStart: s0.workStart, workEnd: s0.workEnd, max: num(String(body.max ?? ''), 5, 20)}), tz: s0.tz});
+        }
+        if (b === 'timeblock' && m === 'POST') {
+          need(tasks.item(String(body.itemId ?? '')).projectId, 'edit');
+          const r = timeblockItem(tasks, String(body.itemId), String(body.start ?? ''), String(body.end ?? ''), actor);
+          return send(res, 201, {...r, event: await withGoogle(r.event)});
+        }
+        if (b === 'hours' && m === 'GET') return send(res, 200, Object.fromEntries([...busyHours(tasks, q('from') ?? '', q('to') ?? '', {timeblocks: q('timeblocks') === '1'})].map(([k, v]) => [k, Object.fromEntries(v)])));
+        if (b) {
+          const e = getEvent(tasks, b);
+          if (!visible(e) && !isAdmin(actor)) throw new Denied('You cannot see this event');
+          if (m === 'GET') return send(res, 200, e);
+          if (m === 'PATCH') {
+            if (body.projectId) need(body.projectId, 'edit');
+            const {scope, occurrence, ...patch} = body;
+            return send(res, 200, await withGoogle(updateEvent(tasks, b, patch, actor, {scope: scope === 'one' ? 'one' : 'all', occurrence})));
+          }
+          if (m === 'DELETE') return send(res, 200, await withGoogle(deleteEvent(tasks, b, actor, {scope: q('scope') === 'one' ? 'one' : 'all', occurrence: q('occurrence')})));
+        }
+      }
+      if (a === 'calendar') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (b === 'settings' && m === 'GET') {
+          const st = tasks.db.prepare('select calendar_id, last_sync, error, channel_expires from gcal_sync where link_id = ?').all(calendarSettings(tasks, actor).linkId ?? '');
+          return send(res, 200, {...calendarSettings(tasks, actor), sync: st});
+        }
+        if (b === 'settings' && m === 'PUT') {
+          const before = calendarSettings(tasks, actor);
+          const next = saveCalendarSettings(tasks, actor, body);
+          if (next.pushTasks !== before.pushTasks || next.tasksCalendarId !== before.tasksCalendarId || next.calendarId !== before.calendarId || next.doneRule !== before.doneRule)
+            void pushAllItems(tasks, info.id, actor).catch(e => console.error('Due dates to Google failed', e.message));
+          return send(res, 200, next);
+        }
+        if (b === 'sync' && m === 'POST') {
+          const s0 = calendarSettings(tasks, actor);
+          if (!s0.linkId) throw new Invalid('Connect Google Calendar first (My Google accounts on the Team page)');
+          const out = [];
+          for (const cal of s0.syncCalendars) out.push({calendar: cal, ...(await pullCalendar(tasks, actor, s0.linkId, cal))});
+          return send(res, 200, out);
+        }
+        if (b === 'cadence-calendar' && m === 'POST') {
+          const s1 = await createCadenceCalendar(tasks, actor);
+          void pushAllItems(tasks, info.id, actor).catch(e => console.error('Due dates to Google failed', e.message));
+          return send(res, 201, s1);
+        }
       }
       // ---- Workspaces: list, create, rename, recolor, reorder ----
       if (a === 'workspaces') {

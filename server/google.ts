@@ -7,7 +7,7 @@ import {randomBytes} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Db} from './db.ts';
 import {getWorkspace, saveWorkspace} from './auth.ts';
-import {SCOPES, saveLink} from './googlelinks.ts';
+import {SCOPES, saveLink, type Want} from './googlelinks.ts';
 import {publicUrl} from './signin.ts';
 
 const pending = new Map<string, {mode: 'connect' | 'link'; actor: string | null; at: number; want?: string}>();
@@ -24,7 +24,7 @@ const redirectUri = (req: IncomingMessage) => `${publicOrigin(req)}/api/auth/goo
 
 function go(res: ServerResponse, to: string) { res.statusCode = 302; res.setHeader('location', to); res.end(); }
 
-export function googleStart(db: Db, req: IncomingMessage, res: ServerResponse, mode: 'connect' | 'link', actor: string | null, want: ('calendar' | 'gmail')[] = []) {
+export function googleStart(db: Db, req: IncomingMessage, res: ServerResponse, mode: 'connect' | 'link', actor: string | null, want: Want[] = []) {
   const g = getWorkspace(db).google;
   if (!g.clientId || !g.clientSecret) return go(res, '/#/team?error=' + encodeURIComponent('Google is not set up yet. An admin adds the OAuth client on the Team page.'));
   const state = randomBytes(16).toString('hex');
