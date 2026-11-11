@@ -869,7 +869,7 @@ If you did not ask for it, ignore this email.`)
           if (held('createItem', [body, actor])) return send(res, 202, propose(tasks, actor!, 'createItem', [body, actor]));
           return send(res, 201, tasks.createItem(body, actor));
         }
-        if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); return send(res, 201, tasks.quickAdd(body, actor)); }
+        if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); if (held('quickAdd', [body, actor])) return send(res, 202, propose(tasks, actor!, 'quickAdd', [body, actor])); return send(res, 201, tasks.quickAdd(body, actor)); }
         const it = b ? tasks.findItem(b) : null;
         if (it) need(it.projectId, 'view');
         if (it && c === 'comments') {

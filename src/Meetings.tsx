@@ -25,7 +25,7 @@ export function useMeetings(store: Store, from: string, to: string, projectId?: 
   const [error, setError] = useState('');
   useEffect(() => {
     let live = true;
-    api<CalEvent[]>(`/meetings?from=${from}&to=${to}&mine=1${projectId ? `&project=${projectId}` : ''}`)
+    api<CalEvent[]>(`/meetings?from=${addDays(from, -1)}&to=${addDays(to, 1)}&mine=1${projectId ? `&project=${projectId}` : ''}`)
       .then(r => { if (live) { setList(r); setError(''); } }).catch(e => live && setError(String(e instanceof Error ? e.message : e)));
     return () => { live = false; };
   }, [from, to, projectId, store.calTick, store.me]);

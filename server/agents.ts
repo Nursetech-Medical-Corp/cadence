@@ -144,7 +144,7 @@ export function propose(tasks: Tasks, agent: string, op: string, args: unknown[]
   tasks.db.prepare('insert into proposals (id, agent, owner, op, args, summary, reason, item_id, project_id, created) values (?,?,?,?,?,?,?,?,?,?)')
     .run(p.id, agent, owner, op, JSON.stringify(args), p.summary, p.reason, p.itemId, p.projectId, p.created);
   if (owner) tasks.notifyPublic(owner, agent, p.itemId, 'ai', `proposes: ${p.summary}. Approve it on the AI work page.`);
-  tasks.emit({kind: 'refresh'});
+  tasks.emit({kind: 'proposals'});
   return {proposal: p.id, state: 'pending', summary: p.summary, note: `Held for ${nameOf(tasks, owner)} to approve. Check agent_inbox later for the decision.`};
 }
 const toProposal = (r: Record<string, unknown>): Proposal => ({id: r.id as string, agent: r.agent as string, owner: (r.owner as string) ?? null, op: r.op as string, args: JSON.parse(r.args as string),
@@ -201,7 +201,7 @@ export function decideProposal(tasks: Tasks, pid: string, decider: string | null
   const done = (state: Proposal['state'], result: unknown, note = opts.note ?? null) => {
     tasks.db.prepare('update proposals set state = ?, decided_by = ?, decided_at = ?, note = ?, result = ? where id = ?').run(state, decider, now(), note, JSON.stringify(result ?? null), pid);
     tasks.notifyPublic(p.agent, decider, p.itemId, 'ai', `${state === 'approved' ? 'approved' : state === 'rejected' ? 'rejected' : 'could not apply'}: ${p.summary}${note ? ` (${note})` : ''}`);
-    tasks.emit({kind: 'refresh'});
+    tasks.emit({kind: 'proposals'});
     return {...getProposal(tasks, pid)};
   };
   if (!approve) return done('rejected', null);
