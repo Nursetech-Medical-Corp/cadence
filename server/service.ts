@@ -565,6 +565,32 @@ export class Tasks {
     this.emit({kind: 'time', itemId: input.itemId});
     return e;
   }
+  /** One person's week: minutes per task per day (Monday first), from finished time entries. */
+  timesheet(person: string, weekStart: string) {
+    this.person(person);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Invalid('week must be a date like 2026-11-09');
+    const days = Array.from({length: 7}, (_, n) => addUnit(weekStart, n, 'day'));
+    const rows = new Map<string, number[]>();
+    for (const e of this.listTime({person})) {
+      if (!e.minutes) continue;
+      const n = days.indexOf(iso(new Date(e.start)));
+      if (n < 0) continue;
+      const m = rows.get(e.itemId) ?? [0, 0, 0, 0, 0, 0, 0];
+      m[n] += e.minutes; rows.set(e.itemId, m);
+    }
+    return {weekStart, days, rows: [...rows.entries()].map(([itemId, minutes]) => ({itemId, minutes}))};
+  }
+  /** Sets a day's logged minutes for one task: replaces that day's finished entries with one entry (0 clears it). */
+  setDayMinutes(person: string, itemId: string, date: string, minutes: number) {
+    this.item(itemId); this.person(person);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Invalid('date must look like 2026-11-30');
+    if (!(Number.isFinite(minutes) && minutes >= 0 && minutes <= 1440)) throw new Invalid('A day has 0 to 24 hours');
+    const old = this.listTime({person, itemId}).filter(e => e.end && iso(new Date(e.start)) === date).map(e => e.id);
+    for (const x of old) this.db.prepare('delete from time_entries where id = ?').run(x);
+    if (minutes > 0) this.logTime({itemId, person, minutes: Math.round(minutes), date});
+    else this.emit({kind: 'time', itemId});
+    return this.timesheet(person, addUnit(date, -((new Date(date + 'T00:00:00').getDay() + 6) % 7), 'day'));
+  }
   deleteTime(entryId: string) {
     const r = this.db.prepare('select item_id from time_entries where id = ?').get(entryId) as Row | undefined;
     if (!r) throw new NotFound('Time entry not found');

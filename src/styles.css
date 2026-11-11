@@ -1042,3 +1042,12 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .tab-drag.dragging { opacity: .4; }
 .tab-drag.drop { box-shadow: inset 2px 0 0 var(--accent); }
 .sprint-tabs { margin: 10px 0 2px; }
+
+/* Timesheet */
+.timesheet th, .timesheet td { text-align: center; }
+.timesheet td:first-child, .timesheet th:first-child { text-align: left; min-width: 280px; }
+.timesheet .today { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ts-cell { width: 54px; border: 1px solid transparent; background: none; text-align: center; font: inherit; border-radius: 4px; padding: 2px; }
+.ts-cell:hover, .ts-cell:focus { border-color: var(--line); background: var(--card); outline: none; }
+.ts-total { font-weight: 600; }
+.ts-sum td { font-weight: 600; border-top: 1px solid var(--line); }

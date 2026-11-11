@@ -585,3 +585,17 @@ test('date shifting: skip weekends, and overlap-only mode for steps that follow'
   t.updateItem(a.id, {due: '2026-11-11'});
   assert.equal(t.item(b.id).start, '2026-11-12', 'now overlapping, B starts the day after A');
 });
+
+test('timesheet: minutes per task per day; setting a day replaces its entries; zero clears', () => {
+  const {t, dave, p} = setup();
+  const a = t.createItem({projectId: p.id, title: 'A'});
+  t.logTime({itemId: a.id, person: dave.id, minutes: 30, date: '2026-11-10'});
+  t.logTime({itemId: a.id, person: dave.id, minutes: 15, date: '2026-11-10'});
+  const week = t.timesheet(dave.id, '2026-11-09');
+  assert.deepEqual(week.rows, [{itemId: a.id, minutes: [0, 45, 0, 0, 0, 0, 0]}]);
+  t.setDayMinutes(dave.id, a.id, '2026-11-10', 120);
+  assert.deepEqual(t.timesheet(dave.id, '2026-11-09').rows[0].minutes, [0, 120, 0, 0, 0, 0, 0]);
+  t.setDayMinutes(dave.id, a.id, '2026-11-10', 0);
+  assert.equal(t.timesheet(dave.id, '2026-11-09').rows.length, 0);
+  assert.throws(() => t.setDayMinutes(dave.id, a.id, '2026-11-10', 2000), /0 to 24 hours/);
+});

@@ -490,6 +490,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (it && !c && m === 'DELETE') { need(it.projectId, 'delete'); return send(res, 200, tasks.deleteItem(it.id, actor)); }
       }
 
+      if (a === 'timesheet') {
+        // Your own week; admins can see and fill anyone's.
+        const person = String((m === 'GET' ? q('person') : body.person) ?? actor ?? '');
+        if (ws.requireLogin && person !== actor) needAdmin();
+        if (m === 'GET') { const t = tasks.timesheet(person, q('week') ?? ''); return send(res, 200, {...t, rows: t.rows.filter(r => { try { return canSee(tasks.item(r.itemId).projectId); } catch { return false; } })}); }
+        if (m === 'PUT') { need(tasks.findItem(String(body.itemId ?? '')).projectId, 'edit'); return send(res, 200, tasks.setDayMinutes(person, String(body.itemId), String(body.date ?? ''), Number(body.minutes))); }
+      }
       if (a === 'time') {
         // Signed in, you can only log or time your own work.
         const person = ws.requireLogin ? actor : (actor ?? q('person') ?? body.person);

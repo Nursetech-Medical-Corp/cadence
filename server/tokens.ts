@@ -50,6 +50,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     addComment: (id) => need(projOfItem(id), 'comment'),
     resolveComment: (cid) => { const r = tasks.db.prepare('select item_id from comments where id = ?').get(cid) as {item_id: string} | undefined; if (r) need(projOfItem(r.item_id), 'comment'); },
     logTime: (i) => need(projOfItem(i.itemId), 'edit'),
+    setDayMinutes: (_p, itemId) => need(projOfItem(itemId), 'edit'),
     applyToChildren: (id) => need(projOfItem(id), 'edit'),
     createSprint: (i) => need(i.projectId, 'sprints'),
     updateSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),

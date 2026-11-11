@@ -1,6 +1,6 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff} from 'lucide-react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -42,9 +42,10 @@ const PlanPage = lazy(() => import('./PlanPage.tsx').then(m => ({default: m.Plan
 const ApprovalsPage = lazy(() => import('./Approvals.tsx').then(m => ({default: m.ApprovalsPage})));
 const RoutinesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.RoutinesPage})));
 const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.TemplatesPage})));
+const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'invite'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -56,6 +57,7 @@ function readRoute(): Route {
   if (page === 'insights') return {page: 'insights'};
   if (page === 'ai') return {page: 'ai'};
   if (page === 'templates' && id) return {page: 'template', id};
+  if (page === 'timesheet') return {page: 'timesheet'};
   if (page === 'invite' && id) return {page: 'invite', id};
   if (page === 'today') return {page: 'today'};
   if (page === 'templates' || page === 'routines' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
@@ -225,6 +227,7 @@ export function App() {
         {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
         {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
         {route.page === 'routines' && <div className="content"><RoutinesPage store={store} open={open} /></div>}
+        {route.page === 'timesheet' && <div className="content"><TimesheetPage store={store} open={open} /></div>}
         {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}
         {route.page === 'ai' && <div className="content"><AIWorkPage store={store} open={open} /></div>}
         {route.page === 'insights' && <div className="content"><InsightsPage store={store} open={open} /></div>}
@@ -307,6 +310,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
         {wsOpen && <>
           <button className={'nav-btn' + (route.page === 'plan' ? ' active' : '')} onClick={() => go({page: 'plan'})}><Sparkles size={15} /> Plan and forecast</button>
           <button className={'nav-btn' + (route.page === 'routines' ? ' active' : '')} onClick={() => go({page: 'routines'})}><Repeat size={15} /> Routines</button>
+          <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
           <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>
           <button className={'nav-btn' + (route.page === 'history' ? ' active' : '')} onClick={() => go({page: 'history'})}><History size={15} /> History</button>
