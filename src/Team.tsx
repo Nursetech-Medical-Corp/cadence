@@ -2,13 +2,60 @@
 import {useEffect, useState} from 'react';
 import {Check as CheckIcon, Copy, KeyRound, LogIn, Plus, Shield, Trash2} from 'lucide-react';
 import type {Project} from './types.ts';
-import {api, type Store, wsId} from './store.ts';
+import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
 type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'};
-export type Me = {required: boolean; person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; caps: Record<string, string[]>};
+export type Me = {required: boolean; forced?: boolean; account?: string | null; setup?: boolean; memberOf?: {id: string; name: string}[];
+  person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; caps: Record<string, string[]>};
+
+/** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
+export function SetupServer() {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [err, setErr] = useState('');
+  const go = async () => {
+    if (pw !== pw2) return setErr('The two passwords do not match');
+    try { await api('/auth/setup', {method: 'POST', body: {name, email, password: pw}}); location.hash = '/mywork'; location.reload(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  };
+  return (
+    <div className="signin">
+      <div className="signin-card">
+        <div className="brand" style={{fontSize: '1.2em'}}><span className="brand-mark" /> Cadence</div>
+        <h1 style={{margin: '8px 0 4px'}}>Set up this server</h1>
+        <div className="muted small">Create the owner account. It becomes admin of every workspace here. Invite everyone else from the Team page.</div>
+        <input className="search" style={{width: '100%'}} placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} />
+        <input className="search" style={{width: '100%'}} placeholder="Email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} />
+        <input className="search" style={{width: '100%'}} type="password" placeholder="Password (8 or more characters)" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
+        <input className="search" style={{width: '100%'}} type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+        {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
+        <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!email.trim() || pw.length < 8} onClick={go}><LogIn size={14} /> Create account</button>
+      </div>
+    </div>
+  );
+}
+
+/** Signed in, but not a member of this workspace: go to one you belong to, or sign out. */
+export function NoAccess({me}: {me: Me}) {
+  const list = me.memberOf ?? [];
+  useEffect(() => { if (list.length === 1) switchWorkspace(list[0].id); }, [list]);
+  return (
+    <div className="signin">
+      <div className="signin-card">
+        <div className="brand" style={{fontSize: '1.2em'}}><span className="brand-mark" /> Cadence</div>
+        <h1 style={{margin: '8px 0 4px'}}>{list.length ? 'Pick a workspace' : 'No workspace yet'}</h1>
+        <div className="muted small">Signed in as <b>{me.account}</b>. {list.length ? 'You are not a member of this one.' : 'Ask an admin to invite this email.'}</div>
+        {list.map(w => <button key={w.id} className="btn" style={{width: '100%', justifyContent: 'center'}} onClick={() => switchWorkspace(w.id)}>{w.name}</button>)}
+        <button className="btn ghost" style={{width: '100%', justifyContent: 'center'}} onClick={async () => { await api('/auth/logout', {method: 'POST'}); location.reload(); }}>Sign out</button>
+      </div>
+    </div>
+  );
+}
 
 export function SignIn({googleReady}: {googleReady: boolean}) {
   const [email, setEmail] = useState('');
@@ -40,7 +87,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const [people, setPeople] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [caps, setCaps] = useState<{id: string; label: string}[]>([]);
-  const [ws, setWs] = useState<{requireLogin: boolean; google: {clientId: string; hasSecret: boolean; senderEmail: string | null; connected: boolean}} | null>(null);
+  const [ws, setWs] = useState<{requireLogin: boolean; forced?: boolean; google: {clientId: string; hasSecret: boolean; senderEmail: string | null; connected: boolean}} | null>(null);
   const [msg, setMsg] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('error') ?? (location.hash.includes('connected=1') ? 'Gmail sender connected.' : location.hash.includes('linked=') ? `Google account connected: ${decodeURIComponent(location.hash.split('linked=')[1] ?? '')}` : ''));
   const [newName, setNewName] = useState('');
   const [secret, setSecret] = useState('');
@@ -105,7 +152,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       {ws && <section className="set-card">
         <div className="set-card-head"><h3><KeyRound size={15} /> Sign in</h3><span className="muted small">Off: anyone on this computer picks who they are (fine while it runs only on your machine). On: everyone signs in and permissions are enforced.</span></div>
         <label className="set-item" style={{gap: 8}}>
-          <input type="checkbox" checked={ws.requireLogin} disabled={!isAdmin} onChange={async e => {
+          <input type="checkbox" checked={ws.requireLogin} disabled={!isAdmin || ws.forced} title={ws.forced ? 'This server requires sign-in for every workspace' : undefined} onChange={async e => {
             try { await api('/workspace', {method: 'PUT', body: {requireLogin: e.target.checked}}); location.reload(); } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
           }} />
           <span className="grow">Require sign in</span>
@@ -262,14 +309,14 @@ function InvitesCard({roles, signInOn, senderReady}: {roles: Role[]; signInOn: b
 
 /** The page an invite link opens: shows where you are joining, then name and password (or Google). */
 export function AcceptInvite({secret}: {secret: string}) {
-  const [info, setInfo] = useState<{email: string; name: string | null; role: string; workspace: string; invitedBy: string | null; googleReady: boolean} | null>(null);
+  const [info, setInfo] = useState<{email: string; name: string | null; role: string; workspace: string; invitedBy: string | null; hasAccount: boolean; googleReady: boolean} | null>(null);
   const [err, setErr] = useState('');
   const [name, setName] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   useEffect(() => { api<NonNullable<typeof info>>(`/invites/${secret}`).then(i => { setInfo(i); setName(i.name ?? ''); }).catch(e => setErr(e instanceof Error ? e.message : String(e))); }, [secret]);
   const join = async () => {
-    if (pw !== pw2) return setErr('The two passwords do not match');
+    if (!info?.hasAccount && pw !== pw2) return setErr('The two passwords do not match');
     try { await api(`/invites/${secret}/accept`, {method: 'POST', body: {name, password: pw}}); location.hash = '/mywork'; location.reload(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
@@ -281,8 +328,13 @@ export function AcceptInvite({secret}: {secret: string}) {
           <h1 style={{margin: '8px 0 4px'}}>Join {info.workspace}</h1>
           <div className="muted small">{info.invitedBy ? `${info.invitedBy} invited ` : 'You were invited as '}<b>{info.email}</b> as {info.role}.</div>
           <input className="search" style={{width: '100%'}} placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} />
-          <input className="search" style={{width: '100%'}} type="password" placeholder="Choose a password (8 or more characters)" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
-          <input className="search" style={{width: '100%'}} type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && join()} />
+          {info.hasAccount ? <>
+            <div className="muted small">You already have a Cadence account on this server. Enter its password to join.</div>
+            <input className="search" style={{width: '100%'}} type="password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && join()} />
+          </> : <>
+            <input className="search" style={{width: '100%'}} type="password" placeholder="Choose a password (8 or more characters)" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
+            <input className="search" style={{width: '100%'}} type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && join()} />
+          </>}
           {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
           <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!name.trim() || pw.length < 8} onClick={join}><LogIn size={14} /> Join workspace</button>
         </> : <>

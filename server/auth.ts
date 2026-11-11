@@ -1,8 +1,8 @@
 // Sign-in, sessions, roles and permissions.
 //
-// Open mode (the default on a fresh install): no sign-in, anyone on this computer picks who they are.
-// Once an admin sets a password and turns on "Require sign in", every API call needs a session cookie,
-// the acting person comes from the session, and each action is checked against that person's role
+// Open mode (the default for pnpm dev): no sign-in, anyone on this computer picks who they are.
+// Once sign-in is required (pnpm start, CADENCE_REQUIRE_LOGIN=1, or "Require sign in" on the Team page), every
+// API call needs a session (accounts.ts), the acting person is the one with the account's email, and each action is checked against that person's role
 // in the item's project.
 //
 // Roles are sets of capabilities. A person has a default role; each project can override it per person,
@@ -43,10 +43,13 @@ export function migrate(db: Db) {
   if (!(db.prepare('select 1 from people where admin = 1').get())) db.exec('update people set admin = 1 where rowid = (select min(rowid) from people)');
 }
 
+/** CADENCE_REQUIRE_LOGIN=1 (the default for pnpm start) turns sign-in on for every workspace. */
+export const loginForced = () => process.env.CADENCE_REQUIRE_LOGIN === '1';
+
 export function getWorkspace(db: Db): Workspace {
   const r = db.prepare("select value from workspace where key = 'settings'").get() as {value: string} | undefined;
   const w = r ? JSON.parse(r.value) : {};
-  return {requireLogin: !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google}};
+  return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google}};
 }
 export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
   const w = {...getWorkspace(db), ...patch};
@@ -68,25 +71,6 @@ export function checkPassword(pw: string, stored: string | null) {
   const a = Buffer.from(hash, 'hex'), b = scryptSync(pw, salt, 32);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-
-const DAYS = 30;
-export function createSession(db: Db, person: string) {
-  const token = randomBytes(32).toString('base64url');
-  const now = new Date();
-  db.prepare('insert into sessions (token, person, created, expires) values (?,?,?,?)').run(token, person, now.toISOString(), new Date(now.getTime() + DAYS * 86400_000).toISOString());
-  return token;
-}
-export function sessionPerson(db: Db, token: string | undefined): string | null {
-  if (!token) return null;
-  const r = db.prepare('select s.person, s.expires, p.active from sessions s join people p on p.id = s.person where s.token = ?').get(token) as {person: string; expires: string; active: number} | undefined;
-  if (!r || r.expires < new Date().toISOString() || !r.active) return null;
-  return r.person;
-}
-export function endSession(db: Db, token: string | undefined) { if (token) db.prepare('delete from sessions where token = ?').run(token); }
-/** Each workspace has its own session cookie, so being signed in to one does not sign you in to another. */
-export const cookieName = (ws = 'main') => ws === 'main' ? 'tasks_session' : `tasks_session_${ws.replace(/[^a-z0-9]/gi, '')}`;
-export function cookieToken(header: string | undefined, ws = 'main') { return new RegExp(`(?:^|;\\s*)${cookieName(ws)}=([^;]+)`).exec(header ?? '')?.[1]; }
-export const sessionCookie = (token: string, ws = 'main') => `${cookieName(ws)}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${DAYS * 86400}`;
 
 /** Capabilities a person has in a project. Workspace admins always have everything. */
 export function capsFor(db: Db, personId: string | null, projectAccess: Access | undefined, strict = false): Set<Cap> {

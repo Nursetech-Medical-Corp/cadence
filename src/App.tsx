@@ -16,7 +16,7 @@ import {QuickCapture, ShortcutsDialog, moveFocus, targetIds, useHotkeys, type Ac
 import {ItemPanel} from './ItemPanel.tsx';
 import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
-import {AcceptInvite, SignIn, type Me} from './Team.tsx';
+import {AcceptInvite, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
 import {ContextMenus} from './ContextMenu.tsx';
@@ -199,7 +199,7 @@ export function App() {
   const view = route.page === 'project' ? projectViews.find(v => v.id === route.view) ?? (route.view === 'settings' ? undefined : projectViews[0]) : undefined;
 
   if (route.page === 'invite') return <AcceptInvite secret={route.id} />;
-  if (auth?.required && !auth.person) return <SignIn googleReady={auth.googleReady} />;
+  if (auth?.required && !auth.person) return auth.setup ? <SetupServer /> : auth.account ? <NoAccess me={auth} /> : <SignIn googleReady={auth.googleReady} />;
   if (!store.ready) return <div className="loading">{store.error ?? 'Loading...'}</div>;
 
   return (

@@ -6,7 +6,7 @@
 import {randomBytes} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Db} from './db.ts';
-import {createSession, getWorkspace, saveWorkspace, sessionCookie} from './auth.ts';
+import {getWorkspace, saveWorkspace} from './auth.ts';
 import {SCOPES, saveLink} from './googlelinks.ts';
 
 const pending = new Map<string, {mode: 'login' | 'connect' | 'link'; actor: string | null; at: number; want?: string}>();
@@ -36,7 +36,7 @@ async function token(params: Record<string, string>) {
   return j;
 }
 
-export async function googleCallback(db: Db, req: IncomingMessage, res: ServerResponse, url: URL, actor: string | null, ws = 'main') {
+export async function googleCallback(db: Db, req: IncomingMessage, res: ServerResponse, url: URL, actor: string | null, signIn: (email: string) => string) {
   const state = pending.get(url.searchParams.get('state') ?? '');
   pending.delete(url.searchParams.get('state') ?? '');
   const fail = (msg: string) => go(res, (state?.mode === 'connect' ? '/#/team?error=' : '/#/signin?error=') + encodeURIComponent(msg));
@@ -61,7 +61,7 @@ export async function googleCallback(db: Db, req: IncomingMessage, res: ServerRe
     }
     const p = db.prepare('select id, active from people where lower(email) = lower(?)').get(info.email) as {id: string; active: number} | undefined;
     if (!p || !p.active) return fail(`${info.email} is not a member of this workspace. Ask an admin to add that email on the Team page.`);
-    res.setHeader('set-cookie', sessionCookie(createSession(db, p.id), ws));
+    res.setHeader('set-cookie', signIn(info.email.toLowerCase()));
     return go(res, '/');
   } catch (e) {
     return fail(e instanceof Error ? e.message : 'Google sign-in failed');

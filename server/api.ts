@@ -1,5 +1,6 @@
 // REST API under /api, mounted as Vite middleware in dev.
-// Who is acting: in open mode the `x-person` header; once sign-in is required, the session cookie.
+// Who is acting: in open mode the `x-person` header; once sign-in is required, the person whose email matches
+// the signed-in account (accounts.ts).
 // Every write is checked against the actor's role in the item's project (see auth.ts).
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {readFileSync} from 'node:fs';
@@ -7,7 +8,9 @@ import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
 import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorFiles, retention, saveSettings, snapshot} from './backup.ts';
-import {CAPS, CAP_LABELS, capsFor, checkPassword, cookieName, cookieToken, createSession, endSession, getWorkspace, hashPassword, migrate, saveWorkspace, sessionCookie, sessionPerson, type Access, type Cap} from './auth.ts';
+import {CAPS, CAP_LABELS, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, type Access, type Cap} from './auth.ts';
+import {ACCOUNT_COOKIE, Accounts, accountCookie} from './accounts.ts';
+import {DatabaseSync} from 'node:sqlite';
 import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
@@ -17,13 +20,12 @@ import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
 import {migrateApprovals} from './approvals.ts';
 import {archiveWorkspace, createWorkspace, listWorkspaces, publicInfo, reorderWorkspaces, updateWorkspace, workspaceDir, type WorkspaceInfo} from './workspaces.ts';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
 type Next = (err?: unknown) => void;
 const ITEM_FIELDS = new Set(['parentId', 'type', 'title', 'body', 'status', 'priority', 'assignees', 'start', 'due', 'estimate', 'tags', 'sprint', 'sort', 'recur', 'fields', 'projectId', 'deps']);
-const DUMMY_HASH = hashPassword('not-a-real-password-just-timing');
 const loginTries = new Map<string, number[]>();
 class Denied extends Error {}
 
@@ -48,8 +50,16 @@ const cookieValue = (cookie: string | undefined, name: string) => cookie?.split(
  * from the x-workspace header, then ?ws=, then the tasks_ws cookie (set by the app's switcher), else "main".
  * Passing a Tasks instance (tests) serves just that one.
  */
+/** What every workspace handler shares: the account store and a way to reach all workspaces. */
+type Shared = {accounts: Accounts; all: () => {id: string; name: string; tasks: Tasks}[]};
+
 export function apiMiddleware(single?: Tasks): Handler {
-  if (single) return workspaceApi(single, {id: 'main', dir: single.dataDir, main: true}, () => single);
+  if (single) {
+    const shared: Shared = {accounts: new Accounts(new DatabaseSync(':memory:')), all: () => [{id: 'main', name: 'Cadence', tasks: single}]};
+    return workspaceApi(single, {id: 'main', dir: single.dataDir, main: true}, () => single, () => {}, shared);
+  }
+  const main = listWorkspaces().find(w => w.id === 'main')!;
+  const shared: Shared = {accounts: new Accounts(new DatabaseSync(join(dirname(main.db), 'accounts.db'))), all: () => listWorkspaces().map(w => ({id: w.id, name: w.name, tasks: open(w).tasks}))};
   const handlers = new Map<string, {h: Handler; tasks: Tasks}>();
   const close = (id: string) => { const x = handlers.get(id); if (x) { x.tasks.db.close(); handlers.delete(id); } };
   const open = (w: WorkspaceInfo): {h: Handler; tasks: Tasks} => {
@@ -57,7 +67,7 @@ export function apiMiddleware(single?: Tasks): Handler {
     if (!x) {
       const tasks = new Tasks(openDb(w.db));
       tasks.dataDir = workspaceDir(w);
-      x = {tasks, h: workspaceApi(tasks, {id: w.id, dir: workspaceDir(w), main: w.id === 'main'}, (ww): Tasks => open(ww).tasks, close)};
+      x = {tasks, h: workspaceApi(tasks, {id: w.id, dir: workspaceDir(w), main: w.id === 'main'}, (ww): Tasks => open(ww).tasks, close, shared)};
       handlers.set(w.id, x);
     }
     return x;
@@ -74,7 +84,7 @@ export function apiMiddleware(single?: Tasks): Handler {
   };
 }
 
-function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolean}, openTasks: (w: WorkspaceInfo) => Tasks, closeWorkspace: (id: string) => void = () => {}): Handler {
+function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolean}, openTasks: (w: WorkspaceInfo) => Tasks, closeWorkspace: (id: string) => void, {accounts, all}: Shared): Handler {
   // The main workspace keeps backups in data/backups (or TASKS_BACKUPS); others in their own folder.
   const bdir = info.main ? undefined : join(info.dir, 'backups');
   migrate(tasks.db);
@@ -127,6 +137,11 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const isAdmin = (pid: string | null) => !!pid && !!(tasks.db.prepare('select admin from people where id = ?').get(pid) as {admin: number} | undefined)?.admin;
   const access = (p: Project) => (p.settings as {access?: Access}).access;
   const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict);
+  const memberId = (t: Tasks, email: string) => (t.db.prepare('select id from people where lower(email) = ? and active = 1').get(email) as {id: string} | undefined)?.id ?? null;
+  /** Workspaces where this account is an active member. */
+  const memberships = (email: string) => all().filter(w => memberId(w.tasks, email)).map(({id, name}) => ({id, name}));
+  /** People rows keep a copy of the account's password hash, for re-checking it when signing approvals. */
+  const syncHash = (email: string, hash: string | null) => { for (const w of all()) w.tasks.db.prepare('update people set password = ? where lower(email) = ?').run(hash, email); };
   const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, password is not null as has_password from people order by name').all()
     .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human'}));
 
@@ -139,11 +154,14 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     const m = req.method ?? 'GET';
     const q = (k: string) => url.searchParams.get(k) ?? undefined;
     const ws = getWorkspace(tasks.db);
-    const token = cookieToken(req.headers.cookie, info.id);
+    const token = cookieValue(req.headers.cookie, ACCOUNT_COOKIE);
+    const account = ws.requireLogin ? accounts.sessionEmail(token) : null;
+    const secure = req.headers['x-forwarded-proto'] === 'https' || 'encrypted' in req.socket;
+    const signIn = (email: string) => accountCookie(accounts.startSession(email), secure);
     // A bearer token (AI agents, other systems) wins; then the session; then, in open mode, the x-person header.
     const bearer = tokenPerson(tasks.db, req.headers.authorization);
     if (req.headers.authorization && !bearer) return send(res, 401, {error: 'Invalid or revoked token'});
-    const actor = bearer ?? (ws.requireLogin ? sessionPerson(tasks.db, token) : ((req.headers['x-person'] as string) || null));
+    const actor = bearer ?? (ws.requireLogin ? (account ? memberId(tasks, account) : null) : ((req.headers['x-person'] as string) || null));
     const [a, b, c] = parts;
     try {
       // Cross-site protection: writes must be JSON from this app's own origin. Browsers cannot send
@@ -164,30 +182,51 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'auth') {
         if (b === 'me' && m === 'GET') {
           const me = actor ? tasks.listPeople().find(p => p.id === actor) ?? null : null;
-          return send(res, 200, {required: ws.requireLogin, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
+          return send(res, 200, {required: ws.requireLogin, forced: loginForced(), account, setup: ws.requireLogin && !accounts.count(),
+            memberOf: account && !me ? memberships(account) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
             caps: Object.fromEntries(tasks.listProjects().map(p => [p.id, [...caps(actor, p.id)]]))});
+        }
+        // First run of a hosted server: the first account becomes admin of every workspace.
+        if (b === 'setup' && m === 'POST') {
+          if (!ws.requireLogin || accounts.count()) throw new Invalid('This server is already set up. Sign in instead.');
+          const email = String(body.email ?? '').trim().toLowerCase(), name = String(body.name ?? '').trim().slice(0, 80);
+          if (!/^[^\s@<>",;:]+@[^\s@<>",;:]+\.[a-z]{2,}$/i.test(email)) throw new Invalid('Enter a valid email address');
+          let hash: string;
+          try { hash = hashPassword(String(body.password ?? '')); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Choose a stronger password'); }
+          for (const w of all()) {
+            // Claim the person with this email, else the first admin without an email, else a new admin.
+            const t = w.tasks;
+            const id = (t.db.prepare('select id from people where lower(email) = ?').get(email) as {id: string} | undefined)?.id
+              ?? (t.db.prepare("select id from people where admin = 1 and (email is null or email = '') and kind != 'ai' order by rowid").get() as {id: string} | undefined)?.id
+              ?? t.createPerson({name: name || email.split('@')[0], email}).id;
+            t.db.prepare('update people set email = ?, admin = 1, active = 1 where id = ?').run(email, id);
+            if (name) t.db.prepare('update people set name = ? where id = ?').run(name, id);
+            t.emit({kind: 'people'});
+          }
+          accounts.setHash(email, hash);
+          syncHash(email, hash);
+          res.setHeader('set-cookie', signIn(email));
+          return send(res, 200, {ok: true});
         }
         if (b === 'login' && m === 'POST') {
           const email = String(body.email ?? '').trim().toLowerCase();
           const key = `${email}|${req.socket.remoteAddress}`;
           const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
           if (tries.length >= 8) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
-          const r = tasks.db.prepare('select id, password, active from people where lower(email) = ?').get(email) as {id: string; password: string | null; active: number} | undefined;
-          // Always run the hash so response time does not reveal whether the email exists.
-          const ok = checkPassword(String(body.password ?? ''), r?.password ?? DUMMY_HASH) && !!r && !!r.active;
-          if (!ok) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
+          const legacy = () => all().flatMap(w => w.tasks.db.prepare('select password from people where lower(email) = ? and active = 1 and password is not null').all(email).map(r => r.password as string));
+          if (!accounts.verify(email, String(body.password ?? ''), legacy)) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
           loginTries.delete(key);
-          res.setHeader('set-cookie', sessionCookie(createSession(tasks.db, r.id), info.id));
-          return send(res, 200, {ok: true});
+          res.setHeader('set-cookie', signIn(email));
+          return send(res, 200, {ok: true, memberOf: memberships(email)});
         }
-        if (b === 'logout' && m === 'POST') { endSession(tasks.db, token); res.setHeader('set-cookie', `${cookieName(info.id)}=; Path=/; Max-Age=0`); return send(res, 200, {ok: true}); }
+        if (b === 'logout' && m === 'POST') { accounts.endSession(token); res.setHeader('set-cookie', accountCookie('', secure)); return send(res, 200, {ok: true}); }
         if (b === 'google' && c === 'start') {
           const mode = q('mode') === 'connect' ? 'connect' : q('mode') === 'link' ? 'link' : 'login';
           // A browser link cannot send x-person, so in open mode the app passes ?as=.
           const who = actor ?? (!ws.requireLogin ? q('as') ?? null : null);
           return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' => w === 'calendar' || w === 'gmail'));
         }
-        if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url, actor, info.id);
+        if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url, actor, email => { if (!accounts.has(email)) accounts.setHash(email, null); return signIn(email); });
       }
       // ---- Invites: the link works while signed out; accepting signs you in ----
       if (a === 'invites' && b && b.length > 20) {
@@ -195,19 +234,25 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const inv = findInvite(tasks.db, b);
           const w = listWorkspaces().find(x => x.id === info.id);
           return send(res, 200, {email: inv.email, name: inv.name, role: ws.roles.find(r => r.id === inv.role)?.name ?? inv.role, workspace: w?.name ?? 'Tasks',
-            invitedBy: inv.by ? tasks.listPeople().find(p => p.id === inv.by)?.name ?? null : null, googleReady: !!(ws.google.clientId && ws.google.clientSecret)});
+            invitedBy: inv.by ? tasks.listPeople().find(p => p.id === inv.by)?.name ?? null : null, hasAccount: !!accounts.hash(inv.email), googleReady: !!(ws.google.clientId && ws.google.clientSecret)});
         }
         if (c === 'accept' && m === 'POST') {
           const key = `invite|${req.socket.remoteAddress}`;
           const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
           if (tries.length >= 20) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
           loginTries.set(key, [...tries, Date.now()]);
+          // Someone who already has an account joins with its password; it is not changed.
+          const inv = findInvite(tasks.db, b), existing = accounts.hash(inv.email);
+          if (accounts.has(inv.email) && !(existing ? checkPassword(String(body.password ?? ''), existing) : account === inv.email))
+            throw new Invalid(existing ? 'You already have an account. Enter its password to join.' : 'Sign in with Google first, then open this link again.');
           const pid = acceptInvite(tasks.db, b, body, (name, email) => tasks.createPerson({name, email}).id);
-          res.setHeader('set-cookie', sessionCookie(createSession(tasks.db, pid), info.id));
+          if (!accounts.has(inv.email)) accounts.setHash(inv.email, (tasks.db.prepare('select password from people where id = ?').get(pid) as {password: string}).password);
+          syncHash(inv.email, accounts.hash(inv.email));
+          res.setHeader('set-cookie', signIn(inv.email));
           return send(res, 200, {ok: true, person: pid});
         }
       }
-      if (ws.requireLogin && !actor) return send(res, 401, {error: 'Please sign in', signIn: true});
+      if (ws.requireLogin && !actor) return account ? send(res, 403, {error: 'You are not a member of this workspace', notMember: true}) : send(res, 401, {error: 'Please sign in', signIn: true});
 
       // ---- API tokens for AI agents and integrations ----
       if (a === 'tokens') {
@@ -260,7 +305,11 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
       // ---- Workspaces: list, create, rename, recolor, reorder ----
       if (a === 'workspaces') {
-        if (!b && m === 'GET') return send(res, 200, {current: info.id, list: listWorkspaces().map(publicInfo)});
+        if (!b && m === 'GET') {
+          // Signed in, you see only the workspaces you belong to.
+          const mine = ws.requireLogin && account ? new Set(memberships(account).map(w => w.id)) : null;
+          return send(res, 200, {current: info.id, list: listWorkspaces().filter(w => !mine || mine.has(w.id)).map(publicInfo)});
+        }
         if (!b && m === 'POST') {
           needAdmin();
           const w = createWorkspace(body);
@@ -322,18 +371,26 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           if (body.kind !== undefined) { needAdmin(); tasks.db.prepare('update people set kind = ? where id = ?').run(body.kind === 'ai' ? 'ai' : 'human', b); }
           if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
           if (body.password) {
-            // Changing your own password needs the current one (when you have one); admins can reset others.
-            const cur = (tasks.db.prepare('select password from people where id = ?').get(b) as {password: string | null}).password;
-            if (ws.requireLogin && self && cur && !checkPassword(String(body.currentPassword ?? ''), cur)) throw new Invalid('Your current password is wrong');
-            tasks.db.prepare('update people set password = ? where id = ?').run(hashPassword(String(body.password)), b);
-            tasks.db.prepare('delete from sessions where person = ? and token != ?').run(b, token ?? '');
+            // Passwords belong to accounts, which can be used in other workspaces. An existing account's password
+            // changes only from that account, with its current password (pnpm reset-password is the owner's way out).
+            const email = (tasks.db.prepare('select email from people where id = ?').get(b) as {email: string | null} | undefined)?.email?.toLowerCase();
+            if (!email) throw new Invalid('Add an email first, then set a password');
+            if (accounts.has(email)) {
+              const cur = accounts.hash(email);
+              if (account !== email) throw new Invalid('Only the account owner can change this password. The server owner can reset it with pnpm reset-password.');
+              if (cur && !checkPassword(String(body.currentPassword ?? ''), cur)) throw new Invalid('Your current password is wrong');
+            }
+            let hash: string;
+            try { hash = hashPassword(String(body.password)); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Choose a stronger password'); }
+            accounts.setHash(email, hash, token);
+            syncHash(email, hash);
           }
           tasks.emit({kind: 'people'});
           return send(res, 200, team().find(p => p.id === b));
         }
       }
       if (a === 'workspace') {
-        if (m === 'GET') return send(res, 200, {...ws, google: {clientId: ws.google.clientId, hasSecret: !!ws.google.clientSecret, senderEmail: ws.google.senderEmail ?? null, connected: !!ws.google.refreshToken}});
+        if (m === 'GET') return send(res, 200, {...ws, forced: loginForced(), google: {clientId: ws.google.clientId, hasSecret: !!ws.google.clientSecret, senderEmail: ws.google.senderEmail ?? null, connected: !!ws.google.refreshToken}});
         if (m === 'PUT') {
           needAdmin();
           if (body.requireLogin && !ws.requireLogin) {

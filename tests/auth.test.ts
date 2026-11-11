@@ -122,3 +122,54 @@ test('invites: admin invites, link works once, sets a password and signs in; bad
     assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'new.person@x.test', password: 'a long password'}})).status, 200);
   } finally { server.close(); }
 });
+
+test('accounts: first-run setup, one sign-in, no password takeover, rejoin with an existing account', async () => {
+  process.env.CADENCE_REQUIRE_LOGIN = '1';
+  const tasks = new Tasks(openDb(':memory:'), () => '2026-11-10');
+  const mw = apiMiddleware(tasks);
+  const server = createServer((req, res) => mw(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as {port: number}).port}/api`;
+  const call = async (path: string, init: {method?: string; body?: unknown; cookie?: string} = {}) => {
+    const r = await fetch(base + path, {method: init.method ?? 'GET', headers: {'content-type': 'application/json', ...(init.cookie ? {cookie: init.cookie} : {})}, body: init.body === undefined ? undefined : JSON.stringify(init.body)});
+    return {status: r.status, json: await r.json().catch(() => null), cookie: r.headers.get('set-cookie')?.split(';')[0], raw: r.headers.get('set-cookie') ?? ''};
+  };
+  try {
+    assert.equal((await call('/bootstrap')).status, 401, 'forced sign-in: nothing without a session');
+    assert.equal((await call('/auth/me')).json.setup, true);
+    assert.equal((await call('/auth/setup', {method: 'POST', body: {email: 'bad', password: 'long enough pw'}})).status, 400);
+    const setup = await call('/auth/setup', {method: 'POST', body: {name: 'Owner', email: 'Owner@X.test', password: 'owner password'}});
+    assert.equal(setup.status, 200);
+    assert.match(setup.raw, /HttpOnly/);
+    const o = setup.cookie!;
+    const me = (await call('/auth/me', {cookie: o})).json;
+    assert.equal(me.person.name, 'Owner');
+    assert.equal(me.admin, true);
+    assert.equal((await call('/auth/setup', {method: 'POST', body: {email: 'evil@x.test', password: 'evil password'}})).status, 400, 'setup works once');
+
+    // The owner gives Sam an email and a first password: that creates Sam's account.
+    const sam = tasks.listPeople().find(p => p.id !== me.person.id && p.kind !== 'ai')!;
+    assert.equal((await call(`/team/${sam.id}`, {method: 'PATCH', body: {email: 'sam@x.test', password: 'sam password'}, cookie: o})).status, 200);
+    // After that, only Sam can change it: an admin cannot take over an account.
+    assert.equal((await call(`/team/${sam.id}`, {method: 'PATCH', body: {password: 'taken over!'}, cookie: o})).status, 400);
+    const s = (await call('/auth/login', {method: 'POST', body: {email: 'sam@x.test', password: 'sam password'}})).cookie!;
+    assert.equal((await call(`/team/${sam.id}`, {method: 'PATCH', body: {password: 'new sam pass'}, cookie: s})).status, 400, 'needs the current password');
+    assert.equal((await call(`/team/${sam.id}`, {method: 'PATCH', body: {password: 'new sam pass', currentPassword: 'sam password'}, cookie: s})).status, 200);
+    assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'sam@x.test', password: 'sam password'}})).status, 401, 'old password stops working');
+
+    // Removed from the workspace: still signed in, but no access.
+    await call(`/team/${sam.id}`, {method: 'PATCH', body: {active: false}, cookie: o});
+    const out = await call('/bootstrap', {cookie: s});
+    assert.equal(out.status, 403);
+    assert.equal(out.json.notMember, true);
+    // Invited back: joins with the existing password, which is not replaced.
+    const secret = (await call('/invites', {method: 'POST', body: {email: 'sam@x.test', role: 'editor'}, cookie: o})).json.link.split('#/invite/')[1];
+    assert.equal((await call(`/invites/${secret}`)).json.hasAccount, true);
+    assert.equal((await call(`/invites/${secret}/accept`, {method: 'POST', body: {name: 'Sam', password: 'a different one'}})).status, 400, 'cannot reset a password with an invite');
+    assert.equal((await call(`/invites/${secret}/accept`, {method: 'POST', body: {name: 'Sam', password: 'new sam pass'}})).status, 200);
+    assert.equal((await call('/bootstrap', {cookie: s})).status, 200);
+
+    assert.equal((await call('/auth/logout', {method: 'POST', body: {}, cookie: o})).status, 200);
+    assert.equal((await call('/bootstrap', {cookie: o})).status, 401, 'signed out');
+  } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
+});

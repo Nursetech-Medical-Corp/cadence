@@ -27,6 +27,19 @@ Runs on http://localhost:5190 and keeps data in `data/`: one SQLite file per wor
 pnpm test
 ```
 
+## Hosting with sign-in
+
+```bash
+pnpm build
+pnpm start
+```
+
+Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change). Sign-in is required: the first visit asks you to create the owner account, which becomes admin of every workspace. Invite everyone else from the Team page. One account works across all workspaces it belongs to.
+
+- Put it behind HTTPS (Caddy, nginx or a tunnel) that sets `X-Forwarded-Proto`, so session cookies are marked Secure.
+- `CADENCE_REQUIRE_LOGIN=0` turns forced sign-in off; `pnpm dev` leaves it off for local use.
+- Locked out: `pnpm reset-password you@example.com` on the server prints a new password.
+
 ## Screenshots
 
 | | |
@@ -82,7 +95,7 @@ pnpm test
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
 
 ### Teams, security and approvals
-- Roles with fine-grained permissions, per-project access, optional sign-in with passwords or Google, and email invites with one-time links.
+- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, email invites with one-time links, roles with fine-grained permissions and per-project access.
 - Approvals and e-signatures: request a review or approval, sign with a password re-check, and keep a fingerprint of what was signed. Workflow rules per item type (allowed moves, required fields, approval before done).
 - Protections: CSRF and origin checks, rate-limited sign-in, hashed tokens and passwords, safe webhooks, CSV formula injection guards.
 

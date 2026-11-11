@@ -171,7 +171,7 @@ export class Tasks {
     return p;
   }
   createPerson(input: {name: string; email?: string | null}): Person {
-    const name = input.name.trim();
+    const name = String(input.name ?? '').trim();
     if (!name) throw new Invalid('Name is required');
     const count = (this.db.prepare('select count(*) c from people').get() as Row).c as number;
     const p: Person = {id: id(), name, email: input.email ?? null, color: COLORS[count % COLORS.length]};
@@ -190,7 +190,7 @@ export class Tasks {
     return toProject(r);
   }
   createProject(input: {name: string; key?: string; statuses?: Status[]; types?: string[]; fields?: FieldDef[]; settings?: Partial<ProjectSettings>; noViews?: boolean}): Project {
-    const name = input.name.trim();
+    const name = String(input.name ?? '').trim();
     if (!name) throw new Invalid('Name is required');
     const base = (input.key || name.replace(/[^a-z]/gi, '').slice(0, 3) || 'PRJ').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'PRJ';
     // Keys must be unique so item keys like ABC-12 and [[links]] point at one project.
@@ -1079,7 +1079,7 @@ export class Tasks {
   }
   createView(input: {projectId: string; name: string; kind: ViewKind; config?: ViewConfig; sort?: number}): View {
     const max = (this.db.prepare('select coalesce(max(sort),0) m from views where project_id = ?').get(input.projectId) as Row).m as number;
-    const v: View = {id: id(), projectId: input.projectId, name: input.name.trim() || input.kind, kind: input.kind, config: input.config ?? {}, sort: input.sort ?? max + 1};
+    const v: View = {id: id(), projectId: input.projectId, name: String(input.name ?? '').trim() || input.kind, kind: input.kind, config: input.config ?? {}, sort: input.sort ?? max + 1};
     this.db.prepare('insert into views (id,project_id,name,kind,config,sort) values (?,?,?,?,?,?)').run(v.id, v.projectId, v.name, v.kind, JSON.stringify(v.config), v.sort);
     this.emit({kind: 'view', projectId: v.projectId});
     return v;
