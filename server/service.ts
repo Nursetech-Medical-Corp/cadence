@@ -371,14 +371,26 @@ export class Tasks {
     const delta = a && b ? daysBetween(a, b) : 0;
     const dueDelta = before.due && next.due ? daysBetween(before.due, next.due) : 0;
     if (!delta && !dueDelta) return;
+    const rules = this.project(next.projectId).settings.dates ?? {};
+    // Saturday and Sunday roll to Monday when the project skips weekends.
+    const workday = (d: string) => { if (!rules.skipWeekends) return d; const w = new Date(d + 'T00:00:00').getDay(); return w === 6 ? addUnit(d, 2, 'day') : w === 0 ? addUnit(d, 1, 'day') : d; };
     const move = (i: Item, d: number) => {
       if (!d || i.completed || !(i.start || i.due)) return;
-      this.updateItem(i.id, {...(i.start ? {start: addUnit(i.start, d, 'day')} : {}), ...(i.due ? {due: addUnit(i.due, d, 'day')} : {})}, actor);
+      const start = i.start ? workday(addUnit(i.start, d, 'day')) : null;
+      // Keep the length: the due date moves as far as the start did.
+      const extra = i.start && start ? daysBetween(addUnit(i.start, d, 'day'), start) : 0;
+      const due = i.due ? workday(addUnit(i.due, d + extra, 'day')) : null;
+      this.updateItem(i.id, {...(start ? {start} : {}), ...(due ? {due} : {})}, actor);
     };
     if (delta) for (const c of this.listItems({parentId: next.id})) if (c.fields.follow === 'parent') move(c, delta);
     if (dueDelta) for (const r of this.db.prepare('select * from items where deps like ?').all(`%${next.id}%`)) {
       const f = toItem(r);
-      if (f.fields.follow === 'previous' && f.deps.includes(next.id)) move(f, dueDelta);
+      if (f.fields.follow !== 'previous' || !f.deps.includes(next.id)) continue;
+      if (rules.shift === 'overlap') {
+        // Only push later when the step would now start before this one ends; never pull it earlier.
+        const s0 = f.start ?? f.due;
+        if (s0 && next.due && s0 <= next.due) move(f, daysBetween(s0, next.due) + 1);
+      } else move(f, dueDelta);
     }
   }
 

@@ -569,3 +569,19 @@ test('assigned comments: notify the assignee, list until resolved', () => {
   assert.ok(t.listComments(i.id)[0].resolved);
   assert.throws(() => t.addComment(i.id, dave.id, 'x', 'nobody'), /Unknown person|not found/i);
 });
+
+test('date shifting: skip weekends, and overlap-only mode for steps that follow', () => {
+  const {t, p} = setup();
+  t.updateProject(p.id, {settings: {...t.project(p.id).settings, dates: {skipWeekends: true}}});
+  const parent = t.createItem({projectId: p.id, title: 'P', start: '2026-11-09', due: '2026-11-13'});
+  const child = t.createItem({projectId: p.id, title: 'C', parentId: parent.id, start: '2026-11-10', due: '2026-11-11', fields: {follow: 'parent'}});
+  t.updateItem(parent.id, {start: '2026-11-13', due: '2026-11-17'}); // +4 days: child would start Sat 11-14
+  assert.deepEqual([t.item(child.id).start, t.item(child.id).due], ['2026-11-16', '2026-11-17'], 'Saturday rolls to Monday, length kept');
+  t.updateProject(p.id, {settings: {...t.project(p.id).settings, dates: {shift: 'overlap'}}});
+  const a = t.createItem({projectId: p.id, title: 'A', start: '2026-11-02', due: '2026-11-04'});
+  const b = t.createItem({projectId: p.id, title: 'B', start: '2026-11-10', due: '2026-11-12', deps: [a.id], fields: {follow: 'previous'}});
+  t.updateItem(a.id, {due: '2026-11-06'});
+  assert.equal(t.item(b.id).start, '2026-11-10', 'still room, so B stays');
+  t.updateItem(a.id, {due: '2026-11-11'});
+  assert.equal(t.item(b.id).start, '2026-11-12', 'now overlapping, B starts the day after A');
+});

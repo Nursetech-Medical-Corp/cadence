@@ -49,6 +49,8 @@ export type ProjectSettings = {
   workflow?: Record<string, TypeRule>;
   /** Sidebar look: a lucide icon ("lucide:Rocket") or an emoji, and a color. */
   icon?: string; color?: string;
+  /** When dates move: skip weekends, and whether steps that follow another move always (gap) or only when they would overlap. */
+  dates?: {skipWeekends?: boolean; shift?: 'gap' | 'overlap'};
   /** A rollup shows work from other projects together. include null means every project. */
   rollup?: {include: string[] | null};
 };

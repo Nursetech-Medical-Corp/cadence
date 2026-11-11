@@ -49,6 +49,17 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
 
       {project.settings.rollup && <RollupCard store={store} project={project} />}
       <section className="set-card">
+        <div className="set-card-head"><h3>When dates move</h3><span className="muted small">For subitems set to move with their parent and steps that follow the step before.</span></div>
+        <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!!project.settings.dates?.skipWeekends} onChange={e => save({settings: {...project.settings, dates: {...project.settings.dates, skipWeekends: e.target.checked}}})} /> Skip weekends (a date that lands on Saturday or Sunday moves to Monday)</label>
+        <div className="row" style={{gap: 8}}>Steps that follow another:
+          <select className="plain-select" value={project.settings.dates?.shift ?? 'gap'} onChange={e => save({settings: {...project.settings, dates: {...project.settings.dates, shift: e.target.value as 'gap' | 'overlap'}}})}>
+            <option value="gap">Always move by the same amount (keep the gap)</option>
+            <option value="overlap">Only move when they would overlap</option>
+          </select>
+        </div>
+        <div className="muted small">Repeating tasks have their own Skip weekends option in the Repeat editor.</div>
+      </section>
+      <section className="set-card">
         <div className="set-card-head"><h3>Statuses</h3><span className="muted small">Drag to reorder. Order sets the board columns. The group decides what counts as done.</span></div>
         {project.statuses.map((s, idx) => (
           <div key={s.id} className={'set-item' + (drag === idx ? ' dragging' : '')} draggable
