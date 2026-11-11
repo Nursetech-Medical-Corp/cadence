@@ -759,3 +759,25 @@ test('hours each: assignees set their own hours, the estimate is the total, remo
   const c = t.updateItem(i.id, {fields: {hours: null}}, dave.id);
   assert.equal(c.fields.hours, undefined, 'clearing removes per-person hours');
 });
+
+test('done date: set automatically, editable by people, not by AI, validated', () => {
+  const {t, p} = setup();
+  const it = t.createItem({projectId: p.id, title: 'Late close'});
+  const done = p.statuses.find(s => s.category === 'done')!.id;
+  const d1 = t.updateItem(it.id, {status: done});
+  assert.ok(d1.completed, 'completed is stamped on done');
+  const created = it.created.slice(0, 10);
+  const back = t.updateItem(it.id, {completed: created});
+  assert.equal(back.completed!.slice(0, 10), created);
+  assert.throws(() => t.updateItem(it.id, {completed: '2999-01-01'}), /future/);
+  assert.throws(() => t.updateItem(it.id, {completed: '2000-01-01'}), /before the item was created/);
+  assert.throws(() => t.updateItem(it.id, {completed: 'yesterday'}), /date like/);
+  const bot = t.createPerson({name: 'Bot'});
+  t.db.prepare("update people set kind = 'ai' where id = ?").run(bot.id);
+  assert.throws(() => t.updateItem(it.id, {completed: created}, bot.id), /AI agents cannot change when/);
+  const reopened = t.updateItem(it.id, {status: p.statuses[0].id});
+  assert.equal(reopened.completed, null, 'reopen clears it');
+  assert.throws(() => t.updateItem(it.id, {completed: created}), /Mark it done first/);
+  const both = t.updateItem(it.id, {status: done, completed: created});
+  assert.equal(both.completed!.slice(0, 10), created, 'bulk mark done on a date');
+});

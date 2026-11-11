@@ -4,6 +4,7 @@ import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
 import type {Tasks} from './service.ts';
 import {settingsChanged, areaLocked, capsFor, type Access, type Cap} from './auth.ts';
+import {WRITE_OPS, approvedSop, needsReview, propose} from './agents.ts';
 
 export function migrateTokens(db: Db) {
   db.exec('create table if not exists tokens (id text primary key, person text not null, name text not null, hash text not null unique, created text not null, last_used text)');
@@ -37,7 +38,7 @@ export class Forbidden extends Error {}
  * the trusted local user (remote MCP over HTTP). Reads are filtered to visible projects; writes need the capability.
  */
 /** Calls that need no project check: the person list, dates, the template gallery. */
-const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit']);
+const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit', 'notifyPublic']);
 
 export function guarded(tasks: Tasks, actor: string): Tasks {
   const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true);
@@ -134,11 +135,23 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   };
   return new Proxy(tasks, {
     get(target, prop, recv) {
+      // Modules that keep per-workspace state (calendar sync hooks) look up the real service behind the guard.
+      if (prop === Symbol.for('cadence.raw')) return target;
       const v = Reflect.get(target, prop, recv);
       if (typeof v !== 'function' || typeof prop !== 'string') return v;
       const check = checks[prop], filter = filters[prop];
       // Anything not listed is refused, so a new service method is closed to tokens until it gets a check.
       if (!check && !filter) { if (OPEN.has(prop)) return v.bind(target); return () => { throw new Forbidden(`${prop} is not available to tokens`); }; }
+      // AI agents on "review": changes wait for their owner, unless they follow an AI SOP the owner approved.
+      if (WRITE_OPS.has(prop) && needsReview(target, actor)) return (...args: unknown[]) => {
+        check?.(...args);
+        const sop = approvedSop(target, actor, prop, args);
+        if (!sop) return propose(target, actor, prop, args);
+        const out = v.apply(target, args);
+        const itemId = typeof args[0] === 'string' ? args[0] : (out as {id?: string} | null)?.id;
+        if (itemId) { try { target.logWork(target.findItem(itemId).id, actor, 'note', `Applied directly under approved ${sop}`); } catch { /* not an item */ } }
+        return filter ? filter(out) : out;
+      };
       return (...args: unknown[]) => {
         check?.(...args);
         const out = v.apply(target, args);

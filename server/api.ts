@@ -17,6 +17,10 @@ import {exportMine, importMine} from './personal.ts';
 import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudbackup.ts';
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
+import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
+import {allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
+import {addAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
+import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
 import {handleMcpHttp} from './mcp-http.ts';
@@ -32,7 +36,7 @@ import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
 type Next = (err?: unknown) => void;
-const ITEM_FIELDS = new Set(['parentId', 'type', 'title', 'body', 'status', 'priority', 'assignees', 'start', 'due', 'estimate', 'tags', 'sprint', 'sort', 'recur', 'fields', 'projectId', 'deps']);
+const ITEM_FIELDS = new Set(['parentId', 'type', 'title', 'body', 'status', 'priority', 'assignees', 'start', 'due', 'estimate', 'tags', 'sprint', 'sort', 'recur', 'fields', 'projectId', 'deps', 'completed']);
 const loginTries = new Map<string, number[]>();
 class Denied extends Error {}
 
@@ -102,7 +106,15 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateApprovals(tasks);
   migrateInvites(tasks.db);
   migrateGoogleLinks(tasks.db);
+  migrateEvents(tasks);
   migrateOAuth(accounts.db);
+  startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
+  // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
+  startAgents(tasks, {post: async (url, payload) => {
+    if (!(await safeTarget(url))) throw new Error(`Webhook target not allowed: ${url}`);
+    const r = await fetch(url, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000)});
+    if (!r.ok) throw new Error(`Webhook answered ${r.status}`);
+  }});
   if (info.main) tasks.seedIfEmpty();
   migrate(tasks.db); // marks the first person as admin once people exist
   // Every workspace gets an All projects rollup at the top, once. Deleting it is respected.
@@ -239,6 +251,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     if (req.headers.authorization && !bearer) return send(res, 401, {error: 'Invalid or revoked token'});
     const actor = bearer ?? (ws.requireLogin ? (account ? memberIn(tasks, emails) : null) : ((req.headers['x-person'] as string) || null));
     const [a, b, c] = parts;
+    // Google Calendar push notifications: no session, no JSON. The channel id, resource id and secret token must match.
+    if (a === 'google' && b === 'push' && m === 'POST') { req.resume(); const ok = onPush(tasks, req.headers); return send(res, ok ? 200 : 404, {ok}); }
     try {
       // Cross-site protection: writes must be JSON from this app's own origin. Browsers cannot send
       // application/json cross-origin without a preflight, and the dev server answers no preflights.
@@ -253,6 +267,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
       const canSee = (projectId: string) => caps(actor, projectId, !!bearer).has('view');
+      // An AI agent on "review" (with a token): the change waits for its owner unless it follows an approved AI SOP.
+      const held = (op: string, args: unknown[]) => !!bearer && needsReview(tasks, actor) && !approvedSop(tasks, actor!, op, args);
       const seesItem = (itemId: string) => { try { return canSee(tasks.item(itemId).projectId); } catch { return false; } };
 
       // ---- Sign-in (always reachable) ----
@@ -384,7 +400,7 @@ If you did not ask for it, ignore this email.`)
           const mode = q('mode') === 'connect' ? 'connect' : 'link';
           // A browser link cannot send x-person, so in open mode the app passes ?as=.
           const who = actor ?? (!ws.requireLogin ? q('as') ?? null : null);
-          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' => w === 'calendar' || w === 'gmail'));
+          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' | 'calendar-full' => w === 'calendar' || w === 'gmail' || w === 'calendar-full'));
         }
         if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url);
       }
@@ -423,18 +439,23 @@ If you did not ask for it, ignore this email.`)
 
       // ---- API tokens for AI agents and integrations ----
       if (a === 'tokens') {
-        if (!b && m === 'GET') return send(res, 200, listTokens(tasks.db, !ws.requireLogin || isAdmin(actor) ? undefined : actor ?? ''));
+        if (!b && m === 'GET') {
+          if (!ws.requireLogin || isAdmin(actor)) return send(res, 200, listTokens(tasks.db));
+          const mine = new Set([actor ?? '', ...(actor ? agentsOf(tasks, actor).map(x => x.id) : [])]);
+          return send(res, 200, listTokens(tasks.db).filter(t => mine.has(t.person)));
+        }
         if (!b && m === 'POST') {
           const person = body.person ?? actor;
           if (!person) throw new Invalid('Pick who the token acts as');
-          if (person !== actor) needAdmin();
+          const ownAgent = !!actor && agentsOf(tasks, actor).some(x => x.id === person);
+          if (person !== actor && !ownAgent) needAdmin();
           if (bearer) throw new Denied('Tokens cannot create tokens');
           return send(res, 201, createToken(tasks.db, person, String(body.name ?? 'Token')));
         }
         if (b && m === 'DELETE') {
           const t = listTokens(tasks.db).find(x => x.id === b);
           if (!t) throw new NotFound('Token not found');
-          if (t.person !== actor) needAdmin();
+          if (t.person !== actor && !(actor && agentsOf(tasks, actor).some(x => x.id === t.person))) needAdmin();
           deleteToken(tasks.db, b); return send(res, 200, {ok: true});
         }
       }
@@ -473,6 +494,83 @@ If you did not ask for it, ignore this email.`)
         if (b === 'events' && m === 'GET') return send(res, 200, await events(tasks.db, actor, q('from') ?? '', q('to') ?? ''));
         if (b === 'events' && m === 'POST') return send(res, 201, await addEvent(tasks.db, actor, String(body.link ?? ''), String(body.calendar ?? 'primary'), {title: String(body.title ?? ''), date: String(body.date ?? ''), description: body.description}));
         if (b === 'gmail' && m === 'GET') return send(res, 200, await gmailSearch(tasks.db, actor, q('link') ?? '', q('q') ?? 'in:inbox', num(q('max'), 10, 25)));
+      }
+      // ---- Meetings and calendar events (Google Calendar sync in server/gcal.ts). /api/events is the live update stream. ----
+      if (a === 'meetings') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        const visible = (e: CalEvent) => canSeeEvent(e, actor, canSee);
+        const withGoogle = async (e: CalEvent | {ok: boolean}) => {
+          const google = await flushGoogle(tasks);
+          const fresh = 'id' in e ? (() => { try { return getEvent(tasks, (e as CalEvent).id); } catch { return e; } })() : e;
+          return {...fresh, google};
+        };
+        if (!b && m === 'GET') {
+          const pid = q('project');
+          const rollup = pid ? !!tasks.project(pid).settings.rollup : false;
+          if (pid && !rollup) need(pid, 'view');
+          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee));
+        }
+        if (!b && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          if (body.itemId) need(tasks.item(body.itemId).projectId, 'view');
+          return send(res, 201, await withGoogle(createEvent(tasks, body, actor)));
+        }
+        if (b === 'free' && m === 'POST') {
+          const people = tasks.listPeople();
+          const ids: string[] = [], emails: string[] = [];
+          for (const a0 of (Array.isArray(body.attendees) ? body.attendees : []).slice(0, 50)) {
+            const p = people.find(x => x.id === a0 || x.name.toLowerCase() === String(a0).toLowerCase() || x.email?.toLowerCase() === String(a0).toLowerCase());
+            if (p) ids.push(p.id); else if (/@/.test(String(a0))) emails.push(String(a0).toLowerCase());
+          }
+          if (!ids.includes(actor)) ids.unshift(actor);
+          const from = String(body.from ?? tasks.today()), to = String(body.to ?? from);
+          const s0 = calendarSettings(tasks, actor);
+          const busy = await allBusy(tasks, ids, emails, actor, from, to);
+          return send(res, 200, {slots: freeSlots(busy, {from, to, durationMin: Number(body.duration ?? 30), tz: s0.tz, workStart: s0.workStart, workEnd: s0.workEnd, max: num(String(body.max ?? ''), 5, 20)}), tz: s0.tz});
+        }
+        if (b === 'timeblock' && m === 'POST') {
+          need(tasks.item(String(body.itemId ?? '')).projectId, 'edit');
+          const r = timeblockItem(tasks, String(body.itemId), String(body.start ?? ''), String(body.end ?? ''), actor);
+          return send(res, 201, {...r, event: await withGoogle(r.event)});
+        }
+        if (b === 'hours' && m === 'GET') return send(res, 200, Object.fromEntries([...busyHours(tasks, q('from') ?? '', q('to') ?? '', {timeblocks: q('timeblocks') === '1'})].map(([k, v]) => [k, Object.fromEntries(v)])));
+        if (b) {
+          const e = getEvent(tasks, b);
+          if (!visible(e) && !isAdmin(actor)) throw new Denied('You cannot see this event');
+          if (m === 'GET') return send(res, 200, e);
+          if (m === 'PATCH') {
+            if (body.projectId) need(body.projectId, 'edit');
+            const {scope, occurrence, ...patch} = body;
+            return send(res, 200, await withGoogle(updateEvent(tasks, b, patch, actor, {scope: scope === 'one' ? 'one' : 'all', occurrence})));
+          }
+          if (m === 'DELETE') return send(res, 200, await withGoogle(deleteEvent(tasks, b, actor, {scope: q('scope') === 'one' ? 'one' : 'all', occurrence: q('occurrence')})));
+        }
+      }
+      if (a === 'calendar') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (b === 'settings' && m === 'GET') {
+          const st = tasks.db.prepare('select calendar_id, last_sync, error, channel_expires from gcal_sync where link_id = ?').all(calendarSettings(tasks, actor).linkId ?? '');
+          return send(res, 200, {...calendarSettings(tasks, actor), sync: st});
+        }
+        if (b === 'settings' && m === 'PUT') {
+          const before = calendarSettings(tasks, actor);
+          const next = saveCalendarSettings(tasks, actor, body);
+          if (next.pushTasks !== before.pushTasks || next.tasksCalendarId !== before.tasksCalendarId || next.calendarId !== before.calendarId || next.doneRule !== before.doneRule)
+            void pushAllItems(tasks, info.id, actor).catch(e => console.error('Due dates to Google failed', e.message));
+          return send(res, 200, next);
+        }
+        if (b === 'sync' && m === 'POST') {
+          const s0 = calendarSettings(tasks, actor);
+          if (!s0.linkId) throw new Invalid('Connect Google Calendar first (My Google accounts on the Team page)');
+          const out = [];
+          for (const cal of s0.syncCalendars) out.push({calendar: cal, ...(await pullCalendar(tasks, actor, s0.linkId, cal))});
+          return send(res, 200, out);
+        }
+        if (b === 'cadence-calendar' && m === 'POST') {
+          const s1 = await createCadenceCalendar(tasks, actor);
+          void pushAllItems(tasks, info.id, actor).catch(e => console.error('Due dates to Google failed', e.message));
+          return send(res, 201, s1);
+        }
       }
       // ---- Workspaces: list, create, rename, recolor, reorder ----
       if (a === 'workspaces') {
@@ -768,6 +866,7 @@ If you did not ask for it, ignore this email.`)
           need(body.projectId, 'create');
           for (const k of Object.keys(body)) if (!ITEM_FIELDS.has(k) && k !== 'projectId') delete body[k];
           for (const d of (body.deps ?? []) as string[]) need(tasks.item(d).projectId, 'view');
+          if (held('createItem', [body, actor])) return send(res, 202, propose(tasks, actor!, 'createItem', [body, actor]));
           return send(res, 201, tasks.createItem(body, actor));
         }
         if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); return send(res, 201, tasks.quickAdd(body, actor)); }
@@ -784,9 +883,10 @@ If you did not ask for it, ignore this email.`)
           for (const d of (body.deps ?? []) as string[]) need(tasks.item(d).projectId, 'view');
           if (body.parentId) need(tasks.item(body.parentId).projectId, 'view');
           if (body.projectId && body.projectId !== it.projectId) need(body.projectId, 'create');
+          if (held('updateItem', [it.id, body, actor])) return send(res, 202, propose(tasks, actor!, 'updateItem', [it.id, body, actor]));
           return send(res, 200, tasks.updateItem(it.id, body, actor, {keep: q('keep') === '1'}));
         }
-        if (it && !c && m === 'DELETE') { need(it.projectId, 'delete'); return send(res, 200, tasks.deleteItem(it.id, actor)); }
+        if (it && !c && m === 'DELETE') { need(it.projectId, 'delete'); if (held('deleteItem', [it.id, actor])) return send(res, 202, propose(tasks, actor!, 'deleteItem', [it.id, actor])); return send(res, 200, tasks.deleteItem(it.id, actor)); }
       }
 
       if (a === 'timesheet') {
@@ -927,9 +1027,42 @@ If you did not ask for it, ignore this email.`)
       }
       if (a === 'items' && b && c === 'approval-state' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.approvalState(it.id)); }
 
+      // ---- AI agents owned by people, and the changes they propose ----
+      if (a === 'agents') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (!b && m === 'GET') return send(res, 200, q('all') === '1' && (isAdmin(actor) || !ws.requireLogin) ? listAgents(tasks) : listAgents(tasks).filter(x => x.owner === actor));
+        if (!b && m === 'POST') { if (bearer) throw new Denied('Add agents in the app, not with a token'); return send(res, 201, addAgent(tasks, actor, body)); }
+        if (b && !c && m === 'PATCH') { if (bearer) throw new Denied('Change agents in the app, not with a token'); return send(res, 200, saveAgentSettings(tasks, b, body, actor)); }
+        if (b && c === 'token' && m === 'POST') {
+          if (bearer) throw new Denied('Tokens cannot create tokens');
+          if (!agentsOf(tasks, actor).some(x => x.id === b)) needAdmin();
+          const tk = createToken(tasks.db, b, String(body.name ?? 'Agent token'));
+          return send(res, 201, {...tk, mcpUrl: `${publicOrigin(req)}/mcp?ws=${info.id}&key=${tk.token}`});
+        }
+      }
+      if (a === 'proposals') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (!b && m === 'GET') {
+          const all = q('all') === '1' && (isAdmin(actor) || !ws.requireLogin);
+          const agentQ = q('agent');
+          if (agentQ && !all && !agentsOf(tasks, actor).some(x => x.id === agentQ) && agentQ !== actor) throw new Denied('Not your agent');
+          return send(res, 200, listProposals(tasks, {owner: all || agentQ ? undefined : actor, agent: agentQ, state: q('state')}));
+        }
+        if (b && !c && m === 'GET') { const p0 = getProposal(tasks, b); if (p0.owner !== actor && p0.agent !== actor) needAdmin(); return send(res, 200, p0); }
+        if (b && c === 'decide' && m === 'POST') {
+          if (bearer) throw new Denied('A person decides proposals in the app');
+          const p0 = getProposal(tasks, b);
+          if (p0.itemId) need(tasks.item(p0.itemId).projectId, 'edit');
+          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined}));
+        }
+      }
       // ---- Human and AI work: claims, reviews, work log, files ----
       if (a === 'ai') {
-        if (b === 'queue' && m === 'GET') return send(res, 200, tasks.aiQueue(q('agent') ?? null, q('projectId')).filter(x => canSee(x.item.projectId)));
+        if (b === 'queue' && m === 'GET') {
+          const owner = q('owner'), mineIds = owner ? new Set(agentsOf(tasks, owner).map(x => x.id)) : null;
+          return send(res, 200, tasks.aiQueue(q('agent') ?? null, q('projectId')).filter(x => canSee(x.item.projectId))
+            .filter(x => !mineIds || (x.review?.agent && mineIds.has(x.review.agent)) || x.item.assignees.some(a => mineIds.has(a))));
+        }
         const it = body.itemId ? tasks.findItem(body.itemId) : null;
         if (it) need(it.projectId, b === 'log' ? 'comment' : 'edit');
         if (b === 'claim' && m === 'POST') return send(res, 200, tasks.claimTask(it!.id, actor ?? '', body.note ?? ''));

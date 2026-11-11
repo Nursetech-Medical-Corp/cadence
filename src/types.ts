@@ -24,7 +24,7 @@ export type Recur = {
   spawned?: string;
 };
 
-export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'};
+export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'; owner?: string | null};
 
 export type Project = {
   id: string; name: string; key: string;
@@ -120,7 +120,7 @@ export const NOTIFY_KINDS = [
 
 export type ItemPatch = Partial<Pick<Item,
   'parentId' | 'type' | 'title' | 'body' | 'status' | 'priority' | 'assignees' | 'start' | 'due' |
-  'estimate' | 'tags' | 'sprint' | 'sort' | 'recur' | 'fields' | 'projectId' | 'deps'>>;
+  'estimate' | 'tags' | 'sprint' | 'sort' | 'recur' | 'fields' | 'projectId' | 'deps' | 'completed'>>;
 
 export type ChangeEvent =
   | {kind: 'item'; item: Item}
@@ -134,6 +134,7 @@ export type ChangeEvent =
   | {kind: 'sprint'; projectId: string}
   | {kind: 'view'; projectId: string}
   | {kind: 'template'}
+  | {kind: 'events'}
   | {kind: 'refresh'};
 
 export type Sprint = {
@@ -162,7 +163,7 @@ export type ViewConfig = {
   /** List rows: the order of the priority, assignee and status fields. Time and due date keep their place. */
   rowFields?: string[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
-  zoom?: 'day' | 'week' | 'month'; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
+  zoom?: 'day' | 'week' | 'month'; calHours?: 'week' | 'day' | null; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
 /** Filters: a group of rules joined by AND or OR; a rule can itself be a group (one level of nesting in the UI). */
 export type FilterRule = {field: string; op: 'is' | 'is-not' | 'contains' | 'empty' | 'not-empty' | 'before' | 'after' | 'gte' | 'lte'; value?: string};

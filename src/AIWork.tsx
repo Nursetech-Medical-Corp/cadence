@@ -104,10 +104,57 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
 }
 
 /** Dashboard: everything moving between people and AI workers. */
+type Proposal = {id: string; agent: string; owner: string | null; op: string; args: unknown[]; summary: string; reason: string; itemId: string | null; created: string; state: string; note: string | null};
+
+/** Changes your agents want to make, held until you approve them. */
+function Proposals({store, open, all}: {store: Store; open: (id: string) => void; all: boolean}) {
+  const [list, setList] = useState<Proposal[]>([]);
+  const [busy, setBusy] = useState('');
+  const [note, setNote] = useState<Record<string, string>>({});
+  const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}`).then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, [store.tick, all]);
+  if (!list.length) return null;
+  const decide = async (p: Proposal, approve: boolean) => {
+    setBusy(p.id);
+    try { const r = await api<Proposal>(`/proposals/${p.id}/decide`, {method: 'POST', body: {approve, note: note[p.id]}}); if (r.state === 'failed') alert(`Could not apply: ${r.note}`); }
+    catch (e) { store.fail(e); }
+    setBusy(''); load();
+  };
+  return (
+    <div className="proposals">
+      <h3>Changes to approve <span className="muted">{list.length}</span></h3>
+      <p className="muted small">Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.</p>
+      {list.map(p => {
+        const agent = store.people.find(x => x.id === p.agent);
+        return (
+          <div key={p.id} className="proposal">
+            <div className="proposal-head">{agent && <Avatar person={agent} size={18} />}<b>{agent?.name ?? 'Agent'}</b><span className="grow">{p.summary}</span>
+              {p.itemId && store.items.has(p.itemId) && <button className="btn ghost small" onClick={() => open(p.itemId!)}>Open</button>}</div>
+            {p.reason && <div className="small muted">{p.reason}</div>}
+            <details className="small"><summary>Details</summary><pre className="proposal-args">{JSON.stringify(p.args[1] ?? p.args[0], null, 1).slice(0, 2000)}</pre></details>
+            <div className="review-actions">
+              <input className="plain-select" style={{flex: 1}} placeholder="Note for the agent (optional)" value={note[p.id] ?? ''} onChange={e => setNote({...note, [p.id]: e.target.value})} />
+              <button className="btn primary small" disabled={busy === p.id} onClick={() => decide(p, true)}><ThumbsUp size={12} /> Approve</button>
+              <button className="btn small" disabled={busy === p.id} onClick={() => decide(p, false)}><ThumbsDown size={12} /> Reject</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AIWorkPage({store, open}: {store: Store; open: (id: string) => void}) {
   const [project, setProject] = useState('');
+  const [whose, setWhose] = useState<'mine' | 'all' | string>('mine');
   const [lastLog, setLastLog] = useState<Record<string, LogEntry | undefined>>({});
-  const items = [...store.items.values()].filter(i => !project || i.projectId === project);
+  const admin = store.settings.admin;
+  const myAgents = new Set(store.people.filter(p => p.kind === 'ai' && p.owner === store.me).map(p => p.id));
+  // Your agents' work by default; admins can look at every agent or one agent.
+  const shown = whose === 'mine' ? myAgents : whose === 'all' ? null : new Set([whose]);
+  const ownedBy = (i: Item) => !shown || (!!reviewOf(i)?.agent && shown.has(reviewOf(i)!.agent!)) || i.assignees.some(a => shown.has(a))
+    || (whose === 'mine' && !reviewOf(i) && i.fields.worker === 'ai' && i.assignees.includes(store.me));
+  const items = [...store.items.values()].filter(i => (!project || i.projectId === project) && ownedBy(i));
   const ais = new Set(store.people.filter(p => p.kind === 'ai').map(p => p.id));
   const r = (i: Item) => reviewOf(i);
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -128,9 +175,15 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       <h1><Bot size={20} /> AI work</h1>
       <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve or send it back with a comment. Mark tasks Human, AI or Either in any item.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
+        <select className="plain-select" value={whose} onChange={e => setWhose(e.target.value)}>
+          <option value="mine">My agents ({myAgents.size})</option>
+          {admin && <option value="all">All agents</option>}
+          {store.people.filter(p => p.kind === 'ai' && (admin || p.owner === store.me)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
         <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <span className="muted small">{store.people.filter(p => p.kind === 'ai').length} AI workers. Add one on the Team page and give it a token.</span>
+        <span className="muted small">{myAgents.size ? '' : 'You have no AI agents yet. '}Add yours on the Team page (My AI agents) and connect it with its key.</span>
       </div>
+      <Proposals store={store} open={open} all={whose === 'all'} />
       <div className="board" style={{padding: 0}}>
         {cols.map(c => (
           <div key={c.id} className="column ai-col">

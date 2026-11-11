@@ -6,11 +6,15 @@ import type {Item} from './types.ts';
 import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {Avatars, PriorityIcon, StatusIcon} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {EventEditor, TimeGrid} from './Meetings.tsx';
+import {api} from './store.ts';
 
 const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function CalendarView({store, project, items, open, config, setConfig}: ViewProps) {
+  const hours = config.calHours ?? null;
   const mode = config.zoom === 'day' ? 'week' : 'month';
+  const [newMeeting, setNewMeeting] = useState(false);
   // Days opened with "+N more" show all their items in place.
   const [openDays, setOpenDays] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState(store.today);
@@ -19,7 +23,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
   const [adding, setAdding] = useState<{day: string; text: string} | null>(null);
 
   const c = parseDay(cursor);
-  const first = mode === 'month' ? iso(new Date(c.getFullYear(), c.getMonth(), 1)) : cursor;
+  const first = mode === 'month' && !hours ? iso(new Date(c.getFullYear(), c.getMonth(), 1)) : cursor;
   const start = addDays(first, -((parseDay(first).getDay() + 6) % 7));
   const weeks = mode === 'month' ? Math.ceil((daysBetween(start, iso(new Date(c.getFullYear(), c.getMonth() + 1, 0))) + 1) / 7) : 1;
   const days = Array.from({length: weeks * 7}, (_, n) => addDays(start, n));
@@ -45,8 +49,17 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
     const [st, du] = onWorkdays(store.projects.find(p => p.id === i.projectId)?.settings.dates?.skipWeekends, start, day);
     store.updateItem(id, {due: du, ...(st ? {start: st} : {})});
   };
-  const step = (n: number) => setCursor(mode === 'month' ? iso(new Date(c.getFullYear(), c.getMonth() + n, 1)) : addDays(cursor, 7 * n));
-  const title = mode === 'month'
+  const step = (n: number) => setCursor(hours === 'day' ? addDays(cursor, n) : !hours && mode === 'month' ? iso(new Date(c.getFullYear(), c.getMonth() + n, 1)) : addDays(cursor, 7 * n));
+  const hourDays = hours === 'day' ? [cursor] : Array.from({length: 7}, (_, n) => addDays(start, n));
+  // Drop a task on an hour: block that time for it on your calendar.
+  const block = async (itemId: string, s: string, e: string) => {
+    try {
+      const r = await api<{pastDue: boolean; note: string; event: {google?: {ok: boolean; error?: string} | null}}>('/meetings/timeblock', {method: 'POST', body: {itemId, start: s, end: e}});
+      if (r.pastDue && confirm(`${r.note}\n\nMove the due date to that day?`)) store.updateItem(itemId, {due: iso(new Date(e))});
+      if (r.event.google && !r.event.google.ok) alert(`Blocked in Cadence. Google: ${r.event.google.error}`);
+    } catch (err) { store.fail(err); }
+  };
+  const title = hours === 'day' ? parseDay(cursor).toLocaleDateString(undefined, {weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'}) : mode === 'month' && !hours
     ? c.toLocaleDateString(undefined, {month: 'long', year: 'numeric'})
     : `${parseDay(start).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})} to ${parseDay(addDays(start, 6)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'})}`;
 
@@ -60,11 +73,16 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
           <b className="cal-title">{title}</b>
           <span className="spacer" />
           <label className="small muted" title="Show items only on their due date instead of across start to due"><input type="checkbox" checked={!!config.dueOnly} onChange={e => setConfig({dueOnly: e.target.checked})} /> Due dates only</label>
+          <button className="btn small" onClick={() => setNewMeeting(true)} title="Schedule a meeting (goes to Google Calendar when connected)">New meeting</button>
           <div className="seg">
-            <button className={mode === 'month' ? 'on' : ''} onClick={() => setConfig({zoom: 'month'})}>Month</button>
-            <button className={mode === 'week' ? 'on' : ''} onClick={() => setConfig({zoom: 'day'})}>Week</button>
+            <button className={!hours && mode === 'month' ? 'on' : ''} onClick={() => setConfig({zoom: 'month', calHours: null})}>Month</button>
+            <button className={!hours && mode === 'week' ? 'on' : ''} onClick={() => setConfig({zoom: 'day', calHours: null})}>Week</button>
+            <button className={hours === 'week' ? 'on' : ''} onClick={() => setConfig({calHours: 'week'})} title="Week with hours: meetings and time-blocks">Hours</button>
+            <button className={hours === 'day' ? 'on' : ''} onClick={() => setConfig({calHours: 'day'})}>Day</button>
           </div>
         </div>
+        {newMeeting && <EventEditor store={store} draft={{projectId: project.settings.rollup ? null : project.id}} items={items} onClose={() => setNewMeeting(false)} open={open} />}
+        {hours ? <TimeGrid store={store} days={hourDays} projectId={project.id} items={items} open={open} onDropTask={block} /> :
         <div className="cal-grid">
           {WD.map(w => <div key={w} className="cal-head">{w}</div>)}
           {days.map(d => {
@@ -102,13 +120,13 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
               </div>
             );
           })}
-        </div>
+        </div>}
       </div>
       <aside className="cal-side" onDragOver={e => e.preventDefault()} onDrop={() => { if (drag) store.updateItem(drag, {due: null, start: null}); setDrag(null); }}>
         <b>No date</b> <span className="count">{undated.length}</span>
-        <div className="muted small" style={{margin: '4px 0 8px'}}>Drag onto a day to schedule. Drop here to clear a date.</div>
+        <div className="muted small" style={{margin: '4px 0 8px'}}>{hours ? 'Drag onto an hour to block time for it.' : 'Drag onto a day to schedule. Drop here to clear a date.'}</div>
         {undated.map(i => (
-          <div key={i.id} className="cal-chip side" draggable onDragStart={() => setDrag(i.id)} onDragEnd={() => setDrag(null)} onClick={() => open(i.id)}>
+          <div key={i.id} className="cal-chip side" draggable onDragStart={e => { setDrag(i.id); e.dataTransfer.setData('text/item', i.id); }} onDragEnd={() => setDrag(null)} onClick={() => open(i.id)}>
             <StatusIcon status={project.statuses.find(s => s.id === i.status)} size={12} /><span className="cal-text">{i.title}</span>
           </div>
         ))}
