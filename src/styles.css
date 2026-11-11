@@ -1129,9 +1129,15 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .head > .cover { margin: 0 0 8px; height: 120px; }
 .cover-actions { position: absolute; right: 12px; bottom: 10px; opacity: 0; transition: opacity .12s; }
 .cover:hover .cover-actions, .cover-actions:focus-within { opacity: 1; }
-.cover-add { height: 0; position: relative; }
-.cover-add > .picker { position: absolute; right: 0; top: -2px; opacity: 0; transition: opacity .12s; z-index: 5; }
+/* "Add header" sits on its own short line at the top (never over other controls) and shows on hover. */
+.cover-add { display: flex; height: 24px; margin-bottom: 2px; }
+.cover-add > .picker { opacity: 0; transition: opacity .12s; }
 .page:hover > .cover-add > .picker, .head:hover > .cover-add > .picker, .cover-add > .picker:focus-within { opacity: 1; }
+.cover-actions { display: flex; gap: 6px; }
+.cover-actions.on { opacity: 1; }
+.cover.repositioning { cursor: grab; outline: 2px solid var(--accent); }
+.cover.repositioning:active { cursor: grabbing; }
+.cover-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,.55); color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 6px; pointer-events: none; }
 .cover-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px 6px 8px; }
 .cover-swatch { height: 34px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
 .cover-swatch:hover { outline: 2px solid var(--accent); }
