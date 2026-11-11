@@ -158,3 +158,10 @@ export type View = {id: string; projectId: string; name: string; kind: ViewKind;
 export type Activity = {id: number; at: string; actor: string | null; kind: 'create' | 'update' | 'delete' | 'revert'; itemId: string; projectId: string; title: string; before: unknown; after: unknown};
 
 export type BurnPoint = {date: string; remaining: number; remainingHours: number; ideal: number; idealHours: number; done: number};
+
+/** Who may change each area, and which optional features are on (Team page, Customization). */
+export type Customization = {viewSettings: 'personal' | 'shared' | 'locked'; viewOrder: 'personal' | 'shared' | 'locked'; projectOrder: 'personal' | 'shared' | 'locked'};
+export type Features = {timeTracking: boolean; aiWork: boolean; approvals: boolean; routines: boolean; insights: boolean};
+export const DEFAULT_CUSTOM: Customization = {viewSettings: 'personal', viewOrder: 'personal', projectOrder: 'personal'};
+export const DEFAULT_FEATURES: Features = {timeTracking: true, aiWork: true, approvals: true, routines: true, insights: true};
+export const FEATURE_LABELS: Record<keyof Features, string> = {timeTracking: 'Time tracking and timesheets', aiWork: 'AI work', approvals: 'Approvals', routines: 'Routines', insights: 'Team insights'};

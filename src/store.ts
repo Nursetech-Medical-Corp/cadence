@@ -1,6 +1,7 @@
 // Client state: everything loads once, edits apply instantly, server confirms, SSE keeps every tab in sync.
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ChangeEvent, Item, ItemPatch, Person, Project, Sprint, TimeEntry, View, ViewKind} from './types.ts';
+import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from './types.ts';
 
 // Which workspace this tab works in. The cookie lets images, file links and live updates reach the same one.
 // An invite link carries its workspace (?ws=), so the person lands in the right one.
@@ -63,7 +64,8 @@ export const validProject = (store: {projects: Project[]}, id: string | null) =>
 export const realProjects = (ps: Project[]) => ps.filter(p => !p.settings.rollup).sort((a, b) => a.sort - b.sort);
 export type Store = ReturnType<typeof useStore>;
 
-type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]; time?: Record<string, number>};
+type Settings = {custom: Customization; features: Features; admin: boolean};
+type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]; time?: Record<string, number>; prefs?: Record<string, unknown>; settings?: Settings};
 
 export function useStore(me: string) {
   const [people, setPeople] = useState<Person[]>([]);
@@ -77,6 +79,8 @@ export function useStore(me: string) {
   const [tick, setTick] = useState(0); // bumps on any server event so panels refetch comments/time
   const [running, setRunning] = useState<TimeEntry | null>(null);
   const [timeTotals, setTimeTotals] = useState<Map<string, number>>(new Map()); // logged minutes per item
+  const [prefs, setPrefs] = useState<Record<string, unknown>>({}); // your own layout (src/customize.ts)
+  const [settings, setSettings] = useState<Settings>({custom: DEFAULT_CUSTOM, features: DEFAULT_FEATURES, admin: true});
   const lastEvent = useRef<ChangeEvent | null>(null);
   const projectsRef = useRef<Project[]>([]);
   const itemsRef = useRef<Map<string, Item>>(new Map());
@@ -105,6 +109,7 @@ export function useStore(me: string) {
   const load = useCallback(async () => {
     const b = await api<Boot>('/bootstrap');
     setPeople(b.people); setProjects(b.projects); setToday(b.today); setSprints(b.sprints); setViews(b.views); setTimeTotals(new Map(Object.entries(b.time ?? {})));
+    setPrefs(b.prefs ?? {}); if (b.settings) setSettings(b.settings);
     setItems(new Map(b.items.map(i => [i.id, i])));
     setReady(true);
   }, []);
@@ -204,6 +209,11 @@ export function useStore(me: string) {
       setViews(prev => prev.map(v => v.id === id ? {...v, ...patch} : v));
       return api<View>(`/views/${id}`, {method: 'PATCH', body: patch}).catch(e => { fail(e); load(); });
     },
+    /** Saves part of your own layout; null removes it. */
+    setPref(key: string, value: unknown) {
+      setPrefs(prev => { const n = {...prev}; if (value === null) delete n[key]; else n[key] = value; return n; });
+      return api('/prefs', {method: 'PUT', body: {key, value}}).catch(fail);
+    },
     reorderPeople(ids: string[]) {
       setPeople(prev => [...prev].sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id)));
       return api('/people/order', {method: 'PUT', body: {ids}}).catch(e => { fail(e); load(); });
@@ -288,7 +298,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {people, projects, items, sprints, views, today, error, ready, tick, running, timeTotals, lastEvent, notice, ...actions};
+  return {me, people, projects, items, sprints, views, today, error, ready, tick, running, timeTotals, prefs, settings, lastEvent, notice, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.

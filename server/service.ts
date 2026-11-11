@@ -1129,6 +1129,18 @@ export class Tasks {
     this.emit({kind: 'view', projectId: v.projectId});
   }
 
+  /** A person's own layout: view settings, tab order, project order. */
+  prefs(person: string): Record<string, unknown> {
+    return Object.fromEntries(this.db.prepare('select key, value from prefs where person = ?').all(person).map(r => [r.key as string, j(r.value, null)]));
+  }
+  setPref(person: string, key: string, value: unknown) {
+    if (!/^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects)$/.test(key)) throw new Invalid('Unknown preference');
+    if (value === null || value === undefined) { this.db.prepare('delete from prefs where person = ? and key = ?').run(person, key); return; }
+    const text = JSON.stringify(value);
+    if (text.length > 50_000) throw new Invalid('That layout is too large');
+    this.db.prepare('insert into prefs (person, key, value) values (?,?,?) on conflict(person, key) do update set value = excluded.value').run(person, key, text);
+  }
+
   /** Everything in this workspace as one JSON file (the same as Data and backups, Export). Passwords are left out. */
   exportWorkspace() { return exportAll(this.db); }
 

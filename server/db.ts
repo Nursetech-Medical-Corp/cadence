@@ -36,6 +36,8 @@ create table if not exists notifications (
 create index if not exists notifications_person on notifications(person, read);
 create index if not exists time_person_start on time_entries(person, start);
 create index if not exists time_item on time_entries(item_id);
+-- Personal layout per person: their own view settings, tab order and project order.
+create table if not exists prefs (person text not null, key text not null, value text not null, primary key (person, key));
 create index if not exists time_running on time_entries(person) where end is null;
 create table if not exists sprints (
   id text primary key, project_id text not null references projects(id) on delete cascade,

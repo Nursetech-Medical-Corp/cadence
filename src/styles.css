@@ -815,8 +815,10 @@ a.btn { text-decoration: none; }
 .proj-find:hover { color: var(--text); }
 /* Settings: two columns of cards on wide screens */
 @media (min-width: 1280px) {
-  .page.settings { max-width: 1500px; display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; align-items: start; }
-  .page.settings > .set-hero, .page.settings > .wide-card { grid-column: 1 / -1; }
+  /* Cards stack in two columns with no row gaps (a short card no longer leaves space beside a tall one). */
+  .page.settings { max-width: 1500px; columns: 2; column-gap: 18px; }
+  .page.settings > * { break-inside: avoid; }
+  .page.settings > .set-hero, .page.settings > .wide-card { column-span: all; }
 }
 
 /* Column kinds, property panel, totals */
@@ -933,7 +935,7 @@ a.btn { text-decoration: none; }
 .btn.disabled { opacity: .5; pointer-events: none; }
 /* Wide cards stay full width in the two-column settings layout. */
 @media (min-width: 1280px) {
-  .page.settings > .set-card:has(.team-row), .page.settings > .set-card:has(.role-grid), .page.settings > h1, .page.settings > p { grid-column: 1 / -1; }
+  .page.settings > .set-card:has(.team-row), .page.settings > .set-card:has(.role-grid), .page.settings > h1, .page.settings > p { column-span: all; }
 }
 .team-row label.small { white-space: nowrap; }
 
@@ -1098,3 +1100,7 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 /* Sign-in cards: fields and buttons fill the card */
 .signin-card input.search { width: 100%; }
 .signin-card > .btn { width: 100%; justify-content: center; }
+
+/* Customization */
+.mine-note { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; margin-top: 8px; }

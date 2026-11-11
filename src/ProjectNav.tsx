@@ -1,5 +1,6 @@
 // Sidebar project list: search, favorites, drag to reorder (grip on hover), icon and color kit,
 // and the rollup project that shows work from many projects together.
+import {projectsFor, saveMode} from './customize.ts';
 import {useMemo, useState} from 'react';
 import {GripVertical, LayoutTemplate, Layers, MoreHorizontal, Search, Settings, X, type LucideIcon} from 'lucide-react';
 // Only the icons offered in the kit are bundled (importing the whole icon set would add about 1 MB).
@@ -59,7 +60,8 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
   const [favs, setFavs] = useState<string[]>(() => JSON.parse(localStorage.getItem(favKey()) ?? '[]'));
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<{id: string; after: boolean} | null>(null);
-  const ordered = useMemo(() => [...store.projects].sort((a, b) => a.sort - b.sort), [store.projects]);
+  const ordered = useMemo(() => projectsFor(store), [store.projects, store.prefs, store.settings]);
+  const mode = saveMode(store, 'projectOrder');
   const shown = useMemo(() => q ? ordered.filter(p => (p.name + ' ' + p.key).toLowerCase().includes(q.toLowerCase())) : ordered, [ordered, q]);
   const toggleFav = (id: string) => { const n = favs.includes(id) ? favs.filter(x => x !== id) : [...favs, id]; setFavs(n); localStorage.setItem(favKey(), JSON.stringify(n)); };
   const drop = (target: string, after: boolean) => {
@@ -67,11 +69,12 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     const list = ordered.filter(p => p.id !== drag);
     const at = list.findIndex(p => p.id === target) + (after ? 1 : 0);
     list.splice(at, 0, ordered.find(p => p.id === drag)!);
-    list.forEach((p, n) => { if (p.sort !== n) store.updateProject(p.id, {sort: n}); });
+    if (mode === 'mine') store.setPref('projects', list.map(p => p.id));
+    else if (mode === 'team') list.forEach((p, n) => { if (p.sort !== n) store.updateProject(p.id, {sort: n}); });
   };
   const row = (p: Project, fav: boolean) => {
     const n = ordered.indexOf(p);
-    const grip = !q && !fav ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
+    const grip = !q && !fav && mode !== 'none' ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
     const star = <button className={'proj-star' + (favs.includes(p.id) ? ' on' : '')} title={favs.includes(p.id) ? 'Remove from favorites' : 'Add to favorites'} onClick={e => { e.stopPropagation(); toggleFav(p.id); }} onKeyDown={e => e.stopPropagation()}><Star size={12} /></button>;
     const icon = <IconKit store={store} project={p} index={n} />;
     const menu = <ProjectMenu project={p} />;

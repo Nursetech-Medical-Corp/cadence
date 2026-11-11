@@ -139,6 +139,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
       </div>
     </>,
   };
+  if (!store.settings.features.timeTracking) delete SECTIONS.time;
   return (
     <aside className="panel">
       <div className="panel-head">

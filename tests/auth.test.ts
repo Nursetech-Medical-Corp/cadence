@@ -173,3 +173,34 @@ test('accounts: first-run setup, one sign-in, no password takeover, rejoin with 
     assert.equal((await call('/bootstrap', {cookie: o})).status, 401, 'signed out');
   } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
 });
+
+test('customization: personal layouts are per person; locked areas are admin only', async () => {
+  process.env.CADENCE_REQUIRE_LOGIN = '1';
+  const tasks = new Tasks(openDb(':memory:'), () => '2026-11-10');
+  const mw = apiMiddleware(tasks);
+  const server = createServer((req, res) => mw(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as {port: number}).port}/api`;
+  const call = async (path: string, init: {method?: string; body?: unknown; cookie?: string} = {}) => {
+    const r = await fetch(base + path, {method: init.method ?? 'GET', headers: {'content-type': 'application/json', ...(init.cookie ? {cookie: init.cookie} : {})}, body: init.body === undefined ? undefined : JSON.stringify(init.body)});
+    return {status: r.status, json: await r.json().catch(() => null), cookie: r.headers.get('set-cookie')?.split(';')[0]};
+  };
+  try {
+    const o = (await call('/auth/setup', {method: 'POST', body: {name: 'Owner', email: 'owner@x.test', password: 'owner password'}})).cookie!;
+    const sam = tasks.listPeople().find(p => p.name !== 'Owner' && p.kind !== 'ai')!;
+    await call(`/team/${sam.id}`, {method: 'PATCH', body: {email: 'sam@x.test', password: 'sam password', role: 'editor'}, cookie: o});
+    const s = (await call('/auth/login', {method: 'POST', body: {email: 'sam@x.test', password: 'sam password'}})).cookie!;
+    const project = tasks.listProjects().find(p => !p.settings.rollup)!, view = tasks.listViews(project.id)[0];
+    // Personal: Sam's own sort is kept for Sam only.
+    assert.equal((await call('/prefs', {method: 'PUT', body: {key: `view:${view.id}`, value: {sorts: [{col: 'due', dir: -1}]}}, cookie: s})).status, 200);
+    assert.deepEqual((await call('/bootstrap', {cookie: s})).json.prefs[`view:${view.id}`], {sorts: [{col: 'due', dir: -1}]});
+    assert.deepEqual((await call('/bootstrap', {cookie: o})).json.prefs, {});
+    assert.equal((await call('/prefs', {method: 'PUT', body: {key: 'bogus', value: 1}, cookie: s})).status, 400);
+    // Locked: only admins change the team setup.
+    assert.equal((await call('/workspace', {method: 'PUT', body: {custom: {viewSettings: 'locked'}}, cookie: s})).status, 403);
+    assert.equal((await call('/workspace', {method: 'PUT', body: {custom: {viewSettings: 'locked'}}, cookie: o})).status, 200);
+    assert.equal((await call('/bootstrap', {cookie: s})).json.settings.custom.viewSettings, 'locked');
+    assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {hideDone: true}}, cookie: s})).status, 403);
+    assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {hideDone: true}}, cookie: o})).status, 200);
+  } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
+});

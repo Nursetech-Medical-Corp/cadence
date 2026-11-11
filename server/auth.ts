@@ -9,6 +9,7 @@
 // and set what everyone else gets (including "no access").
 import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
 import type {Db} from './db.ts';
+import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from '../src/types.ts';
 import {Invalid} from './errors.ts';
 
 export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
@@ -26,7 +27,7 @@ export const DEFAULT_ROLES: Role[] = [
   {id: 'commenter', name: 'Commenter', caps: ['view', 'comment']},
   {id: 'viewer', name: 'Viewer', caps: ['view']},
 ];
-export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}};
+export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}; custom: Customization; features: Features};
 export type Access = {default: string; members: Record<string, string>}; // role ids, or 'none'
 
 export function migrate(db: Db) {
@@ -49,7 +50,8 @@ export const loginForced = () => process.env.CADENCE_REQUIRE_LOGIN === '1';
 const stored = (db: Db) => { const r = db.prepare("select value from workspace where key = 'settings'").get() as {value: string} | undefined; return r ? JSON.parse(r.value) : {}; };
 export function getWorkspace(db: Db): Workspace {
   const w = stored(db);
-  return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google}};
+  return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google},
+    custom: {...DEFAULT_CUSTOM, ...w.custom}, features: {...DEFAULT_FEATURES, ...w.features}};
 }
 export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
   const cur = getWorkspace(db);

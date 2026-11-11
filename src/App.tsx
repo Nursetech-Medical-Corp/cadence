@@ -1,4 +1,5 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
 import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
@@ -195,7 +196,7 @@ export function App() {
   useEffect(() => { const f = (e: Event) => open((e as CustomEvent<string>).detail); addEventListener('open-item', f); return () => removeEventListener('open-item', f); }, [open]);
 
   const project = route.page === 'project' ? store.projects.find(p => p.id === route.id) : undefined;
-  const projectViews = useMemo(() => project ? store.views.filter(v => v.projectId === project.id).sort((a, b) => a.sort - b.sort) : [], [store.views, project]);
+  const projectViews = useMemo(() => project ? viewsFor(store, project.id) : [], [store.views, store.prefs, store.settings, project]);
   const view = route.page === 'project' ? projectViews.find(v => v.id === route.view) ?? (route.view === 'settings' ? undefined : projectViews[0]) : undefined;
 
   if (route.page === 'invite') return <AcceptInvite secret={route.id} />;
@@ -283,14 +284,14 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
       <button className={'nav-btn' + (route.page === 'mywork' ? ' active' : '')} onClick={() => go({page: 'mywork'})}><Sun size={15} /> My work</button>
       {wsCount > 1 && <button className={'nav-btn' + (route.page === 'today' ? ' active' : '')} onClick={() => go({page: 'today'})}><Layers size={15} /> Everything</button>}
       <button className={'nav-btn' + (route.page === 'inbox' ? ' active' : '')} onClick={() => go({page: 'inbox'})}><Bell size={15} /> Inbox {unread > 0 && <span className="badge">{unread}</span>}</button>
-      <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>
-      <button className={'nav-btn' + (route.page === 'ai' ? ' active' : '')} onClick={() => go({page: 'ai'})}><Bot size={15} /> AI work</button>
+      {store.settings.features.approvals && <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>}
+      {store.settings.features.aiWork && <button className={'nav-btn' + (route.page === 'ai' ? ' active' : '')} onClick={() => go({page: 'ai'})}><Bot size={15} /> AI work</button>}
 
       <div className="nav-section">Projects
         <NewProjectMenu store={store} onCreated={id => go({page: 'project', id, view: ''})} />
       </div>
       <ProjectList store={store} activeId={projectId} render={(p, n, x) => {
-        const views = store.views.filter(v => v.projectId === p.id).sort((a, b) => a.sort - b.sort);
+        const views = viewsFor(store, p.id);
         const active = projectId === p.id;
         return <>
           <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: views[0]?.id ?? ''})} />
@@ -309,10 +310,10 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
         </button>
         {wsOpen && <>
           <button className={'nav-btn' + (route.page === 'plan' ? ' active' : '')} onClick={() => go({page: 'plan'})}><Sparkles size={15} /> Plan and forecast</button>
-          <button className={'nav-btn' + (route.page === 'routines' ? ' active' : '')} onClick={() => go({page: 'routines'})}><Repeat size={15} /> Routines</button>
-          <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>
+          {store.settings.features.routines && <button className={'nav-btn' + (route.page === 'routines' ? ' active' : '')} onClick={() => go({page: 'routines'})}><Repeat size={15} /> Routines</button>}
+          {store.settings.features.timeTracking && <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>}
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
-          <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>
+          {store.settings.features.insights && <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>}
           <button className={'nav-btn' + (route.page === 'history' ? ' active' : '')} onClick={() => go({page: 'history'})}><History size={15} /> History</button>
           <button className={'nav-btn' + (route.page === 'team' ? ' active' : '')} onClick={() => go({page: 'team'})}><Shield size={15} /> Team and permissions</button>
           <button className={'nav-btn' + (route.page === 'data' ? ' active' : '')} onClick={() => go({page: 'data'})}><Database size={15} /> Data and backups</button>
@@ -370,15 +371,22 @@ export function applyFilters(items: Item[], c: ViewConfig, ctx?: {project: Proje
     (!c.types?.length || c.types.includes(i.type)));
 }
 
-function ProjectPage({store, project: own, views, view, settings, open}: {store: Store; project: Project; views: View[]; view?: View; settings: boolean; open: (id: string) => void}) {
+function ProjectPage({store, project: own, views, view, settings, open}: {store: Store; project: Project; views: ShownView[]; view?: ShownView; settings: boolean; open: (id: string) => void}) {
   // A rollup shows the chosen projects' work together, with their statuses, levels and fields merged.
   const included = useMemo(() => isRollup(own) ? includedIn(own, store.projects) : [], [own, store.projects]);
   const project = useMemo(() => isRollup(own) ? rollupProject(own, included) : own, [own, included]);
   const ids = useMemo(() => new Set([own.id, ...included.map(p => p.id)]), [own.id, included]);
   const items = useMemo(() => [...store.items.values()].filter(i => ids.has(i.projectId)), [store.items, ids]);
   const config = view?.config ?? {};
-  // A locked view keeps its setup; only unlocking changes it.
-  const setConfig = (patch: Partial<ViewConfig>) => view && (!view.config.locked || 'locked' in patch) && store.updateView(view.id, {config: {...view.config, ...patch}});
+  // A locked view keeps its setup; only unlocking changes it. Otherwise a change is yours or the team's,
+  // by the workspace rule (src/customize.ts). Locking and privacy are about the view itself, so always the team's.
+  const team = view ? store.views.find(v => v.id === view.id) ?? view : undefined;
+  const setConfig = (patch: Partial<ViewConfig>) => {
+    if (!view || !team || (view.config.locked && !('locked' in patch))) return;
+    const mode = 'locked' in patch || 'privateTo' in patch ? 'team' : saveMode(store, 'viewSettings');
+    if (mode === 'mine') store.setPref(`view:${view.id}`, {...view.mine, ...patch});
+    else if (mode === 'team') store.updateView(view.id, {config: {...team.config, ...patch}});
+  };
   const currentSprint = useMemo(() => { const t = store.today; const list = store.sprints.filter(s => s.projectId === project.id); return (list.find(s => s.start <= t && t <= s.end) ?? null)?.id ?? null; }, [store.sprints, store.today, project.id]);
   const filtered = useMemo(() => applyFilters(items, config, {project, today: store.today, currentSprint}), [items, config, project, store.today, currentSprint]);
   const sprints = useMemo(() => store.sprints.filter(s => s.projectId === project.id), [store.sprints, project.id]);
@@ -418,7 +426,9 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
           onDrop={() => {
             if (!dragView || dragView === v.id) return;
             const list = views.filter(x => x.id !== dragView); list.splice(list.findIndex(x => x.id === v.id), 0, views.find(x => x.id === dragView)!);
-            store.reorderViews(project.id, list.map(x => x.id));
+            const order = saveMode(store, 'viewOrder');
+            if (order === 'mine') store.setPref(`views:${project.id}`, list.map(x => x.id));
+            else if (order === 'team') store.reorderViews(project.id, list.map(x => x.id));
             setDragView(null); setOverView(null);
           }}><ViewTab store={store} view={v} active={!settings && view?.id === v.id} project={project} /></span>)}
         <AddView store={store} project={project} />
@@ -426,6 +436,9 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
         <button className={'tab' + (settings ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: 'settings'})}><Settings size={14} /> Settings</button>
       </div>
     </header>
+    {!settings && view?.mine && <div className="locked-note mine-note">Your own changes to this view: only you see them.
+      {store.settings.admin || saveMode(store, 'viewSettings') !== 'none' ? <button className="btn ghost small" title="Make your changes the team setup for this view" onClick={() => { store.updateView(view.id, {config: {...(team?.config ?? {}), ...view.mine}}); store.setPref(`view:${view.id}`, null); }}>Save for everyone</button> : null}
+      <button className="btn ghost small" title="Go back to the team setup" onClick={() => store.setPref(`view:${view.id}`, null)}>Reset to team view</button></div>}
     {!settings && view && view.config.locked && <div className="locked-note"><Lock size={12} /> This view is locked, so its filters, sort and columns stay as they are. Unlock it from the view's ... menu.</div>}
     {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
     <div className="content">

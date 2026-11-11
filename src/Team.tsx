@@ -1,7 +1,8 @@
 // Sign-in page, Team page (people, roles and their permissions, sign-in and Google), and per-project access.
+import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
 import {Check as CheckIcon, Copy, KeyRound, LogIn, Plus, Shield, Trash2} from 'lucide-react';
-import type {Project} from './types.ts';
+import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 
@@ -83,7 +84,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const [people, setPeople] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [caps, setCaps] = useState<{id: string; label: string}[]>([]);
-  const [ws, setWs] = useState<{requireLogin: boolean; forced?: boolean; google: {clientId: string; hasSecret: boolean; senderEmail: string | null; connected: boolean}} | null>(null);
+  const [ws, setWs] = useState<{requireLogin: boolean; forced?: boolean; custom: Customization; features: Features; google: {clientId: string; hasSecret: boolean; senderEmail: string | null; connected: boolean}} | null>(null);
   const [msg, setMsg] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('error') ?? (location.hash.includes('connected=1') ? 'Gmail sender connected.' : location.hash.includes('linked=') ? `Google account connected: ${decodeURIComponent(location.hash.split('linked=')[1] ?? '')}` : ''));
   const [newName, setNewName] = useState('');
   const [secret, setSecret] = useState('');
@@ -103,6 +104,25 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
     <div className="page settings">
       <h1><Shield size={20} /> Team and permissions</h1>
       {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
+
+      {ws && <section className="set-card">
+        <div className="set-card-head"><h3>Customization</h3><span className="muted small">The team setup is what everyone starts from. Choose who changes each part, and which features are on.</span></div>
+        {AREAS.map(([k, label, hint]) => (
+          <div key={k} className="set-item">
+            <span className="grow"><b>{label}</b> <span className="muted small">{hint}</span></span>
+            <select className="plain-select" value={ws.custom[k]} disabled={!isAdmin} onChange={async e => { try { await api('/workspace', {method: 'PUT', body: {custom: {...ws.custom, [k]: e.target.value}}}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }}>
+              {POLICIES.map(([p, l]) => <option key={p} value={p}>{l}</option>)}
+            </select>
+          </div>
+        ))}
+        <div className="muted small">Each person: everyone can arrange things their own way (saved for them); a bar on the view lets them save it for everyone or go back to the team view.</div>
+        <div className="feature-grid">
+          {(Object.keys(FEATURE_LABELS) as (keyof Features)[]).map(k => (
+            <label key={k} className="small"><input type="checkbox" checked={ws.features[k]} disabled={!isAdmin}
+              onChange={async e => { try { await api('/workspace', {method: 'PUT', body: {features: {...ws.features, [k]: e.target.checked}}}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }} /> {FEATURE_LABELS[k]}</label>
+          ))}
+        </div>
+      </section>}
 
       <section className="set-card">
         <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every project unless the project sets its own. Admins can do everything.</span></div>

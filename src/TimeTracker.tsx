@@ -41,6 +41,7 @@ export function TimeCell({item, store, compact}: {item: Item; store: Store; comp
   const mine = store.running?.itemId === item.id ? store.running : null;
   const total = store.timeTotals.get(item.id) ?? 0;
   const [open, setOpen] = useState(false);
+  if (!store.settings.features.timeTracking) return null;
   return (
     <span className={'picker time-cell' + (compact && !mine && !total ? ' idle' : '')} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
       <button className={'time-play' + (mine ? ' on' : '')} title={mine ? 'Stop timer' : 'Start timer'}

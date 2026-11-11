@@ -345,6 +345,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           people: tasks.listPeople(), projects, items, today: tasks.today(),
           time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => seen.has(iid))),
           sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
+          prefs: actor && !bearer ? tasks.prefs(actor) : {}, settings: {custom: ws.custom, features: ws.features, admin: !ws.requireLogin || isAdmin(actor)},
         });
       }
 
@@ -400,6 +401,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const patch: Record<string, unknown> = {};
           if (body.requireLogin !== undefined) patch.requireLogin = !!body.requireLogin;
           if (body.roles) patch.roles = body.roles;
+          const pol = (v: unknown) => v === 'personal' || v === 'shared' || v === 'locked' ? v : null;
+          if (body.custom) patch.custom = Object.fromEntries(Object.entries(ws.custom).map(([k, v]) => [k, pol((body.custom as Record<string, unknown>)[k]) ?? v]));
+          if (body.features) patch.features = Object.fromEntries(Object.entries(ws.features).map(([k, v]) => [k, typeof (body.features as Record<string, unknown>)[k] === 'boolean' ? (body.features as Record<string, boolean>)[k] : v]));
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});
@@ -420,10 +424,10 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'views') {
         if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
         if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
-        if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
+        if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); if (ws.custom.viewOrder === 'locked') needAdmin(); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
         if (b) need(tasks.view(b).projectId, 'views');
         // Only the owner can make a view private to themselves; nobody can make it private to someone else.
-        if (b && m === 'PATCH') { if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
+        if (b && m === 'PATCH') { if (body.config && ws.custom.viewSettings === 'locked' && !('locked' in body.config && Object.keys(body.config).length === 1)) needAdmin(); if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
       }
 
@@ -496,6 +500,12 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (m === 'POST') { needAdmin(); mirrorFiles(join(tasks.dataDir, 'files'), bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
       }
 
+      // Your own layout: view settings, tab order, project order (see src/customize.ts).
+      if (a === 'prefs' && m === 'PUT') {
+        if (!actor || bearer) throw new Invalid('Pick who you are first');
+        tasks.setPref(actor, String(body.key ?? ''), body.value ?? null);
+        return send(res, 200, {ok: true});
+      }
       if (a === 'people') {
         if (b === 'order' && m === 'PUT') { needAdmin(); return send(res, 200, tasks.reorderPeople((body.ids ?? []).map(String))); }
         if (m === 'GET') return send(res, 200, tasks.listPeople());
@@ -513,6 +523,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           // Access rules decide who can do anything, so only admins may change them.
           if (body.settings && JSON.stringify((body.settings as {access?: Access}).access ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) needAdmin();
           need(b, 'settings');
+          if (body.sort !== undefined && ws.custom.projectOrder === 'locked') needAdmin();
           return send(res, 200, tasks.updateProject(b, body));
         }
         if (b && c === 'export' && m === 'GET') {
