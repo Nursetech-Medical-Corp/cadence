@@ -558,7 +558,7 @@ function Toolbar({store, project, view, config, setConfig, openItem}: {store: St
       {view.kind === 'gantt' && (
         <div className="seg">{(['day', 'week', 'month'] as const).map(z => <button key={z} className={(config.zoom ?? 'week') === z ? 'on' : ''} onClick={() => setConfig({zoom: z})}>{z[0].toUpperCase() + z.slice(1)}</button>)}</div>
       )}
-      {active && <button className="btn ghost" onClick={() => { setText(''); setConfig({text: '', assignee: undefined, hideDone: false, types: [], filter: undefined}); }}>Clear</button>}
+      {active && <button className="btn ghost" title="Clears the search, person, types, Showing done and filter rules. Sort and colors stay." onClick={() => { setText(''); setConfig({text: '', assignee: undefined, hideDone: false, types: [], filter: undefined}); }}><X size={13} /> Clear filters</button>}
       <span className="spacer" />
       <button className="btn ghost" title="Download the rows in this view as CSV" onClick={() => downloadCsv(`${project.key}-${view.name}`, project, applyFilters([...store.items.values()].filter(i => i.projectId === project.id), config, {project, today: store.today, currentSprint: store.sprints.find(s => s.projectId === project.id && s.start <= store.today && store.today <= s.end)?.id ?? null}).sort((a, b) => a.sort - b.sort), store)}><Download size={13} /> Export CSV</button>
     </div>
