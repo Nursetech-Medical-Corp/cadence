@@ -23,3 +23,16 @@ test('critical path: the longest chain has no slack; side work with room does no
   assert.deepEqual([...criticalPath(items)].sort(), ['a', 'b', 'c']);
   assert.equal(criticalPath([]).size, 0);
 });
+
+test('sorting: status and dropdowns follow your arranged order, or A to Z when asked', async () => {
+  const {sortItems} = await import('../src/Sorting.tsx');
+  const project = {statuses: [{id: 'backlog', name: 'Backlog'}, {id: 'todo', name: 'To do'}, {id: 'doing', name: 'Doing'}], types: ['Task'],
+    fields: [{id: 'size', name: 'Size', kind: 'select', options: ['Small', 'Medium', 'Large']}]} as never;
+  const it = (title: string, status: string, size?: string) => ({id: title, title, status, type: 'Task', priority: 0, assignees: [], tags: [], fields: size ? {size} : {}, sort: 0}) as never;
+  const items = [it('a', 'doing', 'Large'), it('b', 'backlog', 'Small'), it('c', 'todo', 'Medium')];
+  const titles = (l: {title: string}[]) => l.map(x => x.title).join('');
+  assert.equal(titles(sortItems(items, [{col: 'status', dir: 1}], project, {} as never)), 'bca', 'arranged order');
+  assert.equal(titles(sortItems(items, [{col: 'status', dir: 1, by: 'alpha'}], project, {} as never)), 'bac', 'Backlog, Doing, To do');
+  assert.equal(titles(sortItems(items, [{col: 'f:size', dir: 1}], project, {} as never)), 'bca', 'Small, Medium, Large');
+  assert.equal(titles(sortItems(items, [{col: 'f:size', dir: 1, by: 'alpha'}], project, {} as never)), 'acb', 'Large, Medium, Small');
+});

@@ -1012,3 +1012,8 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .psec.dragging { opacity: .4; }
 .psec-grip { position: absolute; left: -18px; top: 14px; opacity: 0; cursor: grab; color: var(--text3, #aaa); display: inline-flex; }
 .psec:hover > .psec-grip { opacity: 1; }
+
+.pop-row.reorderable { position: relative; }
+.opt-grip { position: absolute; left: 2px; opacity: 0; color: var(--text3, #aaa); cursor: grab; }
+.pop-row.reorderable:hover .opt-grip { opacity: 1; }
+.pop-row.dragging { opacity: .4; }

@@ -276,6 +276,7 @@ export function MultiField({field, value, onChange, store}: {field: FieldDef; va
 export function SelectField({field, value, onChange, store}: {field: FieldDef; value: string | null; onChange: (v: unknown) => void; store: Store}) {
   const project = store.projects.find(p => p.fields.some(f => f.id === field.id));
   return <Menu value={value} onChange={onChange} title={field.name}
+    onReorder={project ? (a, b) => { const opts = [...(field.options ?? [])]; const [m] = opts.splice(a - 1, 1); opts.splice(b - 1, 0, m); store.updateProject(project.id, {fields: project.fields.map(f => f.id === field.id ? {...f, options: opts} : f)}); } : undefined}
     options={[{value: null, label: 'None'}, ...(field.options ?? []).map(o => ({value: o as string | null, label: o}))]}
     render={value ? <span className="tag">{value}</span> : <span className="muted">-</span>}
     onAdd={project ? (name: string) => { store.updateProject(project.id, {fields: project.fields.map(f => f.id === field.id ? {...f, options: [...(f.options ?? []), name]} : f)}); return name; } : undefined} />;

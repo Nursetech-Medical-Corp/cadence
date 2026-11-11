@@ -1,6 +1,6 @@
 import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import {Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon} from 'lucide-react';
+import {Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon, GripVertical} from 'lucide-react';
 import type {Item, Person, Project, Sprint, Status} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import type {Store} from './store.ts';
@@ -74,21 +74,26 @@ export function Popover({open, onClose, children, className = ''}: {open: boolea
 }
 
 /** Button that opens a list of options. */
-export function Menu<T extends string | number | null>({value, options, onChange, render, className = '', title, onAdd, addLabel = 'Add option'}: {
+export function Menu<T extends string | number | null>({value, options, onChange, render, className = '', title, onAdd, addLabel = 'Add option', onReorder}: {
   value: T; options: {value: T; label: string; icon?: ReactNode}[]; onChange: (v: T) => void;
   render: ReactNode; className?: string; title?: string;
   /** When set, the menu ends with an inline "+ Add option" field. Return the new value to select it. */
   onAdd?: (label: string) => T | undefined | Promise<T | undefined>; addLabel?: string;
+  /** When set, options can be dragged into a new order (grip shows on hover). */
+  onReorder?: (from: number, to: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  const [drag, setDrag] = useState<number | null>(null);
   return (
     <span className="picker">
       <button data-pop-trigger className={'cell-btn ' + className} title={title} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>{render}</button>
       <Popover open={open} onClose={() => setOpen(false)}>
-        {options.map(o => (
-          <button key={String(o.value)} className={'pop-row' + (o.value === value ? ' on' : '')} onClick={() => { onChange(o.value); setOpen(false); }}>
-            {o.icon}<span className="grow">{o.label}</span>{o.value === value && <CheckIcon size={14} />}
+        {options.map((o, n) => (
+          <button key={String(o.value)} className={'pop-row' + (o.value === value ? ' on' : '') + (onReorder ? ' reorderable' : '') + (drag === n ? ' dragging' : '')} onClick={() => { onChange(o.value); setOpen(false); }}
+            draggable={!!onReorder && o.value !== null} onDragStart={() => setDrag(n)} onDragEnd={() => setDrag(null)}
+            onDragOver={e => { if (drag !== null) e.preventDefault(); }} onDrop={() => { if (drag !== null && drag !== n && onReorder) onReorder(drag, n); setDrag(null); }}>
+            {onReorder && o.value !== null && <GripVertical size={12} className="opt-grip" />}{o.icon}<span className="grow">{o.label}</span>{o.value === value && <CheckIcon size={14} />}
           </button>
         ))}
         {onAdd && (adding === null
@@ -122,7 +127,7 @@ export function StatusSelect({project, value, onChange, compact}: {project: Proj
     store.updateProject(project.id, {statuses: list});
     return id;
   } : undefined;
-  return <Menu value={value} title="Status" onChange={onChange} className="status-btn" onAdd={onAdd} addLabel="Add status"
+  return <Menu value={value} title="Status" onChange={onChange} className="status-btn" onReorder={store ? (a: number, b: number) => { const l = [...project.statuses]; const [m] = l.splice(a, 1); l.splice(b, 0, m); store.updateProject(project.id, {statuses: l}); } : undefined} onAdd={onAdd} addLabel="Add status"
     options={project.statuses.map(s => ({value: s.id, label: s.name, icon: <StatusIcon status={s} />}))}
     render={<span className="status-pill" style={{'--c': s?.color ?? '#999'} as React.CSSProperties}><StatusIcon status={s} size={13} />{!compact && <span>{s?.name ?? value}</span>}</span>} />;
 }

@@ -5,7 +5,10 @@ import type {Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
 import {Popover} from './components.tsx';
 
-export type SortRule = {col: string; dir: 1 | -1};
+/** by: for status, type, priority and dropdown columns, 'order' follows the order you arranged; 'alpha' sorts A to Z by name. */
+export type SortRule = {col: string; dir: 1 | -1; by?: 'order' | 'alpha'};
+/** Columns whose values have an arranged order. */
+export const hasOrder = (col: string, project: Project) => ['status', 'type', 'priority'].includes(col) || ['select', 'multi'].includes(project.fields.find(f => 'f:' + f.id === col)?.kind ?? '');
 
 export function sortFields(project: Project): {id: string; label: string}[] {
   return [
@@ -22,12 +25,20 @@ export const sortsOf = (c: ViewConfig): SortRule[] => c.sorts ?? (c.sort ? [c.so
 /** Empty values always sort last, whatever the direction. */
 export function sortItems(items: Item[], rules: SortRule[], project: Project, store: Store): Item[] {
   if (!rules.length) return [...items].sort((a, b) => a.sort - b.sort);
-  const val = (i: Item, col: string): string | number | null => {
+  const PRIO = ['', 'urgent', 'high', 'medium', 'low'];
+  const val = (i: Item, col: string, alpha: boolean): string | number | null => {
+    const f = col.startsWith('f:') ? project.fields.find(x => x.id === col.slice(2)) : undefined;
+    if (f && (f.kind === 'select' || f.kind === 'multi')) {
+      // Dropdown columns: the option order you arranged, or A to Z.
+      const v = i.fields[f.id], first = Array.isArray(v) ? (f.options ?? []).find(o => (v as string[]).includes(o)) : (v as string | undefined);
+      if (!first) return null;
+      return alpha ? first.toLowerCase() : (f.options ?? []).indexOf(first);
+    }
     switch (col) {
       case 'title': return i.title.toLowerCase();
-      case 'status': return project.statuses.findIndex(s => s.id === i.status);
-      case 'type': return project.types.indexOf(i.type);
-      case 'priority': return i.priority || null;
+      case 'status': return alpha ? (project.statuses.find(s => s.id === i.status)?.name ?? '').toLowerCase() : project.statuses.findIndex(s => s.id === i.status);
+      case 'type': return alpha ? i.type.toLowerCase() : project.types.indexOf(i.type);
+      case 'priority': return !i.priority ? null : alpha ? PRIO[i.priority] : i.priority;
       case 'assignees': return i.assignees.length ? (store.people.find(p => p.id === i.assignees[0])?.name ?? '').toLowerCase() : null;
       case 'due': return i.due; case 'start': return i.start; case 'estimate': return i.estimate;
       case 'sprint': return i.sprint ? store.sprints.find(s => s.id === i.sprint)?.start ?? null : null;
@@ -39,7 +50,8 @@ export function sortItems(items: Item[], rules: SortRule[], project: Project, st
   };
   return [...items].sort((a, b) => {
     for (const r of rules) {
-      const x = val(a, r.col), y = val(b, r.col);
+      const alpha = r.by === 'alpha';
+      const x = val(a, r.col, alpha), y = val(b, r.col, alpha);
       if (x === y) continue;
       if (x === null) return 1;
       if (y === null) return -1;
@@ -71,6 +83,10 @@ export function SortButton({project, config, setConfig}: {project: Project; conf
             <select className="plain-select" value={r.col} onChange={e => save(rules.map((x, k) => k === n ? {...x, col: e.target.value} : x))}>
               {fields.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
             </select>
+            {hasOrder(r.col, project) && <div className="seg" title="Your order follows how the options are arranged; drag them in any dropdown to change it">
+              <button className={r.by !== 'alpha' ? 'on' : ''} onClick={() => save(rules.map((x, k) => k === n ? {...x, by: 'order'} : x))}>Your order</button>
+              <button className={r.by === 'alpha' ? 'on' : ''} onClick={() => save(rules.map((x, k) => k === n ? {...x, by: 'alpha'} : x))}>A to Z</button>
+            </div>}
             <div className="seg">
               <button className={r.dir === 1 ? 'on' : ''} onClick={() => save(rules.map((x, k) => k === n ? {...x, dir: 1} : x))}><ArrowUp size={12} /> Asc</button>
               <button className={r.dir === -1 ? 'on' : ''} onClick={() => save(rules.map((x, k) => k === n ? {...x, dir: -1} : x))}><ArrowDown size={12} /> Desc</button>
