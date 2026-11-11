@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
 import {addUnit, daysBetween, iso, monday, skipWeekend} from '../src/dates.ts';
-import {parseQuickAdd} from '../src/quickadd.ts';
+import {PRIORITY_WORDS, parseQuickAdd} from '../src/quickadd.ts';
 import {nextOccurrence} from '../src/recur.ts';
 import {Invalid, NotFound} from './errors.ts';
 export {Invalid, NotFound};
@@ -14,6 +14,7 @@ import * as ai from './aiwork.ts';
 import * as approvals from './approvals.ts';
 import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateData} from './packs.ts';
 import {apply as applyRule, matches as ruleMatches, type RuleHost} from './automations.ts';
+import {PRIORITIES} from '../src/types.ts';
 import type {Activity, BurnPoint, InheritKey, ProjectSettings, Rule, Template, Trigger, ChangeEvent, Comment, FieldDef, Item, ItemPatch, Notification, Person, Project, Recur, Sprint, Status, TimeEntry, View, ViewConfig, ViewKind} from '../src/types.ts';
 
 const COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
@@ -127,6 +128,11 @@ const cleanFields = (f: Record<string, unknown>) => Object.fromEntries(Object.en
 export function portableViewConfig(c: ViewConfig): ViewConfig {
   const {sprint: _s, baselines: _b, baseline: _bl, privateTo: _p, locked: _l, ...rest} = c;
   return rest;
+}
+
+function toTime(r: Row): TimeEntry {
+  return {id: r.id as string, itemId: r.item_id as string, person: r.person as string, start: r.start as string,
+    end: (r.end as string) ?? null, minutes: (r.minutes as number) ?? null, note: (r.note as string) ?? null, kind: r.kind === 'review' ? 'review' : 'work'};
 }
 
 function toComment(r: Row): Comment {
@@ -552,13 +558,16 @@ export class Tasks {
     const where: string[] = [], args: string[] = [];
     if (q.itemId) { where.push('item_id = ?'); args.push(q.itemId); }
     if (q.person) { where.push('person = ?'); args.push(q.person); }
-    return this.db.prepare(`select * from time_entries ${where.length ? 'where ' + where.join(' and ') : ''} order by start desc`).all(...args).map(r => ({
-      id: r.id as string, itemId: r.item_id as string, person: r.person as string, start: r.start as string,
-      end: (r.end as string) ?? null, minutes: (r.minutes as number) ?? null, note: (r.note as string) ?? null, kind: r.kind === 'review' ? 'review' : 'work',
-    }));
+    return this.db.prepare(`select * from time_entries ${where.length ? 'where ' + where.join(' and ') : ''} order by start desc`).all(...args).map(toTime);
   }
-  runningTimer(person: string) {
-    return this.listTime({person}).find(e => e.end === null) ?? null;
+  runningTimer(person: string): TimeEntry | null {
+    const r = this.db.prepare('select * from time_entries where person = ? and end is null limit 1').get(person);
+    return r ? toTime(r) : null;
+  }
+  timeEntry(entryId: string): TimeEntry {
+    const r = this.db.prepare('select * from time_entries where id = ?').get(entryId);
+    if (!r) throw new NotFound('Time entry not found');
+    return toTime(r);
   }
   startTimer(itemId: string, person: string, kind: 'work' | 'review' = 'work') {
     this.item(itemId); this.person(person);
@@ -598,8 +607,7 @@ export class Tasks {
   }
   /** Logged minutes per item (all people), for the Time tracked column. */
   timeTotals(itemId?: string): Record<string, number> {
-    const rows = itemId ? this.db.prepare('select item_id, sum(minutes) as m from time_entries where item_id = ? and minutes > 0 group by item_id').all(itemId)
-      : this.db.prepare('select item_id, sum(minutes) as m from time_entries where minutes > 0 group by item_id').all();
+    const rows = this.db.prepare('select item_id, sum(minutes) as m from time_entries where minutes > 0 and (?1 is null or item_id = ?1) group by item_id').all(itemId ?? null);
     return Object.fromEntries(rows.map(r => [r.item_id as string, r.m as number]));
   }
   /** One person's week: minutes per task per day (Monday first), from finished time entries. */
@@ -1107,7 +1115,10 @@ export class Tasks {
     return toView(r);
   }
   updateView(vid: string, patch: Partial<Pick<View, 'name' | 'kind' | 'config' | 'sort'>>): View {
-    const v = {...this.view(vid), ...patch};
+    const cur = this.view(vid);
+    // Locked views keep their settings until someone unlocks them (config.locked false).
+    if (cur.config.locked && patch.config && patch.config.locked !== false) throw new Invalid('This view is locked. Unlock it first (config locked: false).');
+    const v = {...cur, ...patch};
     this.db.prepare('update views set name=?, kind=?, config=?, sort=? where id=?').run(v.name, v.kind, JSON.stringify(v.config), v.sort, vid);
     this.emit({kind: 'view', projectId: v.projectId});
     return v;
@@ -1125,10 +1136,9 @@ export class Tasks {
   exportItems(projectId: string, format: 'json' | 'csv' = 'json') {
     const p = this.project(projectId), people = this.listPeople(), sprints = this.listSprints(projectId), totals = this.timeTotals();
     const items = this.listItems({projectId}), byId = new Map(items.map(i => [i.id, i]));
-    const PRI = ['', 'urgent', 'high', 'medium', 'low'];
     const rows = items.map(i => ({
       key: `${p.key}-${i.number}`, title: i.title, type: i.type, status: p.statuses.find(s => s.id === i.status)?.name ?? i.status,
-      priority: PRI[i.priority] ?? '', assignees: i.assignees.map(a => people.find(x => x.id === a)?.name ?? a).join(', '),
+      priority: i.priority ? PRIORITIES[i.priority].toLowerCase() : '', assignees: i.assignees.map(a => people.find(x => x.id === a)?.name ?? a).join(', '),
       start: i.start ?? '', due: i.due ?? '', estimate: i.estimate ?? '', tags: i.tags.join(', '), sprint: sprints.find(s => s.id === i.sprint)?.name ?? '',
       parent: i.parentId && byId.get(i.parentId) ? `${p.key}-${byId.get(i.parentId)!.number}` : '', done: i.completed ? 'yes' : '',
       hours: totals[i.id] ? Math.round(totals[i.id] / 60 * 100) / 100 : '',
@@ -1148,9 +1158,13 @@ export class Tasks {
   importItems(projectId: string, rows: Record<string, unknown>[], actor: string | null = null) {
     const p = this.project(projectId), people = this.listPeople();
     if (!Array.isArray(rows) || !rows.length || rows.length > 1000) throw new Invalid('Send 1 to 1000 rows');
-    const PRI: Record<string, number> = {none: 0, urgent: 1, high: 2, medium: 3, low: 4};
     const list = (v: unknown) => Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[,;]/).map(x => x.trim()).filter(Boolean) : [];
     const made = new Map<string, string>(), keys: string[] = [], errors: {row: number; error: string}[] = [];
+    // One transaction and one refresh for the whole import, not an event per row.
+    const emit = this.emit;
+    this.emit = () => {};
+    this.db.exec('begin');
+    try {
     rows.forEach((r, n) => {
       try {
         const s = (k: string) => r?.[k] == null || r[k] === '' ? undefined : String(r[k]).trim();
@@ -1160,7 +1174,7 @@ export class Tasks {
         if (sn && !st) throw new Invalid(`Unknown status "${sn}". Known: ${p.statuses.map(x => x.name).join(', ')}`);
         const tn = s('type'), type = tn ? p.types.find(x => x.toLowerCase() === tn.toLowerCase()) : undefined;
         if (tn && !type) throw new Invalid(`Unknown type "${tn}". Known: ${p.types.join(', ')}`);
-        const pn = s('priority'), priority = pn === undefined ? 0 : /^[0-4]$/.test(pn) ? Number(pn) : PRI[pn.toLowerCase()];
+        const pn = s('priority'), priority = pn === undefined || /^(none|0)$/i.test(pn) ? 0 : PRIORITY_WORDS[pn.toLowerCase()];
         if (priority === undefined) throw new Invalid(`Unknown priority "${pn}"`);
         const assignees = list(r.assignees ?? r.assignee).map(a => {
           const hit = people.find(x => x.id === a || x.name.toLowerCase() === a.toLowerCase() || x.email?.toLowerCase() === a.toLowerCase());
@@ -1182,6 +1196,9 @@ export class Tasks {
         keys.push(`${p.key}-${it.number}`);
       } catch (e) { errors.push({row: n + 1, error: e instanceof Error ? e.message : String(e)}); }
     });
+      this.db.exec('commit');
+    } catch (e) { this.db.exec('rollback'); throw e; } finally { this.emit = emit; }
+    if (keys.length) this.emit({kind: 'refresh'});
     return {created: keys.length, keys, errors};
   }
 

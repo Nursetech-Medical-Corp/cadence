@@ -125,7 +125,7 @@ export function useStore(me: string) {
       else if (e.kind === 'project') setProjects(prev => prev.some(p => p.id === e.project.id) ? prev.map(p => p.id === e.project.id ? e.project : p) : [...prev, e.project]);
       else if (e.kind === 'project-deleted') setProjects(prev => prev.filter(p => p.id !== e.id));
       else if (e.kind === 'people') api<Person[]>('/people').then(setPeople);
-      else if (e.kind === 'time') api<Record<string, number>>(`/time/totals?itemId=${e.itemId}`).then(r => setTimeTotals(prev => new Map(prev).set(e.itemId, r[e.itemId] ?? 0))).catch(() => {});
+      else if (e.kind === 'time') api<number>(`/time/totals?itemId=${e.itemId}`).then(m => setTimeTotals(prev => new Map(prev).set(e.itemId, m))).catch(() => {});
       else if (e.kind === 'sprint') loadSprints();
       else if (e.kind === 'view') loadViews();
       else if (e.kind === 'refresh') load();

@@ -1,5 +1,5 @@
 // MCP server over stdio. Shares the SQLite file with the web app; the UI updates live.
-import {addDays} from '../src/dates.ts';
+import {monday} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -84,7 +84,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     if (!actor) throw new Error('Start the MCP server with --as <person> to comment');
     return tasks.addComment(tasks.findItem(i.item).id, actor, i.body, i.assignee ? personId(i.assignee) : null);
   });
-  const me = () => actor ?? (() => { throw new Error('Start the MCP server with --as <person>, or use a token'); })();
+  const me = () => { if (!actor) throw new Error('Pass person, or start the MCP server with --as <person> (or use a token)'); return actor; };
   tool('start_timer', 'Start your timer on an item (stops any other timer you have running). Timers record to the second. Work you log on a task starts it for you.',
     {item: z.string(), kind: z.enum(['work', 'review']).optional().describe('review: time spent reviewing the work on this item')}, false,
     i => tasks.startTimer(tasks.findItem(i.item).id, me(), i.kind ?? 'work'));
@@ -101,7 +101,6 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('update_view', 'Change a view: rename it, or change its settings (merged into the current ones unless replace is true). Locked views must be unlocked first (config.locked false). ' + VIEW_CONFIG_DOC,
     {view: z.string().describe('View id'), name: z.string().optional(), config: z.record(z.string(), z.any()).optional(), replace: z.boolean().optional()}, false, i => {
       const v = tasks.view(i.view);
-      if (v.config.locked && i.config?.locked !== false) throw new Error('This view is locked. Send config {locked: false} to unlock it first.');
       return tasks.updateView(v.id, {...(i.name ? {name: i.name} : {}), ...(i.config ? {config: i.replace ? i.config : {...v.config, ...i.config}} : {})});
     });
   tool('delete_view', 'Delete a view (the items stay).', {view: z.string()}, false, i => { tasks.deleteView(i.view); return {ok: true}; });
@@ -132,12 +131,12 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('list_time', 'Time entries for an item or a person (kind work or review; minutes can be fractional).', {item: z.string().optional(), person: z.string().optional()}, true,
     i => tasks.listTime({itemId: i.item ? tasks.findItem(i.item).id : undefined, person: i.person ? personId(i.person) : undefined}));
   tool('get_timesheet', 'A person\'s week: minutes per task per day, Monday first.', {week: z.string().describe('Any date in the week, YYYY-MM-DD'), person: z.string().optional()}, true,
-    i => tasks.timesheet(i.person ? personId(i.person) : me(), addDays(i.week, -((new Date(i.week + 'T00:00:00').getDay() + 6) % 7))));
+    i => tasks.timesheet(i.person ? personId(i.person) : me(), monday(i.week)));
   tool('set_day_time', 'Set the hours logged on one task for one day (replaces that day\'s entries; 0 clears).', {item: z.string(), date: z.string(), hours: z.number().min(0).max(24), person: z.string().optional()}, false,
     i => tasks.setDayMinutes(i.person ? personId(i.person) : me(), tasks.findItem(i.item).id, i.date, i.hours * 60));
   tool('delete_time_entry', 'Delete a time entry by id.', {id: z.string()}, false, i => { tasks.deleteTime(i.id); return {ok: true}; });
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
-    i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : (actor ?? (() => { throw new Error('Pass person, or start the MCP server with --as <person>'); })()), minutes: i.minutes, note: i.note, date: i.date}));
+    i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : me(), minutes: i.minutes, note: i.note, date: i.date}));
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
   tool('create_project', 'Create a project with default statuses.', {name: z.string(), key: z.string().optional()}, false, i => tasks.createProject(i));
   tool('update_project', 'Change project name, statuses, types or custom fields.', {

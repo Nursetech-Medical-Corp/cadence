@@ -50,8 +50,7 @@ export function acceptInvite(db: Db, secret: string, input: {name?: unknown; pas
   const name = String(input.name ?? '').trim() || inv.name || inv.email.split('@')[0];
   if (name.length > 100) throw new Invalid('Names are limited to 100 characters');
   const password = String(input.password ?? '');
-  let hash: string;
-  try { hash = hashPassword(password); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Choose a stronger password'); }
+  const hash = hashPassword(password);
   const existing = db.prepare('select id from people where lower(email) = ?').get(inv.email) as {id: string} | undefined;
   const id = existing?.id ?? createPerson(name, inv.email);
   db.prepare('update people set name = ?, password = ?, role = ?, active = 1 where id = ?').run(name, hash, inv.role, id);

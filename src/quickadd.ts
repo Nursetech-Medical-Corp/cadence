@@ -7,7 +7,8 @@ export type Parsed = {
   sprint?: 'current' | 'next' | 'none' | string;
 };
 
-const PRIO: Record<string, number> = {urgent: 1, u: 1, '1': 1, high: 2, h: 2, '2': 2, medium: 3, med: 3, m: 3, '3': 3, low: 4, l: 4, '4': 4};
+/** Priority words and shorthands (urgent, u, 1, high, h, ...) to numbers. */
+export const PRIORITY_WORDS: Record<string, number> = {urgent: 1, u: 1, '1': 1, high: 2, h: 2, '2': 2, medium: 3, med: 3, m: 3, '3': 3, low: 4, l: 4, '4': 4};
 const UNITS: Record<string, Recur['unit']> = {d: 'day', day: 'day', daily: 'day', w: 'week', week: 'week', weekly: 'week', m: 'month', month: 'month', monthly: 'month', y: 'year', year: 'year', yearly: 'year'};
 
 // "Fix login @dave !high #bug due:fri start:mon ~3h every:2w type:Bug"
@@ -21,7 +22,7 @@ export function parseQuickAdd(text: string, people: Person[], today: string, typ
       const p = people.find(p => p.name.toLowerCase() === q || p.name.toLowerCase().replace(/\s+/g, '') === q) ?? people.find(p => p.name.toLowerCase().startsWith(q));
       if (p) { if (!out.assignees.includes(p.id)) out.assignees.push(p.id); continue; }
     }
-    if (tok.startsWith('!') && PRIO[tok.slice(1).toLowerCase()]) { out.priority = PRIO[tok.slice(1).toLowerCase()]; continue; }
+    if (tok.startsWith('!') && PRIORITY_WORDS[tok.slice(1).toLowerCase()]) { out.priority = PRIORITY_WORDS[tok.slice(1).toLowerCase()]; continue; }
     if (tok.length > 1 && tok.startsWith('#')) { out.tags.push(tok.slice(1)); continue; }
     const kv = /^(due|start|every|type|sprint|sp):(.+)$/i.exec(tok);
     if (kv) {

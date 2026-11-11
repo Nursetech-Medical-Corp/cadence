@@ -8,6 +8,9 @@
 import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
 import {checkPassword, hashPassword} from './auth.ts';
+import {DatabaseSync} from 'node:sqlite';
+import {dirname, join} from 'node:path';
+import {listWorkspaces} from './workspaces.ts';
 
 const DAYS = 30;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -57,3 +60,8 @@ export class Accounts {
 /** HttpOnly session cookie; Secure when the request came over HTTPS (directly or through a proxy). */
 export const accountCookie = (token: string, secure: boolean) =>
   `${ACCOUNT_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${token ? DAYS * 86400 : 0}${secure ? '; Secure' : ''}`;
+
+/** The server's account store, beside the main workspace database (data/accounts.db). */
+export function openAccounts() {
+  return new Accounts(new DatabaseSync(join(dirname(listWorkspaces().find(w => w.id === 'main')!.db), 'accounts.db')));
+}

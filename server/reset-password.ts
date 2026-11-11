@@ -3,8 +3,7 @@
 //   pnpm reset-password someone@example.com "new pass"
 import {randomBytes} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-import {dirname, join} from 'node:path';
-import {Accounts} from './accounts.ts';
+import {openAccounts} from './accounts.ts';
 import {hashPassword} from './auth.ts';
 import {listWorkspaces} from './workspaces.ts';
 
@@ -13,7 +12,7 @@ if (!email.includes('@')) { console.error('Usage: pnpm reset-password <email> [n
 const password = given ?? randomBytes(12).toString('base64url');
 const hash = hashPassword(password);
 const workspaces = listWorkspaces();
-const accounts = new Accounts(new DatabaseSync(join(dirname(workspaces.find(w => w.id === 'main')!.db), 'accounts.db')));
+const accounts = openAccounts();
 accounts.setHash(email, hash);
 let found = 0;
 for (const w of workspaces) {

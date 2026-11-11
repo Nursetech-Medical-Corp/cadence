@@ -74,6 +74,17 @@ export function Popover({open, onClose, children, className = ''}: {open: boolea
 }
 
 /** Button that opens a list of options. */
+/** Drag rows of a popover list into a new order. Returns props for row n, and whether it is the one being dragged. */
+export function useDragRows<T>(list: T[], onReorder?: (list: T[]) => void) {
+  const [drag, setDrag] = useState<number | null>(null);
+  const row = (n: number, enabled = true) => !onReorder || !enabled ? {} : {
+    draggable: true, onDragStart: () => setDrag(n), onDragEnd: () => setDrag(null),
+    onDragOver: (e: React.DragEvent) => { if (drag !== null) e.preventDefault(); },
+    onDrop: () => { if (drag !== null && drag !== n) { const l = [...list]; const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder(l); } setDrag(null); },
+  };
+  return {row, dragging: (n: number) => drag === n};
+}
+
 export function Menu<T extends string | number | null>({value, options, onChange, render, className = '', title, onAdd, addLabel = 'Add option', onReorder}: {
   value: T; options: {value: T; label: string; icon?: ReactNode}[]; onChange: (v: T) => void;
   render: ReactNode; className?: string; title?: string;
@@ -85,18 +96,14 @@ export function Menu<T extends string | number | null>({value, options, onChange
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
-  const [drag, setDrag] = useState<number | null>(null);
+  const rows = useDragRows(options.map(o => o.value), onReorder && (l => onReorder(l.filter((x): x is NonNullable<T> => x !== null))));
   return (
     <span className="picker">
       <button data-pop-trigger className={'cell-btn ' + className} title={title} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>{render}</button>
       <Popover open={open} onClose={() => setOpen(false)}>
         {options.map((o, n) => (
-          <button key={String(o.value)} className={'pop-row' + (o.value === value ? ' on' : '') + (onReorder ? ' reorderable' : '') + (drag === n ? ' dragging' : '')} onClick={() => { onChange(o.value); setOpen(false); }}
-            draggable={!!onReorder && o.value !== null} onDragStart={() => setDrag(n)} onDragEnd={() => setDrag(null)}
-            onDragOver={e => { if (drag !== null) e.preventDefault(); }} onDrop={() => {
-              if (drag !== null && drag !== n && onReorder) { const l = options.map(x => x.value); const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder(l.filter((x): x is NonNullable<T> => x !== null)); }
-              setDrag(null);
-            }}>
+          <button key={String(o.value)} className={'pop-row' + (o.value === value ? ' on' : '') + (onReorder ? ' reorderable' : '') + (rows.dragging(n) ? ' dragging' : '')} onClick={() => { onChange(o.value); setOpen(false); }}
+            {...rows.row(n, o.value !== null)}>
             {onReorder && o.value !== null && <GripVertical size={12} className="opt-grip" />}{o.icon}<span className="grow">{o.label}</span>{o.value === value && <CheckIcon size={14} />}
           </button>
         ))}
@@ -171,9 +178,9 @@ export function SprintSelect({sprints, value, onChange, projectId}: {sprints: Sp
 export function PeoplePicker({value, people, onChange, compact, onReorder}: {value: string[]; people: Person[]; onChange: (v: string[]) => void; compact?: boolean; onReorder?: (ids: string[]) => void}) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [drag, setDrag] = useState<number | null>(null);
   const movable = !!onReorder && !q;
   const list = people.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
+  const rows = useDragRows(list.map(p => p.id), movable ? onReorder : undefined);
   return (
     <span className="picker">
       <button data-pop-trigger className="cell-btn" onClick={e => { e.stopPropagation(); setOpen(o => !o); }} title="Assign">
@@ -182,10 +189,8 @@ export function PeoplePicker({value, people, onChange, compact, onReorder}: {val
       <Popover open={open} onClose={() => setOpen(false)}>
         <input autoFocus className="pop-search" placeholder="Search people" value={q} onChange={e => setQ(e.target.value)} />
         {list.map((p, n) => (
-          <button key={p.id} className={'pop-row' + (value.includes(p.id) ? ' on' : '') + (movable ? ' reorderable' : '') + (drag === n ? ' dragging' : '')}
-            onClick={() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])}
-            draggable={movable} onDragStart={() => setDrag(n)} onDragEnd={() => setDrag(null)} onDragOver={e => { if (drag !== null) e.preventDefault(); }}
-            onDrop={() => { if (drag !== null && drag !== n) { const l = list.map(x => x.id); const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder!(l); } setDrag(null); }}>
+          <button key={p.id} className={'pop-row' + (value.includes(p.id) ? ' on' : '') + (movable ? ' reorderable' : '') + (rows.dragging(n) ? ' dragging' : '')}
+            onClick={() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])} {...rows.row(n)}>
             {movable && <GripVertical size={12} className="opt-grip" />}<Avatar person={p} /><span className="grow">{p.name}</span>{value.includes(p.id) && <CheckIcon size={14} />}
           </button>
         ))}

@@ -29,11 +29,16 @@ const shortSpan = (min: number) => min < 1 ? `${Math.round(min * 60)}s` : fmtMin
 const clockOf = (iso: string, secs: boolean) => new Date(iso).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit', ...(secs ? {second: '2-digit'} : {})});
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
 
+/** Time since start, counting up every second. Only this re-renders while a timer runs. */
+export function Elapsed({start, className}: {start: string; className?: string}) {
+  const now = useNow(true);
+  return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
+}
+
 /** Table and list cell: play or stop, then the total (or the running clock). Click the total for the full box. */
 /** compact: with no time yet, only a play button that shows on hover (board cards, list rows). */
 export function TimeCell({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
   const mine = store.running?.itemId === item.id ? store.running : null;
-  const now = useNow(!!mine);
   const total = store.timeTotals.get(item.id) ?? 0;
   const [open, setOpen] = useState(false);
   return (
@@ -43,7 +48,7 @@ export function TimeCell({item, store, compact}: {item: Item; store: Store; comp
         {mine ? <Square size={8} fill="currentColor" /> : <Play size={9} fill="currentColor" />}
       </button>
       <button data-pop-trigger className={'time-total' + (mine ? ' on' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        {mine ? fmtClock(now - Date.parse(mine.start)) : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
+        {mine ? <Elapsed start={mine.start} /> : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} className="time-pop"><TimeBox item={item} store={store} /></Popover>
     </span>
@@ -55,13 +60,13 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const load = () => api<TimeEntry[]>(`/time?itemId=${item.id}`).then(setEntries).catch(() => {});
   useEffect(() => { load(); }, [item.id]);
-  useEffect(() => { if (store.lastEvent.current?.kind === 'time') load(); }, [store.tick]);
+  useEffect(() => { const e = store.lastEvent.current; if (e?.kind === 'time' && e.itemId === item.id) load(); }, [store.tick]);
   const running = store.running?.itemId === item.id ? store.running : null;
-  const now = useNow(!!running);
   const own = store.timeTotals.get(item.id) ?? 0;
   const withSubs = useMemo(() => {
-    const all = [...store.items.values()];
-    const sum = (pid: string): number => all.filter(i => i.parentId === pid).reduce((a, c) => a + (store.timeTotals.get(c.id) ?? 0) + sum(c.id), 0);
+    const kids = new Map<string, string[]>();
+    for (const i of store.items.values()) if (i.parentId) kids.set(i.parentId, [...(kids.get(i.parentId) ?? []), i.id]);
+    const sum = (pid: string): number => (kids.get(pid) ?? []).reduce((a, c) => a + (store.timeTotals.get(c) ?? 0) + sum(c), 0);
     return own + sum(item.id);
   }, [store.items, store.timeTotals, item.id, own]);
 
@@ -76,12 +81,9 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
   const typeDur = (v: string) => { setDur(v); const m = parseDuration(v); if (m > 0 && m < 1440) setFrom(toHHMM(Math.max(0, toMin(to) - m))); };
   const pick = (f: string, t: string) => { setFrom(f); setTo(t); const d = toMin(t) - toMin(f); setDur(d > 0 ? fmtMinutes(d) : ''); };
   const save = async () => {
-    const typed = parseDuration(dur);
-    const minutes = span > 0 ? span : typed;
-    if (Number.isNaN(typed) || !(minutes > 0)) { setErr('Enter a time like 3h 20m, or pick a start and an end'); return; }
-    const start = new Date(`${date}T${from}:00`);
+    if (Number.isNaN(parseDuration(dur)) || !(span > 0)) { setErr('Enter a time like 3h 20m, or pick a start and an end'); return; }
     try {
-      await api('/time', {method: 'POST', body: {itemId: item.id, start: start.toISOString(), end: new Date(start.getTime() + minutes * 60000).toISOString(), minutes, note: note.trim() || null}});
+      await api('/time', {method: 'POST', body: {itemId: item.id, start: new Date(`${date}T${from}:00`).toISOString(), end: new Date(`${date}T${to}:00`).toISOString(), note: note.trim() || null}});
       setDur(''); setNote(''); setErr(''); const t = nowHHMM(); setTo(t); setFrom(t); load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
@@ -104,7 +106,7 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
           {running
             ? <button className="time-play on big" title="Stop timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
             : <button className="time-play big" title="Start timer" onClick={() => store.startTimer(item.id)}><Play size={11} fill="currentColor" /></button>}
-          {running && <span className="time-live">{fmtClock(now - Date.parse(running.start))}</span>}
+          {running && <Elapsed start={running.start} className="time-live" />}
         </div>
         <div className="time-when">
           <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} />
@@ -116,7 +118,7 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
         </div>
         <input className="time-note" placeholder="Notes" value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()} />
         {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-        <div className="time-actions"><button className="btn primary small" disabled={!!running || !(span > 0 || parseDuration(dur) > 0)} onClick={save}>Save</button></div>
+        <div className="time-actions"><button className="btn primary small" disabled={!!running || !(span > 0)} onClick={save}>Save</button></div>
       </div>
       {byPerson.length > 0 && <div className="time-entries">
         <div className="pop-label">Time entries</div>

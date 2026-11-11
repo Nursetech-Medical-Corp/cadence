@@ -36,12 +36,17 @@ export class Forbidden extends Error {}
  * Wraps the service so every call is checked against the acting person's role, for callers that are not
  * the trusted local user (remote MCP over HTTP). Reads are filtered to visible projects; writes need the capability.
  */
+/** Calls that need no project check: the person list, dates, the template gallery. */
+const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit']);
+
 export function guarded(tasks: Tasks, actor: string): Tasks {
   const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true);
   const need = (projectId: string, cap: Cap) => { if (!caps(projectId).has(cap)) throw new Forbidden(`Not allowed: needs "${cap}" in project ${tasks.project(projectId).key}`); };
   const sees = (projectId: string) => { try { return caps(projectId).has('view'); } catch { return false; } };
   const projOfItem = (id: string) => tasks.findItem(id).projectId;
   const isAdmin = () => !!(tasks.db.prepare('select admin from people where id = ?').get(actor) as {admin: number} | undefined)?.admin;
+  const self = (person: string, what: string) => { if (person !== actor) throw new Forbidden(`You can only ${what} your own`); };
+  const selfOrAdmin = (person: string, what: string) => { if (person !== actor && !isAdmin()) throw new Forbidden(`Only admins ${what} for others`); };
   const checks: Record<string, (...a: any[]) => void> = {
     createItem: (i) => { need(i.projectId, 'create'); for (const d of i.deps ?? []) need(projOfItem(d), 'view'); },
     quickAdd: (i) => need(i.projectId, 'create'),
@@ -50,13 +55,13 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     addComment: (id) => need(projOfItem(id), 'comment'),
     resolveComment: (cid) => need(projOfItem(tasks.comment(cid).itemId), 'comment'),
     reorderViews: (pid) => need(pid, 'views'),
-    logTime: (i) => { need(projOfItem(i.itemId), 'edit'); if (i.person !== actor && !isAdmin()) throw new Forbidden('Only admins log time for others'); },
-    startTimer: (itemId, person) => { need(projOfItem(itemId), 'edit'); if (person !== actor) throw new Forbidden('You can only run your own timer'); },
-    stopTimer: (person) => { if (person !== actor) throw new Forbidden('You can only stop your own timer'); },
-    timesheet: (person) => { if (person !== actor && !isAdmin()) throw new Forbidden('Only admins see other people\'s timesheets'); },
-    deleteTime: (eid) => { const e = tasks.listTime({}).find(x => x.id === eid); if (!e) return; need(projOfItem(e.itemId), 'edit'); if (e.person !== actor && !isAdmin()) throw new Forbidden('Only admins delete other people\'s time'); },
-    listNotifications: (person) => { if (person !== actor) throw new Forbidden('Only your own notifications'); },
-    markRead: (person) => { if (person !== actor) throw new Forbidden('Only your own notifications'); },
+    logTime: (i) => { need(projOfItem(i.itemId), 'edit'); selfOrAdmin(i.person, 'log time'); },
+    startTimer: (itemId, person) => { need(projOfItem(itemId), 'edit'); self(person, 'run timers'); },
+    stopTimer: (person) => self(person, 'stop timers'),
+    timesheet: (person) => selfOrAdmin(person, 'see timesheets'),
+    deleteTime: (eid) => { const e = tasks.timeEntry(eid); need(projOfItem(e.itemId), 'edit'); selfOrAdmin(e.person, 'delete time'); },
+    listNotifications: (person) => self(person, 'read notifications'),
+    markRead: (person) => self(person, 'read notifications'),
     updateView: (vid, patch) => { need(tasks.view(vid).projectId, 'views'); if (patch?.config?.privateTo && patch.config.privateTo !== actor) throw new Forbidden('A view can only be made private to yourself'); },
     deleteView: (vid) => need(tasks.view(vid).projectId, 'views'),
     deleteProject: () => { if (!isAdmin()) throw new Forbidden('Only admins delete projects'); },
@@ -64,7 +69,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     importItems: (pid) => need(pid, 'create'),
     exportItems: (pid) => need(pid, 'export'),
     exportWorkspace: () => { if (!isAdmin()) throw new Forbidden('Only admins export the whole workspace'); },
-    setDayMinutes: (person, itemId) => { need(projOfItem(itemId), 'edit'); if (person !== actor && !isAdmin()) throw new Forbidden('Only admins log time for others'); },
+    setDayMinutes: (person, itemId) => { need(projOfItem(itemId), 'edit'); selfOrAdmin(person, 'log time'); },
     applyToChildren: (id) => need(projOfItem(id), 'edit'),
     createSprint: (i) => need(i.projectId, 'sprints'),
     updateSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
@@ -101,12 +106,22 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     projectFiles: (pid) => need(pid, 'view'),
     workLog: (id) => need(projOfItem(id), 'view'),
     itemFiles: (id) => need(projOfItem(id), 'view'),
+    listComments: (id) => need(projOfItem(id), 'view'),
+    approvalState: (id) => need(projOfItem(id), 'view'),
+    currentSprint: (pid) => need(pid, 'view'),
+    burndown: (sid) => need(tasks.sprint(sid).projectId, 'view'),
+    estimateMissing: (pid) => { if (!pid) throw new Forbidden('Pass a project'); need(pid, 'view'); },
+    replan: (o) => { if (!o?.projectId) throw new Forbidden('Pass a project'); need(o.projectId, 'view'); },
+    forecast: (o) => { if (!o?.projectId) throw new Forbidden('Pass a project'); need(o.projectId, 'view'); },
+    exportPack: (ids: string[]) => { for (const id of ids) checks.getTemplate(id); },
   };
   const filters: Record<string, (r: any) => any> = {
     listProjects: (r: any[]) => r.filter(p => sees(p.id)),
     listItems: (r: any[]) => r.filter(i => sees(i.projectId)),
     listSprints: (r: any[]) => r.filter(s => sees(s.projectId)),
     listTime: (r: any[]) => r.filter(e => sees(projOfItem(e.itemId))),
+    listApprovals: (r: any[]) => r.filter(a => sees(projOfItem(a.itemId))),
+    view: (v: any) => { if (!sees(v.projectId)) throw new Forbidden('Not found'); return v; },
     listViews: (r: any[]) => r.filter(v => sees(v.projectId) && (!v.config.privateTo || v.config.privateTo === actor)),
     listActivity: (r: any[]) => r.filter(a => sees(a.projectId)),
     myWork: (r: Record<string, any[]>) => Object.fromEntries(Object.entries(r).map(([k, l]) => [k, l.filter(i => sees(i.projectId))])),
@@ -122,7 +137,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
       const v = Reflect.get(target, prop, recv);
       if (typeof v !== 'function' || typeof prop !== 'string') return v;
       const check = checks[prop], filter = filters[prop];
-      if (!check && !filter) return v.bind(target);
+      // Anything not listed is refused, so a new service method is closed to tokens until it gets a check.
+      if (!check && !filter) { if (OPEN.has(prop)) return v.bind(target); return () => { throw new Forbidden(`${prop} is not available to tokens`); }; }
       return (...args: unknown[]) => {
         check?.(...args);
         const out = v.apply(target, args);

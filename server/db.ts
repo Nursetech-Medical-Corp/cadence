@@ -35,6 +35,8 @@ create table if not exists notifications (
 );
 create index if not exists notifications_person on notifications(person, read);
 create index if not exists time_person_start on time_entries(person, start);
+create index if not exists time_item on time_entries(item_id);
+create index if not exists time_running on time_entries(person) where end is null;
 create table if not exists sprints (
   id text primary key, project_id text not null references projects(id) on delete cascade,
   name text not null, start text not null, end text not null, goal text not null default '',

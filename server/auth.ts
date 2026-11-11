@@ -9,6 +9,7 @@
 // and set what everyone else gets (including "no access").
 import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
 import type {Db} from './db.ts';
+import {Invalid} from './errors.ts';
 
 export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
 export type Cap = typeof CAPS[number];
@@ -30,7 +31,6 @@ export type Access = {default: string; members: Record<string, string>}; // role
 
 export function migrate(db: Db) {
   db.exec(`
-    create table if not exists sessions (token text primary key, person text not null, created text not null, expires text not null);
     create table if not exists workspace (key text primary key, value text not null);
   `);
   const cols = db.prepare('pragma table_info(people)').all().map(r => r.name);
@@ -46,13 +46,14 @@ export function migrate(db: Db) {
 /** CADENCE_REQUIRE_LOGIN=1 (the default for pnpm start) turns sign-in on for every workspace. */
 export const loginForced = () => process.env.CADENCE_REQUIRE_LOGIN === '1';
 
+const stored = (db: Db) => { const r = db.prepare("select value from workspace where key = 'settings'").get() as {value: string} | undefined; return r ? JSON.parse(r.value) : {}; };
 export function getWorkspace(db: Db): Workspace {
-  const r = db.prepare("select value from workspace where key = 'settings'").get() as {value: string} | undefined;
-  const w = r ? JSON.parse(r.value) : {};
+  const w = stored(db);
   return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google}};
 }
 export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
-  const w = {...getWorkspace(db), ...patch};
+  const cur = getWorkspace(db);
+  const w = {...cur, requireLogin: !!stored(db).requireLogin, ...patch};
   if (!w.roles.some(r => r.id === 'admin')) throw new Error('The Admin role cannot be removed');
   w.roles = w.roles.map(r => r.id === 'admin' ? {...r, caps: [...CAPS]} : r);
   db.prepare("insert into workspace (key, value) values ('settings', ?) on conflict(key) do update set value = excluded.value").run(JSON.stringify(w));
@@ -60,8 +61,8 @@ export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
 }
 
 export function hashPassword(pw: string) {
-  if (pw.length < 8) throw new Error('Passwords need at least 8 characters');
-  if (pw.length > 200) throw new Error('Passwords are limited to 200 characters');
+  if (pw.length < 8) throw new Invalid('Passwords need at least 8 characters');
+  if (pw.length > 200) throw new Invalid('Passwords are limited to 200 characters');
   const salt = randomBytes(16).toString('hex');
   return `${salt}:${scryptSync(pw, salt, 32).toString('hex')}`;
 }

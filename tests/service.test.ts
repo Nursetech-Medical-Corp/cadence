@@ -687,7 +687,7 @@ test('MCP: an agent runs the board (views, import, export, timesheet) but cannot
   const v = await call('create_view', {project: 'WEB', name: 'Urgent first', kind: 'table', config: {sorts: [{col: 'priority', dir: 1}]}});
   const u = await call('update_view', {view: v.id, config: {hideDone: true, locked: true}});
   assert.deepEqual(u.config.sorts, [{col: 'priority', dir: 1}]);
-  await assert.rejects(call('update_view', {view: v.id, name: 'x'}), /locked/);
+  await assert.rejects(call('update_view', {view: v.id, config: {hideDone: false}}), /locked/);
   await call('update_view', {view: v.id, config: {locked: false}});
   const views = await call('list_views', {project: 'WEB'});
   await call('reorder_views', {project: 'WEB', views: [v.id, ...views.filter((x: {id: string}) => x.id !== v.id).map((x: {id: string}) => x.id)]});

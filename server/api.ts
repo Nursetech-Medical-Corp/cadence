@@ -9,7 +9,7 @@ import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
 import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorFiles, retention, saveSettings, snapshot} from './backup.ts';
 import {CAPS, CAP_LABELS, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, type Access, type Cap} from './auth.ts';
-import {ACCOUNT_COOKIE, Accounts, accountCookie} from './accounts.ts';
+import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts} from './accounts.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
@@ -20,7 +20,7 @@ import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
 import {migrateApprovals} from './approvals.ts';
 import {archiveWorkspace, createWorkspace, listWorkspaces, publicInfo, reorderWorkspaces, updateWorkspace, workspaceDir, type WorkspaceInfo} from './workspaces.ts';
-import {dirname, join} from 'node:path';
+import {join} from 'node:path';
 import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
@@ -58,8 +58,7 @@ export function apiMiddleware(single?: Tasks): Handler {
     const shared: Shared = {accounts: new Accounts(new DatabaseSync(':memory:')), all: () => [{id: 'main', name: 'Cadence', tasks: single}]};
     return workspaceApi(single, {id: 'main', dir: single.dataDir, main: true}, () => single, () => {}, shared);
   }
-  const main = listWorkspaces().find(w => w.id === 'main')!;
-  const shared: Shared = {accounts: new Accounts(new DatabaseSync(join(dirname(main.db), 'accounts.db'))), all: () => listWorkspaces().map(w => ({id: w.id, name: w.name, tasks: open(w).tasks}))};
+  const shared: Shared = {accounts: openAccounts(), all: () => listWorkspaces().map(w => ({id: w.id, name: w.name, tasks: open(w).tasks}))};
   const handlers = new Map<string, {h: Handler; tasks: Tasks}>();
   const close = (id: string) => { const x = handlers.get(id); if (x) { x.tasks.db.close(); handlers.delete(id); } };
   const open = (w: WorkspaceInfo): {h: Handler; tasks: Tasks} => {
@@ -177,6 +176,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this project`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
       const canSee = (projectId: string) => caps(actor, projectId, !!bearer).has('view');
+      const seesItem = (itemId: string) => { try { return canSee(tasks.item(itemId).projectId); } catch { return false; } };
 
       // ---- Sign-in (always reachable) ----
       if (a === 'auth') {
@@ -191,8 +191,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           if (!ws.requireLogin || accounts.count()) throw new Invalid('This server is already set up. Sign in instead.');
           const email = String(body.email ?? '').trim().toLowerCase(), name = String(body.name ?? '').trim().slice(0, 80);
           if (!/^[^\s@<>",;:]+@[^\s@<>",;:]+\.[a-z]{2,}$/i.test(email)) throw new Invalid('Enter a valid email address');
-          let hash: string;
-          try { hash = hashPassword(String(body.password ?? '')); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Choose a stronger password'); }
+          const hash = hashPassword(String(body.password ?? ''));
           for (const w of all()) {
             // Claim the person with this email, else the first admin without an email, else a new admin.
             const t = w.tasks;
@@ -341,9 +340,10 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
       if (a === 'bootstrap' && m === 'GET') {
         const projects = tasks.listProjects().filter(p => canSee(p.id)), ids = new Set(projects.map(p => p.id));
+        const items = tasks.listItems().filter(i => ids.has(i.projectId)), seen = new Set(items.map(i => i.id));
         return send(res, 200, {
-          people: tasks.listPeople(), projects, items: tasks.listItems().filter(i => ids.has(i.projectId)), today: tasks.today(),
-          time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => { try { return ids.has(tasks.item(iid).projectId); } catch { return false; } })),
+          people: tasks.listPeople(), projects, items, today: tasks.today(),
+          time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => seen.has(iid))),
           sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
         });
       }
@@ -381,8 +381,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
               if (account !== email) throw new Invalid('Only the account owner can change this password. The server owner can reset it with pnpm reset-password.');
               if (cur && !checkPassword(String(body.currentPassword ?? ''), cur)) throw new Invalid('Your current password is wrong');
             }
-            let hash: string;
-            try { hash = hashPassword(String(body.password)); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Choose a stronger password'); }
+            const hash = hashPassword(String(body.password));
             accounts.setHash(email, hash, token);
             syncHash(email, hash);
           }
@@ -422,9 +421,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
         if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
         if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
-        const vr = b ? tasks.db.prepare('select project_id from views where id = ?').get(b) as {project_id: string} | undefined : undefined;
-        if (b && !vr) throw new NotFound('View not found');
-        if (vr) need(vr.project_id, 'views');
+        if (b) need(tasks.view(b).projectId, 'views');
         // Only the owner can make a view private to themselves; nobody can make it private to someone else.
         if (b && m === 'PATCH') { if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
@@ -562,22 +559,21 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         // Your own week; admins can see and fill anyone's.
         const person = String((m === 'GET' ? q('person') : body.person) ?? actor ?? '');
         if (ws.requireLogin && person !== actor) needAdmin();
-        if (m === 'GET') { const t = tasks.timesheet(person, q('week') ?? ''); return send(res, 200, {...t, rows: t.rows.filter(r => { try { return canSee(tasks.item(r.itemId).projectId); } catch { return false; } })}); }
+        if (m === 'GET') { const t = tasks.timesheet(person, q('week') ?? ''); return send(res, 200, {...t, rows: t.rows.filter(r => seesItem(r.itemId))}); }
         if (m === 'PUT') { need(tasks.findItem(String(body.itemId ?? '')).projectId, 'edit'); return send(res, 200, tasks.setDayMinutes(person, String(body.itemId), String(body.date ?? ''), Number(body.minutes))); }
       }
       if (a === 'time') {
         // Signed in, you can only log or time your own work.
         const person = ws.requireLogin ? actor : (actor ?? q('person') ?? body.person);
-        if (!b && m === 'GET') return send(res, 200, tasks.listTime({itemId: q('itemId'), person: q('person')}).filter(t => { try { return canSee(tasks.item(t.itemId).projectId); } catch { return false; } }));
+        if (!b && m === 'GET') return send(res, 200, tasks.listTime({itemId: q('itemId'), person: q('person')}).filter(t => seesItem(t.itemId)));
         if (!b && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.logTime({...body, person: ws.requireLogin ? actor : body.person ?? person})); }
-        if (b === 'totals' && m === 'GET') { const iid = q('itemId') ?? ''; need(tasks.item(iid).projectId, 'view'); return send(res, 200, tasks.timeTotals(iid)); }
+        if (b === 'totals' && m === 'GET') { const iid = q('itemId') ?? ''; need(tasks.item(iid).projectId, 'view'); return send(res, 200, tasks.timeTotals(iid)[iid] ?? 0); }
         if (b === 'running' && m === 'GET') return send(res, 200, person ? tasks.runningTimer(person) : null);
         if (b === 'start' && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.startTimer(body.itemId, ws.requireLogin ? actor! : body.person ?? person, body.kind === 'review' ? 'review' : 'work')); }
         if (b === 'stop' && m === 'POST') return send(res, 200, tasks.stopTimer(ws.requireLogin ? actor! : body.person ?? person, body.note));
         if (b && m === 'DELETE') {
-          const e = tasks.db.prepare('select person, item_id from time_entries where id = ?').get(b) as {person: string; item_id: string} | undefined;
-          if (!e) throw new NotFound('Time entry not found');
-          if (e.person !== actor) { need(tasks.item(e.item_id).projectId, 'edit'); needAdmin(); }
+          const e = tasks.timeEntry(b);
+          if (e.person !== actor) { need(tasks.item(e.itemId).projectId, 'edit'); needAdmin(); }
           tasks.deleteTime(b); return send(res, 200, {ok: true});
         }
       }
@@ -654,7 +650,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'approvals') {
         if (!b && m === 'GET') {
           const list = tasks.listApprovals({itemId: q('itemId'), approver: q('mine') ? actor ?? '' : undefined, pending: q('pending') === 'true'});
-          return send(res, 200, list.filter(x => { try { return canSee(tasks.item(x.itemId).projectId); } catch { return false; } }));
+          return send(res, 200, list.filter(x => seesItem(x.itemId)));
         }
         if (!b && m === 'POST') { const it = tasks.findItem(body.itemId); need(it.projectId, 'edit'); return send(res, 201, tasks.requestApproval(it.id, actor, body.approvers ?? [], body.meaning ?? 'approved', body.note ?? '')); }
         if (b && c === 'sign' && m === 'POST') {
