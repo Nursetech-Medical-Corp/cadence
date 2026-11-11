@@ -110,9 +110,8 @@ function Widget({id, store, me, mine, open}: {id: WidgetId; store: Store; me: st
     return <div className="week-strip">{days.map(d => {
       const due = openItems.filter(i => i.due === d || (n0(d, t) && i.due && i.due < t));
       return <div key={d} className={'wk-day' + (d === t ? ' today' : '')}>
-        <div className="wk-name">{parseDay(d).toLocaleDateString(undefined, {weekday: 'short'})} {parseDay(d).getDate()}</div>
-        {due.slice(0, 4).map(i => <div key={i.id} className={'wk-item' + (i.due! < t ? ' overdue' : '')} onClick={() => open(i.id)} title={i.title}>{i.title}</div>)}
-        {due.length > 4 && <div className="muted small">+{due.length - 4}</div>}
+        <div className="wk-name">{parseDay(d).toLocaleDateString(undefined, {weekday: 'short'})} {parseDay(d).getDate()}{due.length > 0 && <span className="wk-count">{due.length}</span>}</div>
+        <div className="wk-list">{due.map(i => <div key={i.id} className={'wk-item' + (i.due! < t ? ' overdue' : '')} onClick={() => open(i.id)} title={i.title}>{i.title}</div>)}</div>
       </div>;
     })}</div>;
   }

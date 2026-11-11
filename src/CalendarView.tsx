@@ -11,6 +11,8 @@ const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function CalendarView({store, project, items, open, config, setConfig}: ViewProps) {
   const mode = config.zoom === 'day' ? 'week' : 'month';
+  // Days opened with "+N more" show all their items in place.
+  const [openDays, setOpenDays] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState(store.today);
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
                 onDragOver={e => { e.preventDefault(); setOver(d); }} onDragLeave={() => setOver(o => o === d ? null : o)}
                 onDrop={() => { if (drag) moveTo(drag, d); setDrag(null); setOver(null); }}>
                 <div className="cal-num"><span>{parseDay(d).getDate()}</span><button className="icon cal-add" title="Add item due this day" onClick={() => setAdding({day: d, text: ''})}><Plus size={13} /></button></div>
-                {list.slice(0, mode === 'week' ? 50 : 4).map(i => (
+                {list.slice(0, mode === 'week' || openDays.has(d) ? list.length : 4).map(i => (
                   <div key={i.id} className={'cal-chip' + segment(i, d) + (i.completed ? ' done' : '') + (i.due! < store.today && !i.completed ? ' late' : '')} draggable
                     onDragStart={() => setDrag(i.id)} onDragEnd={() => { setDrag(null); setOver(null); }} onClick={() => open(i.id)} title={i.title}>
                     <StatusIcon status={project.statuses.find(s => s.id === i.status)} size={12} />
@@ -83,7 +85,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
                     {mode === 'week' && <Avatars ids={i.assignees} people={store.people} size={16} />}
                   </div>
                 ))}
-                {mode === 'month' && list.length > 4 && <button className="cal-more" onClick={() => { setCursor(d); setConfig({zoom: 'day'}); }}>+{list.length - 4} more</button>}
+                {mode === 'month' && list.length > 4 && <button className="cal-more" onClick={() => setOpenDays(s => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; })}>{openDays.has(d) ? 'Show less' : `+${list.length - 4} more`}</button>}
                 {adding?.day === d && (
                   <input autoFocus className="cal-input" placeholder="Title, Enter" value={adding.text}
                     onChange={e => setAdding({day: d, text: e.target.value})}

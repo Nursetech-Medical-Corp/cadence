@@ -355,7 +355,11 @@ body > .popover.wide { min-width: 260px; }
 .widget-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .widget .row { border-bottom: 1px solid var(--line2); border-radius: 0; }
 .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-.wk-day { background: var(--bg2); border-radius: 8px; padding: 6px; min-height: 90px; min-width: 0; }
+.wk-day { background: var(--bg2); border-radius: 8px; padding: 6px; min-height: 90px; min-width: 0; display: flex; flex-direction: column; }
+/* All of a day's items, scrolling inside the day; a bigger widget shows more at once. */
+.week-strip { height: 100%; }
+.wk-list { flex: 1; min-height: 0; overflow-y: auto; }
+.wk-count { margin-left: 6px; font-size: 10.5px; color: var(--muted); background: var(--card); border-radius: 999px; padding: 0 6px; }
 .wk-day.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .wk-name { font-size: .78em; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
 .wk-item { font-size: .78em; background: var(--card); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
