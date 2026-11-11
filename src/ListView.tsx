@@ -2,10 +2,10 @@ import {Fragment, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
-import {ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Repeat} from 'lucide-react';
+import {ChevronDown, ChevronRight, GripVertical, Plus, Repeat, Maximize2} from 'lucide-react';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
-import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move} from './components.tsx';
+import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move, SpaceChip} from './components.tsx';
 import {rowFieldsOf, type RowField, type ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
 import {countRules} from './FilterBuilder.tsx';
@@ -105,6 +105,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
               {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
             </button>
             <Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} />
+            {project.settings.rollup && <SpaceChip item={i} projects={store.projects} />}
             {i.type !== 'Task' && <TypeBadge type={i.type} />}
             <RowTitle item={i}
               onSave={title => store.updateItem(i.id, {title})}
@@ -120,7 +121,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
               <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => store.updateItem(i.id, {due})} placeholder="Due" />
               {slot(fields[1], i)}
               {slot(fields[2], i)}
-              <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button>
+              <button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button>
             </span>
           </div>
           {!isCollapsed && rows(i.id, depth + 1)}

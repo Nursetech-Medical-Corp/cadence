@@ -2,7 +2,7 @@
 // rank by dragging, and plan by dragging items onto sprint cards on the right.
 import {useQuickAssist} from './QuickAssist.tsx';
 import {Fragment, useMemo, useState} from 'react';
-import {ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, Plus} from 'lucide-react';
+import {ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Plus, Maximize2} from 'lucide-react';
 import type {Item} from './types.ts';
 import {between} from './store.ts';
 import {Check, PeoplePicker, PriorityIcon, SprintSelect, StatusSelect, TypeBadge, EstimateText} from './components.tsx';
@@ -74,7 +74,7 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
             <span className="sprint-slot"><SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => store.updateItem(i.id, {sprint})} /></span>
             <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
             <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} compact />
-            <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button>
+            <button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button>
           </span>
         </div>
         {!collapsed.has(i.id) && ch.map(c => row(c, depth + 1))}

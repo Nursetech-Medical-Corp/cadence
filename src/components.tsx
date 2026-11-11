@@ -290,6 +290,13 @@ export function Check({item, project, onToggle}: {item: Item; project: Project; 
   );
 }
 
+/** The space an item belongs to, as a small colored label (used in rollup views, where spaces mix). */
+export function SpaceChip({item, projects}: {item: Item; projects: Project[]}) {
+  const p = projects.find(x => x.id === item.projectId);
+  if (!p) return null;
+  const color = (p.settings as {color?: string}).color ?? 'var(--accent)';
+  return <span className="space-chip" title={`In ${p.name}`} style={{'--chip': color} as React.CSSProperties}>{p.name}</span>;
+}
 export function itemKey(item: Item, projects: Project[]) {
   return `${projects.find(p => p.id === item.projectId)?.key ?? '?'}-${item.number}`;
 }

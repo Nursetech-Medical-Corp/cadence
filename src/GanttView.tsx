@@ -2,7 +2,7 @@
 // drag the dot at a bar's end onto another bar to add a dependency. Click an arrow to remove it.
 import {api} from './store.ts';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
-import {ChevronDown, ChevronRight, MoreHorizontal} from 'lucide-react';
+import {ChevronDown, ChevronRight, Maximize2} from 'lucide-react';
 import type {Item} from './types.ts';
 import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {criticalPath} from './critical.ts';
@@ -249,7 +249,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
             {i.type !== 'Task' && <TypeBadge type={i.type} />}
             <span className={'g-title' + (i.completed ? ' done' : '')} title={i.title}><InlineText value={i.title} onSave={title => store.updateItem(i.id, {title})} /></span>
             <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact />
-            <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={15} /></button>
+            <button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={13} /></button>
           </div>
         ))}
       </div>

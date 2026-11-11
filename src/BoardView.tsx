@@ -7,7 +7,7 @@ import {GripVertical, Link2, Repeat} from 'lucide-react';
 import type {Item, ItemPatch, Sprint} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {between, type Store} from './store.ts';
-import {Avatars, PriorityIcon, StatusIcon, TypeBadge, EstimateText} from './components.tsx';
+import {Avatars, PriorityIcon, StatusIcon, TypeBadge, EstimateText, itemKey, SpaceChip} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf, type SortRule} from './Sorting.tsx';
 
@@ -109,7 +109,8 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                   onDragOver={e => { e.preventDefault(); e.stopPropagation(); setOver({group: g.id, before: i.id}); }}
                   onClick={() => open(i.id)}>
                   <div className="card-top">
-                    <span className="muted small">{project.key}-{i.number}</span>
+                    <span className="muted small">{itemKey(i, store.projects)}</span>
+                    {project.settings.rollup && <SpaceChip item={i} projects={store.projects} />}
                     {i.type !== 'Task' && <TypeBadge type={i.type} />}
                     <span className="spacer" />
                     {groupBy !== 'priority' && i.priority > 0 && <PriorityIcon value={i.priority} />}

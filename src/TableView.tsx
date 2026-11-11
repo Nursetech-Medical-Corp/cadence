@@ -1,10 +1,10 @@
 import {Fragment, useEffect, useRef, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
-import {ArrowDown, ArrowUp, EyeOff, MoreHorizontal, Plus, Trash2, Pencil} from 'lucide-react';
+import {ArrowDown, ArrowUp, EyeOff, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
 import {between, fmtMinutes, type Store} from './store.ts';
-import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf} from './components.tsx';
+import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf, itemKey, SpaceChip} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
@@ -35,7 +35,8 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   const up = (i: Item) => (patch: Parameters<Store['updateItem']>[1]) => store.updateItem(i.id, patch);
 
   const base: Col[] = [
-    {id: 'key', name: 'ID', width: 80, sortVal: i => i.number, cell: i => <button className="link" onClick={() => open(i.id)}>{project.key}-{i.number}</button>},
+    {id: 'key', name: 'ID', width: 80, sortVal: i => i.number, cell: i => <button className="link" onClick={() => open(i.id)}>{itemKey(i, store.projects)}</button>},
+    ...(project.settings.rollup ? [{id: 'space', name: 'Space', width: 150, sortVal: (i: Item) => store.projects.find(p => p.id === i.projectId)?.name ?? '', cell: (i: Item) => <SpaceChip item={i} projects={store.projects} />} as Col] : []),
     {id: 'title', name: 'Title', width: 340, sortVal: i => i.title.toLowerCase(), raw: i => i.title, cell: i => (
       <span className="title-cell"><Check item={i} project={project} onToggle={status => up(i)({status})} /><InlineText value={i.title} onSave={title => up(i)({title})} /></span>)},
     {id: 'parent', name: 'Parent', width: 200, sortVal: i => (i.parentId ? store.items.get(i.parentId)?.title ?? '' : '~'), raw: i => i.parentId, cell: i => (
@@ -162,7 +163,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           {first > 0 && <tr aria-hidden style={{height: first * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
           {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
             <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
-            {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button></td></tr>
+            {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>
             {insertAt?.id === i.id && <InsertRow cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
               // Between this row and the one shown next to it.
               const sibs = rows, at = sibs.findIndex(x => x.id === i.id);
