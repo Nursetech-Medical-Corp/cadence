@@ -36,7 +36,7 @@ export class Accounts {
     db.exec(`create table if not exists accounts (email text primary key, password text, created text not null);
       create table if not exists account_sessions (hash text primary key, email text not null, created text not null, expires text not null);
       create table if not exists account_links (a text not null, b text not null, created text not null, primary key (a, b));
-      create table if not exists account_resets (hash text primary key, email text not null, expires text not null);
+      create table if not exists signin_links (hash text primary key, email text not null, expires text not null);
       create table if not exists server_settings (key text primary key, value text not null);
       create table if not exists push_subs (endpoint text primary key, email text not null, p256dh text not null, auth text not null, created text not null);
       create table if not exists notify_prefs (email text primary key, value text not null);`);
@@ -75,18 +75,19 @@ export class Accounts {
   }
   setNotifyPrefs(email: string, p: NotifyPrefs) { this.db.prepare('insert into notify_prefs (email, value) values (?, ?) on conflict(email) do update set value = excluded.value').run(email, JSON.stringify(p)); }
 
-  /** A one-time password reset link, valid for an hour. Only its hash is stored. */
-  startReset(email: string) {
+  /** A one-time sign-in link, valid for 15 minutes. Only its hash is stored; a new link voids older unused ones. */
+  startSignInLink(email: string) {
     const token = randomBytes(32).toString('base64url');
-    this.db.prepare('delete from account_resets where email = ? or expires < ?').run(email, new Date().toISOString());
-    this.db.prepare('insert into account_resets (hash, email, expires) values (?, ?, ?)').run(sha(token), email, new Date(Date.now() + 3600_000).toISOString());
+    this.db.prepare('delete from signin_links where email = ? or expires < ?').run(email, new Date().toISOString());
+    this.db.prepare('insert into signin_links (hash, email, expires) values (?, ?, ?)').run(sha(token), email, new Date(Date.now() + 15 * 60_000).toISOString());
     return token;
   }
-  /** The account a reset link belongs to, used up on the way. */
-  useReset(token: string): string | null {
-    const r = this.db.prepare('select email, expires from account_resets where hash = ?').get(sha(String(token))) as {email: string; expires: string} | undefined;
+  /** The account a sign-in link belongs to, used up on the way. Null when unknown, used or expired. */
+  useSignInLink(token: string): string | null {
+    const h = sha(String(token));
+    const r = this.db.prepare('select email, expires from signin_links where hash = ?').get(h) as {email: string; expires: string} | undefined;
     if (!r) return null;
-    this.db.prepare('delete from account_resets where hash = ?').run(sha(String(token)));
+    this.db.prepare('delete from signin_links where hash = ?').run(h);
     return r.expires > new Date().toISOString() ? r.email : null;
   }
   count() { return (this.db.prepare('select count(*) as n from accounts').get() as {n: number}).n; }

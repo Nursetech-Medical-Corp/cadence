@@ -265,7 +265,7 @@ test('linked accounts: a work and a personal account share one sign-in, only wit
   } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
 });
 
-test('sign-up is invite-only until the owner opens it; forgot password sends a one-time link', async () => {
+test('sign-up is invite-only until the owner opens it', async () => {
   const {resetWorkspaceCache} = await import('../server/workspaces.ts');
   const prevDb = process.env.TASKS_DB;
   process.env.TASKS_DB = join(mkdtempSync(join(tmpdir(), 'tasks-signup-')), 'tasks.db');
@@ -292,17 +292,6 @@ test('sign-up is invite-only until the owner opens it; forgot password sends a o
     assert.equal(pat.status, 201);
     assert.ok(pat.json.workspace, 'a new account gets its own workspace');
     assert.equal((await call('/auth/signup', {method: 'POST', body: {name: 'Pat', email: 'pat@x.test', password: 'another one'}})).status, 400, 'one account per email');
-    // Forgot password: same answer for unknown emails; the link works once.
-    const unknown = await call('/auth/forgot', {method: 'POST', body: {email: 'nobody@x.test'}});
-    const known = await call('/auth/forgot', {method: 'POST', body: {email: 'owner@x.test'}});
-    assert.equal(unknown.json.message, known.json.message);
-    const link = logged.find(l => l.includes('owner@x.test') && l.includes('#/reset/'))!;
-    const token = link.split('#/reset/')[1].trim();
-    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'short'}})).status, 400);
-    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'brand new pass'}})).status, 200);
-    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'again again'}})).status, 400, 'link works once');
-    assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'owner@x.test', password: 'owner password'}})).status, 401, 'old password gone');
-    assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'owner@x.test', password: 'brand new pass'}})).status, 200);
   } finally {
     console.log = log; server.close(); delete process.env.CADENCE_REQUIRE_LOGIN;
     if (prevDb === undefined) delete process.env.TASKS_DB; else process.env.TASKS_DB = prevDb;
