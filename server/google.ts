@@ -8,9 +8,19 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Db} from './db.ts';
 import {getWorkspace, saveWorkspace} from './auth.ts';
 import {SCOPES, saveLink} from './googlelinks.ts';
+import {publicUrl} from './signin.ts';
 
 const pending = new Map<string, {mode: 'connect' | 'link'; actor: string | null; at: number; want?: string}>();
-const redirectUri = (req: IncomingMessage) => `http://${req.headers.host}/api/auth/google/callback`;
+/** The address people use to reach this server: PUBLIC_URL when set, otherwise what the HTTPS proxy (Coolify,
+ * Caddy, nginx) forwarded, so Google's redirect is https:// behind a proxy. */
+export function publicOrigin(req: IncomingMessage) {
+  const set = publicUrl();
+  if (set) return set;
+  const first = (h: string | string[] | undefined) => String(Array.isArray(h) ? h[0] : h ?? '').split(',')[0].trim();
+  const proto = first(req.headers['x-forwarded-proto']) || ('encrypted' in req.socket ? 'https' : 'http');
+  return `${proto === 'https' ? 'https' : 'http'}://${first(req.headers['x-forwarded-host']) || req.headers.host}`;
+}
+const redirectUri = (req: IncomingMessage) => `${publicOrigin(req)}/api/auth/google/callback`;
 
 function go(res: ServerResponse, to: string) { res.statusCode = 302; res.setHeader('location', to); res.end(); }
 

@@ -150,6 +150,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         <h1><CircleUser size={20} /> My account</h1>
         {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
         {me.account && <AccountCard me={me} />}
+      {me.person && <MyDataCard />}
         {self && <section className="set-card">
           <div className="set-card-head"><h3>Password and notifications</h3></div>
           <div className="set-item">
@@ -164,6 +165,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
         {me.account && <ConnectedAppsCard />}
         {self && <TokensCard people={[self]} admin={false} me={self.id} />}
+        {me.person && <MyDataCard />}
       </div>
     );
   }
@@ -174,6 +176,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
 
       {me.account && <AccountCard me={me} />}
+      {me.person && <MyDataCard />}
       {me.owner && <section className="set-card">
         <div className="set-card-head"><h3>Server</h3><span className="muted small">You set this server up, so you decide who can create an account.</span></div>
         <div className="set-item"><span className="grow">Who can create an account</span>
@@ -305,27 +308,35 @@ function SetPassword({has, self, disabled, onSet}: {has: boolean; self: boolean;
 export function AccessCard({store, project}: {store: Store; project: Project}) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [admin, setAdmin] = useState(false);
-  useEffect(() => { api<{roles: Role[]}>('/team').then(t => setRoles(t.roles)).catch(() => {}); api<Me>('/auth/me').then(m => setAdmin(m.admin)).catch(() => {}); }, []);
+  const [mine, setMine] = useState(false);
+  const [me, setMe] = useState<string | null>(null);
+  useEffect(() => { api<{roles: Role[]}>('/team').then(t => setRoles(t.roles)).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
   const access = project.settings.access ?? {default: 'inherit', members: {}};
+  const personal = !!access.private;
+  const canEdit = personal ? mine || (admin && !!me && !!access.members[me]) : admin;
   const save = (a: typeof access) => store.updateProject(project.id, {settings: {...project.settings, access: a}});
   const options = <>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}<option value="none">No access</option></>;
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3><Shield size={15} /> Access</h3><span className="muted small">Who can see and change this project. Enforced once sign-in is required (Team page). Only admins can change this.</span></div>
+      <div className="set-card-head"><h3><Shield size={15} /> {personal ? 'Sharing' : 'Access'}</h3><span className="muted small">{personal
+        ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
+        : 'Who can see and change this space. Enforced once sign-in is required (Team page). Only admins can change this.'}</span></div>
       <div className="set-item">
-        <span className="grow">Everyone else</span>
-        <select className="plain-select" value={access.default} disabled={!admin} onChange={e => save({...access, default: e.target.value})}>
-          <option value="inherit">Their default role</option>{options}
+        <span className="grow">Everyone else in the workspace</span>
+        <select className="plain-select" value={access.default} disabled={!canEdit} onChange={e => save({...access, default: e.target.value})}>
+          {!personal && <option value="inherit">Their default role</option>}{options}
         </select>
       </div>
       {store.people.map(p => (
         <div key={p.id} className="set-item">
           <Avatar person={p} size={22} /><span className="grow">{p.name}</span>
-          <select className="plain-select" value={access.members[p.id] ?? ''} disabled={!admin} onChange={e => { const m = {...access.members}; if (e.target.value) m[p.id] = e.target.value; else delete m[p.id]; save({...access, members: m}); }}>
+          <select className="plain-select" value={access.members[p.id] ?? ''} disabled={!canEdit || (personal && p.id === me && !admin)} onChange={e => { const m = {...access.members}; if (e.target.value) m[p.id] = e.target.value; else delete m[p.id]; save({...access, members: m}); }}>
             <option value="">Same as everyone else</option>{options}
           </select>
         </div>
       ))}
+      {personal && canEdit && <div className="set-item"><span className="grow muted small">Make it a regular workspace space (admins can then see and manage it).</span>
+        <button className="btn small" onClick={() => { if (confirm('Turn this into a regular workspace space? Admins will see it.')) save({default: access.default === 'none' ? 'inherit' : access.default, members: access.members}); }}>Make shared space</button></div>}
     </section>
   );
 }
@@ -507,6 +518,35 @@ function AccountCard({me}: {me: Me}) {
         <button className="btn" disabled={!email.trim() || !pw} onClick={link}>Link account</button>
       </div>
       {msg && <div className="small muted">{msg}</div>}
+    </section>
+  );
+}
+
+/** My data: download what you can see plus your layouts, or merge a download back in (personal spaces and layouts). */
+function MyDataCard() {
+  const [msg, setMsg] = useState('');
+  const download = async () => {
+    try {
+      const data = await api<unknown>('/me/export');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], {type: 'application/json'}));
+      const a = document.createElement('a'); a.href = url; a.download = `cadence-my-data-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+  };
+  const restore = async (file: File | undefined, what: 'all' | 'prefs') => {
+    if (!file) return;
+    try {
+      const r = await api<{prefs: number; prefsSkipped: number; spacesCreated: number; itemsAdded: number; viewsAdded: number}>('/me/import', {method: 'POST', body: {data: JSON.parse(await file.text()), what}});
+      setMsg(`Restored: ${r.prefs} layout settings, ${r.spacesCreated} personal spaces, ${r.itemsAdded} items, ${r.viewsAdded} views${r.prefsSkipped ? ` (${r.prefsSkipped} settings had nothing to match here)` : ''}.`);
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+  };
+  return (
+    <section className="set-card">
+      <div className="set-card-head"><h3>My data</h3><span className="muted small">Download everything you can see (spaces, items, comments, sprints), your time, your private views and your layouts. Restoring merges: your personal spaces come back and your layouts apply; shared spaces are never overwritten.</span></div>
+      <div className="set-item"><span className="grow">Download my data (JSON)</span><button className="btn small" onClick={download}>Download</button></div>
+      <div className="set-item"><span className="grow">Restore personal spaces and layouts</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'all'); e.target.value = ''; }} /></label></div>
+      <div className="set-item"><span className="grow">Restore layouts only</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'prefs'); e.target.value = ''; }} /></label></div>
+      {msg && <p className="small">{msg}</p>}
     </section>
   );
 }

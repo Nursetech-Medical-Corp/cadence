@@ -28,7 +28,24 @@ export const DEFAULT_ROLES: Role[] = [
   {id: 'viewer', name: 'Viewer', caps: ['view']},
 ];
 export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}; custom: Customization; features: Features};
-export type Access = {default: string; members: Record<string, string>}; // role ids, or 'none'
+export type Access = {default: string; members: Record<string, string>; private?: boolean}; // role ids, or 'none'
+/** A personal space: only its owner until they share it. Workspace admins get no automatic access. */
+export const personalAccess = (owner: string): Access => ({default: 'none', members: {[owner]: 'admin'}, private: true});
+
+/** Who may change a space's access rules: admins for normal spaces; for a personal space, its members who manage settings. */
+export function mayChangeAccess(db: Db, personId: string | null, current: Access | undefined, next: Access | undefined): string | null {
+  const admin = !!personId && !!(db.prepare('select admin from people where id = ?').get(personId) as {admin: number} | undefined)?.admin;
+  if (current?.private) {
+    if (!capsFor(db, personId, current, true).has('settings')) return 'Only the owner of this personal space can share it';
+  } else if (!admin) return 'Only admins change access';
+  if (next?.private) {
+    const w = getWorkspace(db);
+    const managers = Object.entries(next.members).filter(([, r]) => w.roles.find(x => x.id === r)?.caps.includes('settings'));
+    if (!managers.length) throw new Invalid('A personal space needs at least one person with full access');
+    if (!admin && !next.members[personId!]) return 'Keep yourself in your personal space, or ask an admin to take it over';
+  }
+  return null;
+}
 
 export function migrate(db: Db) {
   db.exec(`
@@ -99,7 +116,7 @@ export function capsFor(db: Db, personId: string | null, projectAccess: Access |
   if (!personId) return new Set();
   const p = db.prepare('select role, admin, active from people where id = ?').get(personId) as {role: string; admin: number; active: number} | undefined;
   if (!p || !p.active) return new Set();
-  if (p.admin) return new Set(CAPS);
+  if (p.admin && !projectAccess?.private) return new Set(CAPS);
   const roleId = projectAccess?.members[personId] ?? (projectAccess && projectAccess.default !== 'inherit' ? projectAccess.default : p.role);
   if (roleId === 'none') return new Set();
   return new Set(w.roles.find(r => r.id === roleId)?.caps ?? []);

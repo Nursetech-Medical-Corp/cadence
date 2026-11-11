@@ -5,13 +5,30 @@ import {PRIORITIES} from './types.ts';
 import {api, type Store, wsId} from './store.ts';
 
 type Snap = {name: string; bytes: number; created: string; reason: string; keptAs?: string};
-type Settings = {enabled: boolean; intervalHours: number; keepRecent: number; keepDaily: number; keepWeekly: number; keepMonthly: number};
+type Settings = {enabled: boolean; intervalHours: number; keepRecent: number; keepDaily: number; keepWeekly: number; keepMonthly: number; target: 'local' | 'local+cloud'};
+type CloudSnap = Snap & {key: string};
 
 export function DataPage({store}: {store: Store}) {
   const [snaps, setSnaps] = useState<Snap[]>([]);
   const [msg, setMsg] = useState('');
   const file = useRef<HTMLInputElement>(null);
-  const load = () => api<Snap[]>('/backups').then(setSnaps).catch(() => {});
+  const [cloud, setCloud] = useState<{configured: boolean; bucket?: string; lastOk?: string; lastFile?: string; lastError?: string} | null>(null);
+  const [cloudSnaps, setCloudSnaps] = useState<CloudSnap[]>([]);
+  const admin = store.settings.admin;
+  const load = () => {
+    api<Snap[]>('/backups').then(setSnaps).catch(() => {});
+    if (!admin) return;
+    api<typeof cloud>('/cloud-backup').then(c => { setCloud(c); if (c?.configured) api<CloudSnap[]>('/cloud-backups').then(setCloudSnaps).catch(e => setMsg(String(e instanceof Error ? e.message : e))); }).catch(() => {});
+  };
+  // Roll the workspace back to a snapshot (admins). The current state is saved first, so this can be undone.
+  const rollback = async (label: string, path: string, body: object) => {
+    if (prompt(`Roll the whole workspace back to ${label}?\n\nEveryone's spaces, items and views go back to that point. The current state is saved first as a before-restore snapshot, so this can be undone.\n\nType RESTORE to continue.`) !== 'RESTORE') return;
+    try {
+      const r = await api<{restored: Record<string, number>}>(path, {method: 'POST', body});
+      setMsg(`Rolled back to ${label}: ${r.restored.items ?? 0} items, ${r.restored.projects ?? 0} spaces. The previous state was saved first.`);
+      load();
+    } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
+  };
   useEffect(() => { load(); }, []);
 
   const restore = async (f: File) => {
@@ -37,21 +54,32 @@ export function DataPage({store}: {store: Store}) {
       </div>
       <p className="muted small">CSV of a single view: open the view and use Export CSV in its toolbar. It exports exactly the rows and filters you see.</p>
 
-      <h3>Restore</h3>
+      {admin && <><h3>Restore</h3>
       <div className="chips">
         <button className="btn" onClick={() => file.current?.click()}><Upload size={14} /> Restore from a JSON export</button>
         <input ref={file} type="file" accept=".json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) restore(f); e.target.value = ''; }} />
       </div>
+      </>}
       {msg && <p className="small">{msg}</p>}
 
       <h3>Automatic backups</h3>
       <BackupSchedule onSaved={load} />
-      <p className="muted small">Snapshots are full copies of the database in <code>{wsId() === 'main' ? 'data/backups' : `data/workspaces/${wsId()}/backups`}</code>. Manual and before-restore copies are never removed automatically. To roll back to one, stop the app and copy it over that database file.</p>
-      <button className="btn" onClick={async () => { await api('/backups', {method: 'POST'}); load(); setMsg('Snapshot saved.'); }}><HardDriveDownload size={14} /> Back up now</button>
+      <p className="muted small">Snapshots are full copies of the database in <code>{wsId() === 'main' ? 'data/backups' : `data/workspaces/${wsId()}/backups`}</code>. Manual and before-restore copies are never removed automatically. Admins can roll back to any snapshot below; cloud copies follow the same keep rules.</p>
+      <p className="small">{cloud?.configured
+        ? <>Encrypted cloud copies: on, to <code>{cloud.bucket}</code>. {cloud.lastOk ? `Last upload ${new Date(cloud.lastOk).toLocaleString()}.` : 'No upload yet since the server started.'} {cloud.lastError && <span style={{color: 'var(--danger)'}}>Last error: {cloud.lastError}</span>}</>
+        : <span className="muted">Encrypted cloud copies: off. Set the CADENCE_BACKUP_S3_* variables and CADENCE_BACKUP_PASSPHRASE on the server (see server/cloudbackup.ts) to send every snapshot, encrypted, to an S3-compatible bucket.</span>}</p>
+      <button className="btn" onClick={async () => { const r = await api<{cloud: boolean}>('/backups', {method: 'POST'}); load(); setMsg(r.cloud ? 'Snapshot saved and uploaded, encrypted.' : 'Snapshot saved.'); }}><HardDriveDownload size={14} /> Back up now</button>
       <div style={{marginTop: 10}}>
-        {snaps.map(s => <div key={s.name} className="row"><span className="grow">{new Date(s.created).toLocaleString()}</span><span className={'tag'}>{s.keptAs ?? 'will be pruned'}</span><span className="muted small">{(s.bytes / 1024).toFixed(0)} KB</span></div>)}
+        {snaps.map(s => <div key={s.name} className="row"><span className="grow">{new Date(s.created).toLocaleString()}</span><span className={'tag'}>{s.keptAs ?? 'will be pruned'}</span><span className="muted small">{(s.bytes / 1024).toFixed(0)} KB</span>
+          {admin && <button className="btn ghost small" onClick={() => rollback(`the ${new Date(s.created).toLocaleString()} snapshot`, '/backups/restore', {name: s.name})}>Restore</button>}</div>)}
         {!snaps.length && <p className="muted small">No snapshots yet.</p>}
       </div>
+      {admin && cloud?.configured && <>
+        <h3>Cloud copies (encrypted)</h3>
+        {cloudSnaps.map(s => <div key={s.key} className="row"><span className="grow">{new Date(s.created).toLocaleString()}</span><span className="tag">{s.keptAs ?? 'will be pruned'}</span><span className="muted small">{(s.bytes / 1024).toFixed(0)} KB</span>
+          <button className="btn ghost small" onClick={() => rollback(`the ${new Date(s.created).toLocaleString()} cloud copy`, '/cloud-backups/restore', {key: s.key})}>Restore</button></div>)}
+        {!cloudSnaps.length && <p className="muted small">No cloud copies yet.</p>}
+      </>}
       <p className="muted small" style={{marginTop: 16}}>{store.projects.length} projects, {store.items.size} items, {store.views.length} views, {store.sprints.length} sprints.</p>
     </div>
   );
@@ -98,6 +126,11 @@ function BackupSchedule({onSaved}: {onSaved: () => void}) {
   return (
     <div className="chart-card" style={{maxWidth: 620, marginBottom: 12}}>
       <label className="set-row"><input type="checkbox" checked={s.enabled} onChange={e => save({enabled: e.target.checked})} /> Back up automatically</label>
+      <label className="set-row"><span style={{width: 200}}>Backup type</span>
+        <select className="plain-select" value={s.target ?? 'local+cloud'} onChange={e => save({target: e.target.value as Settings['target']})}>
+          <option value="local+cloud">On the server + encrypted cloud copy (default)</option>
+          <option value="local">On the server only</option>
+        </select></label>
       <label className="set-row"><span style={{width: 200}}>Every</span>
         <select className="plain-select" value={s.intervalHours} onChange={e => save({intervalHours: Number(e.target.value)})}>
           {[[1, 'hour'], [3, '3 hours'], [6, '6 hours'], [12, '12 hours'], [24, 'day'], [168, 'week']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}

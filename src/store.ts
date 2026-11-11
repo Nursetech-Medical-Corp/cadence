@@ -206,8 +206,16 @@ export function useStore(me: string) {
       try { return await api<Person>('/people', {method: 'POST', body: {name}}); } catch (e) { fail(e); return null; }
     },
     async createView(projectId: string, name: string, kind: ViewKind, config = {}) {
-      try { const v = await api<View>('/views', {method: 'POST', body: {projectId, name, kind, config}}); setViews(prev => [...prev.filter(x => x.id !== v.id), v]); return v; }
-      catch (e) { fail(e); return null; }
+      const add = (v: View) => { setViews(prev => [...prev.filter(x => x.id !== v.id), v]); return v; };
+      try { return add(await api<View>('/views', {method: 'POST', body: {projectId, name, kind, config}})); }
+      catch (e) {
+        // No permission to add shared views here: make it a private view of your own instead.
+        const me = await api<{person: {id: string} | null}>('/auth/me').then(r => r.person?.id ?? '').catch(() => '');
+        if (me && e instanceof Error && /Create and change views/.test(e.message)) {
+          try { return add(await api<View>('/views', {method: 'POST', body: {projectId, name, kind, config: {...config, privateTo: me}}})); } catch (e2) { fail(e2); return null; }
+        }
+        fail(e); return null;
+      }
     },
     updateView(id: string, patch: Partial<View>) {
       setViews(prev => prev.map(v => v.id === id ? {...v, ...patch} : v));

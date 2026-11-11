@@ -51,6 +51,15 @@ People sign in with "Continue with Google" or "Email me a sign-in link"; a passw
 - Sign-in links work once, for 15 minutes; a new one voids older ones. At most 5 per email and 10 per IP in 15 minutes. The link opens a page with a Sign in button, so mail scanners that open links do not use them up.
 - Every sign-in attempt (time, email, method, result, IP, user agent) is appended to `signin-log.jsonl` in the data folder. Tokens and passwords are never logged.
 
+### Behind Coolify or another HTTPS proxy
+Set `PUBLIC_URL` (see `.env.example`). Emailed links use it. Without it, the Gmail sender and Google calendar connections fall back to the address the proxy forwards (`X-Forwarded-Proto`/`X-Forwarded-Host`), so they still use https.
+
+### Encrypted cloud backups
+Set `CADENCE_BACKUP_S3_ENDPOINT`, `CADENCE_BACKUP_S3_REGION`, `CADENCE_BACKUP_S3_BUCKET`, `CADENCE_BACKUP_S3_KEY_ID`, `CADENCE_BACKUP_S3_SECRET` (any S3-compatible bucket: Backblaze B2, Cloudflare R2, AWS) and `CADENCE_BACKUP_PASSPHRASE`. Every snapshot is then gzipped, encrypted (AES-256-GCM) and uploaded. `pnpm decrypt-backup <file.enc>` turns a download back into a database file. Keep the passphrase in a password manager: without it the backups cannot be opened.
+
+### Personal spaces and My data
+Anyone can create a personal space (New space, Personal). Only they see it, admins included, until they use Share on the space header. My account, My data downloads everything a person can see plus their layouts, and restores personal spaces and layouts by merging.
+
 ### On phones
 Cadence installs as an app. On iPhone or iPad, open your server's address in Safari, tap Share, then Add to Home Screen. On Android or desktop Chrome and Edge, use Install app in the address bar or menu. Phones get a tab bar (My work, Inbox, new task, Search, Spaces), and a tap on a task opens it full screen.
 

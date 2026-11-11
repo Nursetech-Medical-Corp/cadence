@@ -92,12 +92,14 @@ export function NewProjectMenu({store, onCreated}: {store: Store; onCreated: (id
   const [tpl, setTpl] = useState('');
   const [preset, setPreset] = useState(0);
   const [custom, setCustom] = useState('');
+  const admin = store.settings.admin;
+  const [personal, setPersonal] = useState(!admin);
   const customLevels = custom.split(/[,>]/).map(x => x.trim()).filter(Boolean);
   const levels = preset < LEVELS.length ? LEVELS[preset].types : customLevels;
   const create = async () => {
     if (!name.trim()) return;
     try {
-      const p = tpl ? await api<Project>(`/templates/${tpl}/use`, {method: 'POST', body: {name}}) : await api<Project>('/projects', {method: 'POST', body: {name, types: levels.length ? levels : LEVELS[0].types}});
+      const p = tpl ? await api<Project>(`/templates/${tpl}/use`, {method: 'POST', body: {name, personal: personal || !admin}}) : await api<Project>('/projects', {method: 'POST', body: {name, personal: personal || !admin, types: levels.length ? levels : LEVELS[0].types}});
       setOpen(false); setName(''); setTpl('');
       if (p) onCreated(p.id);
     } catch (e) { store.fail(e); }
@@ -120,9 +122,12 @@ export function NewProjectMenu({store, onCreated}: {store: Store; onCreated: (id
           </div>
           {preset === LEVELS.length && <input className="pop-search" placeholder="Levels, top to bottom: Goal, Project, Task, Subtask" value={custom} onChange={e => setCustom(e.target.value)} />}
         </>}
-        <button className="pop-row" onClick={async () => { try { const p = await api<Project>('/projects/rollup', {method: 'POST', body: {name: name.trim() || 'Rollup'}}); setOpen(false); setName(''); onCreated(p.id); } catch (e) { store.fail(e); } }}>
+        <label className="row small" style={{cursor: admin ? 'pointer' : 'default', margin: '6px 0'}} title={admin ? 'Personal spaces are private to you until you share them' : 'Your spaces start private. Use Share to invite people.'}>
+          <input type="checkbox" checked={personal || !admin} disabled={!admin} onChange={e => setPersonal(e.target.checked)} /> Personal: only you until you share it
+        </label>
+        {admin && <button className="pop-row" onClick={async () => { try { const p = await api<Project>('/projects/rollup', {method: 'POST', body: {name: name.trim() || 'Rollup'}}); setOpen(false); setName(''); onCreated(p.id); } catch (e) { store.fail(e); } }}>
           <Layers size={14} /> Or make a rollup: views across chosen spaces
-        </button>
+        </button>}
         <div className="pop-label">Start from</div>
         <select className="plain-select" style={{width: '100%', marginBottom: 6}} value={tpl} onChange={e => setTpl(e.target.value)}>
           <option value="">Blank (default statuses and views)</option>

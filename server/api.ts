@@ -7,13 +7,15 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
-import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, retention, saveSettings, snapshot} from './backup.ts';
-import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
+import {backupDir, exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, restoreSnapshotFile, retention, saveSettings, snapFromName, snapshot} from './backup.ts';
+import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
-import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
+import {exportMine, importMine} from './personal.ts';
+import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudbackup.ts';
+import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
@@ -109,7 +111,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
-  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); } catch (e) { console.error('Snapshot failed', e); } };
+  const auto = () => { try { const f = maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); if (f) void uploadSnapshot(info.id, f, getSettings(bdir)); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
   setInterval(auto, 10 * 60 * 1000).unref();
   // Due-date automations and sprint rollover, checked on start and hourly.
@@ -246,7 +248,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const ct = String(req.headers['content-type'] ?? '');
         if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout')) return send(res, 415, {error: 'Send JSON with content-type application/json'});
       }
-      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
+      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
@@ -600,9 +602,11 @@ If you did not ask for it, ignore this email.`)
 
       if (a === 'views') {
         if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
-        if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
+        // Anyone who can see a space may keep their own private views there; shared views need "views".
+        const ownView = (cfg: {privateTo?: string} | undefined) => !!actor && cfg?.privateTo === actor;
+        if (!b && m === 'POST') { need(body.projectId, ownView(body.config) ? 'view' : 'views'); return send(res, 201, tasks.createView(body)); }
         if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); if (areaLocked(tasks.db, 'viewOrder')) needAdmin(); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
-        if (b) need(tasks.view(b).projectId, 'views');
+        if (b) { const v = tasks.view(b); need(v.projectId, ownView(v.config) && (!body.config || ownView(body.config)) ? 'view' : 'views'); }
         // Only the owner can make a view private to themselves; nobody can make it private to someone else.
         if (b && m === 'PATCH') { if (body.config && areaLocked(tasks.db, 'viewSettings') && settingsChanged(tasks.view(b).config, body.config)) needAdmin(); if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
@@ -612,7 +616,7 @@ If you did not ask for it, ignore this email.`)
         if (q('project')) need(q('project')!, 'view');
         res.statusCode = 200;
         res.setHeader('content-type', 'text/calendar; charset=utf-8');
-        const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: `http://${req.headers.host}`, canSee});
+        const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: publicOrigin(req), canSee});
         res.end(feed);
         return;
       }
@@ -645,7 +649,12 @@ If you did not ask for it, ignore this email.`)
           const t = tasks.listTemplates().find(x => x.id === b);
           if (!t) throw new NotFound('Template not found');
           if (t.projectId && tasks.listProjects().some(p => p.id === t.projectId)) need(t.projectId, 'view');
-          if (t.kind === 'project') { needAdmin(); return send(res, 201, tasks.createProjectFromTemplate(b, body.name ?? t.name, actor)); }
+          if (t.kind === 'project') {
+            if (!body.personal) { needAdmin(); return send(res, 201, tasks.createProjectFromTemplate(b, body.name ?? t.name, actor)); }
+            if (!actor) throw new Denied('Sign in first');
+            const p = tasks.createProjectFromTemplate(b, body.name ?? t.name, actor);
+            return send(res, 201, tasks.updateProject(p.id, {settings: {...p.settings, access: personalAccess(actor)}}));
+          }
           if (t.kind === 'view') { need(body.projectId, 'views'); return send(res, 201, tasks.useViewTemplate(b, body.projectId)); }
           need(body.projectId, 'create');
           return send(res, 201, tasks.useItemTemplate(b, body.projectId, body.parentId ?? null, actor, {title: body.title, due: body.due || undefined, start: body.start || undefined}));
@@ -667,16 +676,44 @@ If you did not ask for it, ignore this email.`)
         res.setHeader('content-disposition', `attachment; filename="tasks-export-${new Date().toISOString().slice(0, 10)}.json"`);
         return send(res, 200, exportAll(tasks.db));
       }
-      if (a === 'import' && m === 'POST') { needAdmin(); const r = importAll(tasks.db, body, bdir); migrate(tasks.db); tasks.emit({kind: 'refresh'}); return send(res, 200, r); }
+      if (a === 'import' && m === 'POST') { if (bearer) throw new Denied('Restores are done by an admin in the app, not with a token'); needAdmin(); const r = importAll(tasks.db, body, bdir); migrate(tasks.db); tasks.emit({kind: 'refresh'}); void uploadSnapshot(info.id, r.snapshotBefore, getSettings(bdir)); return send(res, 200, r); }
       if (a === 'backup-settings') {
         if (m === 'GET') return send(res, 200, getSettings(bdir));
         if (m === 'PUT') { needAdmin(); try { return send(res, 200, saveSettings(body, bdir)); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); } }
       }
       if (a === 'backups') {
-        if (m === 'GET') return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
-        if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
+        if (m === 'GET' && !b) return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
+        if (m === 'POST' && !b) { needAdmin(); mirrorUploads(tasks.dataDir, bdir); const file = snapshot(tasks.db, 'manual', bdir); const cloud = await uploadSnapshot(info.id, file, getSettings(bdir)); return send(res, 201, {file, cloud, cloudStatus: cloudStatus(info.id)}); }
+      }
+      if (a === 'cloud-backup' && m === 'GET') { needAdmin(); return send(res, 200, cloudStatus(info.id)); }
+      // Rolling back the whole workspace: signed-in admins only, never API tokens or AI agents.
+      // A before-restore snapshot is taken first (and sent to the cloud), so every restore can be undone.
+      const restoreGuard = () => { if (bearer) throw new Denied('Restores are done by an admin in the app, not with a token'); needAdmin(); };
+      const afterRestore = (r: {snapshotBefore: string}) => { migrate(tasks.db); tasks.emit({kind: 'refresh'}); void uploadSnapshot(info.id, r.snapshotBefore, getSettings(bdir)); return r; };
+      if (a === 'cloud-backups' && !b && m === 'GET') { needAdmin(); return send(res, 200, await listCloud(info.id, getSettings(bdir))); }
+      if (a === 'cloud-backups' && b === 'restore' && m === 'POST') {
+        restoreGuard();
+        return send(res, 200, afterRestore(await restoreFromCloud(tasks.db, info.id, String(body.key ?? ''), bdir)));
+      }
+      if (a === 'backups' && b === 'restore' && m === 'POST') {
+        restoreGuard();
+        const name = String(body.name ?? '');
+        if (!snapFromName(name) || /[\\/]/.test(name)) throw new Invalid('Pick a snapshot from the list');
+        const file = join(backupDir(bdir), name);
+        if (!existsSync(file)) throw new NotFound('Snapshot not found');
+        return send(res, 200, afterRestore(restoreSnapshotFile(tasks.db, file, bdir)));
       }
 
+      // My data: everything this person can see plus their layouts, and a merging restore of it.
+      if (a === 'me' && b === 'export' && m === 'GET') {
+        if (!actor) throw new Denied('Sign in first');
+        res.setHeader('content-disposition', `attachment; filename="cadence-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
+        return send(res, 200, exportMine(tasks, actor, canSee));
+      }
+      if (a === 'me' && b === 'import' && m === 'POST') {
+        if (!actor || bearer) throw new Denied('Sign in first');
+        return send(res, 200, importMine(tasks, actor, body.data, body.what === 'prefs' ? 'prefs' : 'all'));
+      }
       // Your own layout: view settings, tab order, project order (see src/customize.ts).
       if (a === 'prefs' && m === 'PUT') {
         if (!actor || bearer) throw new Invalid('Pick who you are first');
@@ -692,13 +729,22 @@ If you did not ask for it, ignore this email.`)
       if (a === 'projects') {
         if (!b && m === 'GET') return send(res, 200, tasks.listProjects().filter(p => canSee(p.id)));
         if (b === 'rollup' && m === 'POST') { needAdmin(); return send(res, 201, tasks.createRollup(String(body.name ?? '').trim() || undefined)); }
-        if (!b && m === 'POST') { needAdmin(); return send(res, 201, tasks.createProject(body)); }
+        if (!b && m === 'POST') {
+          // Anyone signed in can make a personal space (only they see it until they share it); shared spaces are for admins.
+          if (body.personal) { if (!actor) throw new Denied('Sign in first'); return send(res, 201, tasks.createProject({...body, settings: {...body.settings, access: personalAccess(actor)}})); }
+          needAdmin(); return send(res, 201, tasks.createProject(body));
+        }
         if (b && c === 'files' && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.projectFiles(b)); }
         if (b && c === 'file-tasks' && m === 'POST') { need(b, 'create'); return send(res, 201, tasks.fileTask(b, actor, {name: String(body.name ?? 'file'), mime: String(body.mime ?? ''), data: String(body.data ?? ''), parentId: body.parentId ?? null, status: body.status})); }
         if (b && !c && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.project(b)); }
         if (b && m === 'PATCH') {
           // Access rules decide who can do anything, so only admins may change them.
-          if (body.settings && JSON.stringify((body.settings as {access?: Access}).access ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) needAdmin();
+          const nextAccess = (body.settings as {access?: Access} | undefined)?.access;
+          if (body.settings && JSON.stringify(nextAccess ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) {
+            const why = (ws.requireLogin || bearer) ? mayChangeAccess(tasks.db, actor, access(tasks.project(b)), nextAccess) : null;
+            if (why) throw new Denied(why);
+            if (bearer && !isAdmin(actor)) throw new Denied('Tokens cannot change access rules');
+          }
           need(b, 'settings');
           if (body.sort !== undefined && areaLocked(tasks.db, 'projectOrder')) needAdmin();
           return send(res, 200, tasks.updateProject(b, body));
@@ -710,7 +756,7 @@ If you did not ask for it, ignore this email.`)
           return send(res, 200, out);
         }
         if (b && c === 'import' && m === 'POST') { need(b, 'create'); return send(res, 200, tasks.importItems(b, body.rows, actor)); }
-        if (b && m === 'DELETE') { needAdmin(); tasks.deleteProject(b); return send(res, 200, {ok: true}); }
+        if (b && m === 'DELETE') { if (access(tasks.project(b))?.private) need(b, 'settings'); else needAdmin(); tasks.deleteProject(b); return send(res, 200, {ok: true}); }
       }
 
       if (a === 'items') {
