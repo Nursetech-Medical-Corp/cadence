@@ -44,9 +44,10 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 
 | | |
 | --- | --- |
-| ![Table with formula, rollup, money and rating columns](docs/screenshots/table.jpg) | ![Timeline with dependencies and critical path](docs/screenshots/timeline.jpg) |
-| ![Board](docs/screenshots/board.jpg) | ![Everything across workspaces](docs/screenshots/everything.jpg) |
-| ![Template editor with relative dates](docs/screenshots/template.jpg) | ![Workspace switcher](docs/screenshots/workspaces.jpg) |
+| ![Table with header picture, colored rows and Time tracked column](docs/screenshots/table.jpg) | ![Timeline with dependencies and critical path](docs/screenshots/timeline.jpg) |
+| ![Board with header, colors and timers on cards](docs/screenshots/board.jpg) | ![Everything across workspaces](docs/screenshots/everything.jpg) |
+| ![Template editor with relative dates](docs/screenshots/template.jpg) | ![Workspace switcher with logos](docs/screenshots/workspaces.jpg) |
+| ![New space with level presets](docs/screenshots/newspace.jpg) | ![Customization: team setup, personal layouts, feature switches](docs/screenshots/customization.jpg) |
 
 ## Features
 

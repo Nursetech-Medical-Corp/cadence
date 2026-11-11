@@ -34,7 +34,21 @@ export function seedSampleWorkspaces(open: (w: WorkspaceInfo) => Tasks) {
   header(work, space('Website'), 'header-hills.jpg');
   header(work, space('DevOps'), 'header-shapes.jpg');
   const alex = work.listPeople().find(p => p.kind !== 'ai');
-  if (alex) work.setPref(alex.id, 'cover:mywork', {gradient: 7});
+  if (alex) work.setPref(alex.id, 'cover:mywork', {gradient: 0});
+  // Show off colored rows and time tracking on the website space.
+  const web = space('Website');
+  if (web) {
+    work.updateProject(web.id, {fields: [...web.fields, {id: 'tracked', name: 'Time tracked', kind: 'time'}]});
+    const colors = [
+      {rule: {field: 'statusGroup', op: 'is' as const, value: 'done'}, color: '#10b981'},
+      {rule: {field: 'due', op: 'before' as const, value: 'today'}, color: '#ef4444'},
+      {rule: {field: 'priority', op: 'is' as const, value: '1'}, color: '#f97316'},
+    ];
+    for (const v of work.listViews(web.id).filter(v => ['table', 'list', 'board'].includes(v.kind))) work.updateView(v.id, {config: {...v.config, colors}});
+    const people = work.listPeople().filter(p => p.kind !== 'ai');
+    work.listItems({projectId: web.id}).slice(0, 8).forEach((it, n) =>
+      work.logTime({itemId: it.id, person: people[n % people.length].id, minutes: 35 + n * 25, date: addUnit(work.today(), -(n % 4), 'day')}));
+  }
   const w = updateWorkspace(createWorkspace({name: 'Personal', color: '#10b981', icon: 'P'}).id, {logo: logo('logo-personal.png')});
   const t = open(w);
   const me = t.createPerson({name: 'David', email: 'david@example.com'});
