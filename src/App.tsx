@@ -1,5 +1,5 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X} from 'lucide-react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -125,7 +125,15 @@ export function App() {
     const id = sessionStorage.getItem('open-after');
     if (id && store.items.has(id)) { sessionStorage.removeItem('open-after'); open(id); }
   }, [store.items]);
-  const open = useCallback((id: string) => setOpenId(id), []);
+  // Task panel history: back and forward through the tasks you opened, and reopen the last one after closing.
+  const [hist, setHist] = useState<{list: string[]; at: number}>({list: [], at: -1});
+  const [lastClosed, setLastClosed] = useState<string | null>(null);
+  const [pinned, setPinned] = useState(() => localStorage.getItem('panel-pin') === '1');
+  const open = useCallback((id: string) => {
+    setOpenId(id);
+    setHist(h => h.list[h.at] === id ? h : {list: [...h.list.slice(0, h.at + 1), id].slice(-50), at: Math.min(h.at + 1, 49)});
+  }, []);
+  const step = (d: number) => setHist(h => { const at = Math.max(0, Math.min(h.list.length - 1, h.at + d)); setOpenId(h.list[at]); return {...h, at}; });
   const [capture, setCapture] = useState(false);
   const [tour, setTour] = useState<string | null>(null);
   const [shortcuts, setShortcuts] = useState(false);
@@ -166,9 +174,20 @@ export function App() {
     }
   };
   useHotkeys(useCallback((a: ActionId) => runRef.current(a), []));
-  const close = useCallback(() => setOpenId(null), []);
+  const close = useCallback(() => { if (openId) setLastClosed(openId); setOpenId(null); }, [openId]);
+  // Clicking outside the panel closes it (unless pinned). Clicks on other tasks, menus and dialogs do not count.
+  useEffect(() => {
+    if (!openId || pinned) return;
+    const down = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.isConnected || t.closest('.panel, .popover, .ctx-menu, .overlay, .panel-reopen, [data-id], .qv, dialog')) return;
+      close();
+    };
+    document.addEventListener('mousedown', down);
+    return () => document.removeEventListener('mousedown', down);
+  }, [openId, pinned, close]);
   // Item links inside descriptions ask to open an item through this event.
-  useEffect(() => { const f = (e: Event) => setOpenId((e as CustomEvent<string>).detail); addEventListener('open-item', f); return () => removeEventListener('open-item', f); }, []);
+  useEffect(() => { const f = (e: Event) => open((e as CustomEvent<string>).detail); addEventListener('open-item', f); return () => removeEventListener('open-item', f); }, [open]);
 
   const project = route.page === 'project' ? store.projects.find(p => p.id === route.id) : undefined;
   const projectViews = useMemo(() => project ? store.views.filter(v => v.projectId === project.id).sort((a, b) => a.sort - b.sort) : [], [store.views, project]);
@@ -209,7 +228,9 @@ export function App() {
         {route.page === 'team' && auth && <div className="content"><TeamPage store={store} me={auth} /></div>}
         </ViewBoundary>
       </main>
-      {openId && store.items.has(openId) && <ItemPanel key={openId} store={store} id={openId} close={close} open={open} me={me} />}
+      {openId && store.items.has(openId) && <ItemPanel key={openId} store={store} id={openId} close={close} open={open} me={me}
+        nav={{back: () => step(-1), forward: () => step(1), canBack: hist.at > 0, canForward: hist.at < hist.list.length - 1, pinned, togglePin: () => setPinned(p => { localStorage.setItem('panel-pin', p ? '0' : '1'); return !p; })}} />}
+      {!openId && lastClosed && store.items.has(lastClosed) && <button className="panel-reopen" title={`Reopen ${store.items.get(lastClosed)!.title}`} onClick={() => open(lastClosed)}><ChevronLeft size={16} /></button>}
       {palette && <Palette store={store} close={() => setPalette(false)} open={id => { setPalette(false); open(id); }} />}
       <QuickViewHost />
       <ContextMenus store={store} open={open} />

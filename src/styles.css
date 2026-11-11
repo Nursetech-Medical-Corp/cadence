@@ -995,3 +995,9 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .proj-more { background: none; border: 0; padding: 2px; color: var(--text3, #aaa); opacity: 0; cursor: pointer; display: inline-flex; }
 .proj-nav:hover .proj-more, .proj-more:focus-visible { opacity: 1; }
 .ctx-menu { z-index: 200; min-width: 210px; }
+
+/* Task panel: history and reopen */
+.panel-nav { display: inline-flex; gap: 0; margin-right: 6px; }
+.panel-head .icon.on { color: var(--accent); }
+.panel-reopen { position: fixed; top: 64px; right: 0; z-index: 40; width: 26px; height: 40px; border: 1px solid var(--line); border-right: 0; border-radius: 8px 0 0 8px; background: var(--card); color: var(--text2); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); }
+.panel-reopen:hover { color: var(--accent); width: 32px; }

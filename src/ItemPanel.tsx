@@ -2,7 +2,7 @@ import {Fragment, useEffect, useState} from 'react';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {FieldCell} from './TableView.tsx';
 import {COMPUTED} from './Fields.tsx';
-import {GripVertical, Link2, Pause, Play, SlidersHorizontal, Trash2, X} from 'lucide-react';
+import {GripVertical, Link2, Pause, Play, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight, Pin, PinOff} from 'lucide-react';
 import type {Comment, Item, TimeEntry} from './types.ts';
 import {api, fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
@@ -13,7 +13,8 @@ import {ActivityList} from './History.tsx';
 import {ApplyToChildrenButton, SaveTemplateButton} from './TemplateMenus.tsx';
 import {Avatar, Check, DateInput, InlineText, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TagEditor, TypeBadge, TypeSelect, itemKey} from './components.tsx';
 
-export function ItemPanel({store, id, close, open, me}: {store: Store; id: string; close: () => void; open: (id: string) => void; me: string}) {
+type PanelNav = {back: () => void; forward: () => void; canBack: boolean; canForward: boolean; pinned: boolean; togglePin: () => void};
+export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: string; close: () => void; open: (id: string) => void; me: string; nav?: PanelNav}) {
   const item = store.items.get(id);
   const [comments, setComments] = useState<Comment[]>([]);
   const [time, setTime] = useState<TimeEntry[]>([]);
@@ -55,6 +56,10 @@ export function ItemPanel({store, id, close, open, me}: {store: Store; id: strin
   return (
     <aside className="panel">
       <div className="panel-head">
+        {nav && <span className="panel-nav">
+          <button className="icon" title="Previous task you opened" disabled={!nav.canBack} onClick={nav.back}><ArrowLeft size={15} /></button>
+          <button className="icon" title="Next task you opened" disabled={!nav.canForward} onClick={nav.forward}><ArrowRight size={15} /></button>
+        </span>}
         <span className="muted">
           {parent && <><button className="link" onClick={() => open(parent.id)}>{itemKey(parent, store.projects)} {parent.title.slice(0, 30)}</button> / </>}
           {itemKey(item, store.projects)}
@@ -62,6 +67,7 @@ export function ItemPanel({store, id, close, open, me}: {store: Store; id: strin
         <span className="spacer" />
         <SaveTemplateButton store={store} item={item} />
         <button className="icon" title="Delete" onClick={() => { if (confirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`)) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>
+        {nav && <button className={'icon' + (nav.pinned ? ' on' : '')} title={nav.pinned ? 'Pinned: stays open when you click elsewhere. Click to unpin' : 'Pin open (otherwise clicking outside closes it)'} onClick={nav.togglePin}>{nav.pinned ? <Pin size={15} /> : <PinOff size={15} />}</button>}
         <button className="icon" title="Close (Esc)" onClick={close}><X size={16} /></button>
       </div>
       <div className="panel-title">
