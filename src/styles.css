@@ -1001,3 +1001,14 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .panel-head .icon.on { color: var(--accent); }
 .panel-reopen { position: fixed; top: 64px; right: 0; z-index: 40; width: 26px; height: 40px; border: 1px solid var(--line); border-right: 0; border-radius: 8px 0 0 8px; background: var(--card); color: var(--text2); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow); }
 .panel-reopen:hover { color: var(--accent); width: 32px; }
+
+/* Task panel: drag fields and sections by the grip that shows on hover */
+.prop-label { display: flex; align-items: center; gap: 2px; cursor: grab; position: relative; }
+.prop-grip { margin-left: -14px; opacity: 0; color: var(--text3, #aaa); flex-shrink: 0; }
+.prop-label:hover .prop-grip { opacity: 1; }
+.prop-label.dragging { opacity: .4; }
+.props-foot { display: flex; align-items: center; gap: 10px; margin: 2px 0 6px; }
+.psec { position: relative; }
+.psec.dragging { opacity: .4; }
+.psec-grip { position: absolute; left: -18px; top: 14px; opacity: 0; cursor: grab; color: var(--text3, #aaa); display: inline-flex; }
+.psec:hover > .psec-grip { opacity: 1; }

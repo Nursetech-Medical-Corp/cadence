@@ -25,8 +25,12 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
   const [depPick, setDepPick] = useState('');
   const running = store.running?.itemId === id ? store.running : null;
   const layoutKey = 'panel-layout:' + (store.items.get(id)?.projectId ?? '');
-  const [layout, setLayoutState] = useState<{order: string[]; hidden: string[]}>(() => JSON.parse(localStorage.getItem(layoutKey) ?? '{"order":[],"hidden":[]}'));
-  const setLayout = (l: {order: string[]; hidden: string[]}) => { setLayoutState(l); localStorage.setItem(layoutKey, JSON.stringify(l)); };
+  type Layout = {order: string[]; hidden: string[]; sections?: string[]; showEmpty?: boolean};
+  const [layout, setLayoutState] = useState<Layout>(() => JSON.parse(localStorage.getItem(layoutKey) ?? '{"order":[],"hidden":[]}'));
+  const setLayout = (l: Layout) => { setLayoutState(l); localStorage.setItem(layoutKey, JSON.stringify(l)); };
+  // Drag a field or a section by its grip to reorder; the order is saved per project in this browser.
+  const [dragProp, setDragProp] = useState<string | null>(null);
+  const [dragSec, setDragSec] = useState<string | null>(null);
   const now = useNow(!!running);
 
   useEffect(() => {
@@ -53,6 +57,93 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
   const person = (pid: string) => store.people.find(p => p.id === pid);
   const candidates = all.filter(i => i.projectId === project.id && i.id !== item.id && !item.deps.includes(i.id));
 
+  // Sections of the panel, in the order you dragged them into (saved per project).
+  const SECTIONS: Record<string, React.ReactNode> = {
+    description: <>
+      <div className="body-wrap"><BlockEditor key={item.id} value={item.body} onSave={body => body !== item.body && up({body})} onUploadImage={async f => {
+        const data = await new Promise<string>(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.readAsDataURL(f); });
+        try { return (await api<{url: string}>(`/items/${item.id}/files`, {method: 'POST', body: {name: f.name || 'screenshot.png', mime: f.type, data}})).url; } catch (e) { store.fail(e); return null; }
+      }} /></div>
+    </>,
+    work: <>
+      <WorkSection item={item} store={store} />
+    </>,
+    approvals: <>
+      <ApprovalsSection item={item} store={store} me={me} />
+    </>,
+    subitems: <>
+      <h4>Subitems <span className="count">{children.filter(c => c.completed).length}/{children.length}</span>{children.length > 0 && <span style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}}><ApplyToChildrenButton store={store} item={item} project={project} /></span>}</h4>
+      {children.map(c => (
+        <div key={c.id} className={'sub' + (c.completed ? ' done' : '')}>
+          <Check item={c} project={project} onToggle={status => store.updateItem(c.id, {status})} />
+          {c.type !== 'Task' && <TypeBadge type={c.type} />}
+          <button className="link grow" style={{color: 'var(--text)'}} onClick={() => open(c.id)}>{c.title}</button>
+          {c.assignees.map(a => <Avatar key={a} person={person(a)} size={18} />)}
+        </div>
+      ))}
+      <span className="qa-wrap" style={{display: 'block'}}><input className="inline" style={{width: '100%'}} placeholder="+ Add subitem. Enter to add. @ assign, due: date" value={sub} onChange={e => setSub(e.target.value)} {...qa.props}
+        onKeyDown={async e => {
+          if (qa.keyDown(e)) return;
+          if (e.key !== 'Enter' || !sub.trim()) return;
+          const t = sub; setSub('');
+          // Subitems inherit sprint and assignee from the parent unless set in the text.
+          // The server copies the fields this project inherits (Settings, Subitems inherit).
+          await store.quickAdd(project.id, t, {parentId: item.id});
+        }} />{qa.ui}</span>
+    </>,
+    links: <>
+      <RelatedLinks store={store} item={item} open={open} />
+    </>,
+    dependencies: <>
+      <h4><Link2 size={13} /> Dependencies</h4>
+      {blockedBy.map(b => (
+        <div key={b.id} className="dep">
+          <span className="small muted" style={{width: 70}}>Waits for</span>
+          <Check item={b} project={project} onToggle={status => store.updateItem(b.id, {status})} />
+          <button className="link grow" onClick={() => open(b.id)}>{itemKey(b, store.projects)} {b.title}</button>
+          <button className="icon" title="Remove" onClick={() => up({deps: item.deps.filter(d => d !== b.id)})}><X size={13} /></button>
+        </div>
+      ))}
+      {blocking.map(b => (
+        <div key={b.id} className="dep">
+          <span className="small muted" style={{width: 70}}>Blocks</span>
+          <Check item={b} project={project} onToggle={status => store.updateItem(b.id, {status})} />
+          <button className="link grow" onClick={() => open(b.id)}>{itemKey(b, store.projects)} {b.title}</button>
+        </div>
+      ))}
+      <select className="plain-select" value={depPick} onChange={e => { if (e.target.value) up({deps: [...item.deps, e.target.value]}); setDepPick(''); }}>
+        <option value="">+ Add "waits for"...</option>
+        {candidates.map(i => <option key={i.id} value={i.id}>{itemKey(i, store.projects)} {i.title.slice(0, 60)}</option>)}
+      </select>
+    </>,
+    time: <>
+      <h4>Time <span className="muted">{fmtMinutes(logged)} logged{item.estimate ? ` of ${item.estimate}h` : ''}</span></h4>
+      <div className="time-row">
+        {running
+          ? <><span className="clock-big">{fmtClock(now - Date.parse(running.start))}</span><button className="btn danger" onClick={() => store.stopTimer()}><Pause size={14} /> Stop</button></>
+          : <button className="btn" disabled={!me} onClick={() => store.startTimer(item.id)}><Play size={14} /> Start timer</button>}
+        <span className="spacer" />
+        <input className="inline num" placeholder="min" value={minutes} onChange={e => setMinutes(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={e => { if (e.key === 'Enter' && Number(minutes) > 0) { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); } }} />
+        <button className="btn" disabled={!(Number(minutes) > 0)} onClick={() => { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); }}>Log</button>
+      </div>
+      {time.slice(0, 6).map(t => <div key={t.id} className="small muted" style={{padding: '2px 0'}}>{person(t.person)?.name}: {t.minutes ? fmtMinutes(t.minutes) : 'running'} on {new Date(t.start).toLocaleDateString()}</div>)}
+    </>,
+    history: <>
+      <h4>History</h4>
+      <ActivityList store={store} itemId={item.id} limit={20} />
+    </>,
+    comments: <>
+      <h4>Comments</h4>
+      {comments.map(c => (
+        <div key={c.id} className="comment"><Avatar person={person(c.author)} size={24} /><div><b>{person(c.author)?.name}</b> <span className="muted small">{new Date(c.created).toLocaleString()}</span><div style={{whiteSpace: 'pre-wrap'}}>{c.body}</div></div></div>
+      ))}
+      <textarea className="comment-box" placeholder="Comment. @Name to mention. Ctrl+Enter to send" disabled={!me} value={comment}
+        onChange={e => setComment(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && comment.trim()) { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); } }} />
+      <button className="btn" style={{marginTop: 6}} disabled={!comment.trim()} onClick={() => { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); }}>Send</button>
+    </>,
+  };
   return (
     <aside className="panel">
       <div className="panel-head">
@@ -104,88 +195,41 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
             : <FieldValue kind={f.kind} options={f.options} value={item.fields[f.id]} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />] as [string, string, React.ReactNode]),
         ];
         const order = layout.order.length ? [...layout.order.filter(k => rows.some(r => r[0] === k)), ...rows.map(r => r[0]).filter(k => !layout.order.includes(k))] : rows.map(r => r[0]);
-        const shown = order.filter(k => !layout.hidden.includes(k));
+        const blank = (v: unknown) => v === undefined || v === null || v === '' || v === 0 || (Array.isArray(v) && !v.length);
+        const empty = new Set<string>([
+          ...(['assignees', 'priority', 'sprint', 'start', 'due', 'estimate', 'tags'] as const).filter(k => blank(item[k])),
+          ...(item.parentId ? [] : ['parent']), ...(item.recur ? [] : ['repeat']),
+          ...project.fields.filter(f => !COMPUTED.includes(f.kind) && blank(item.fields[f.id])).map(f => 'f:' + f.id),
+        ]);
+        const shown = order.filter(k => !layout.hidden.includes(k) && (layout.showEmpty || !empty.has(k)));
+        const hiddenEmpty = order.filter(k => !layout.hidden.includes(k) && empty.has(k)).length;
+        const move = (target: string) => {
+          if (!dragProp || dragProp === target) return;
+          const next = order.filter(k => k !== dragProp);
+          next.splice(next.indexOf(target), 0, dragProp);
+          setLayout({...layout, order: next});
+        };
         return <>
           <div className="props">
-            {shown.map(k => { const r = rows.find(x => x[0] === k)!; return <Fragment key={k}><label>{r[1]}</label>{r[2]}</Fragment>; })}
+            {shown.map(k => { const r = rows.find(x => x[0] === k)!; return <Fragment key={k}>
+              <label className={'prop-label' + (dragProp === k ? ' dragging' : '')} draggable onDragStart={() => setDragProp(k)} onDragEnd={() => setDragProp(null)}
+                onDragOver={e => { if (dragProp) e.preventDefault(); }} onDrop={() => { move(k); setDragProp(null); }} title="Drag to reorder"><GripVertical size={12} className="prop-grip" />{r[1]}</label>
+              {r[2]}</Fragment>; })}
           </div>
-          <PanelLayoutMenu rows={rows.map(r => [r[0], r[1]])} order={order} hidden={layout.hidden} onChange={setLayout} />
+          <div className="props-foot">
+            {hiddenEmpty > 0 && <button className="link-btn small muted" onClick={() => setLayout({...layout, showEmpty: !layout.showEmpty})}>{layout.showEmpty ? 'Hide empty fields' : `Show ${hiddenEmpty} empty field${hiddenEmpty === 1 ? '' : 's'}`}</button>}
+            <PanelLayoutMenu rows={rows.map(r => [r[0], r[1]])} order={order} hidden={layout.hidden} onChange={l => setLayout({...layout, ...l})} />
+          </div>
         </>;
       })()}
 
-      <div className="body-wrap"><BlockEditor key={item.id} value={item.body} onSave={body => body !== item.body && up({body})} onUploadImage={async f => {
-        const data = await new Promise<string>(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.readAsDataURL(f); });
-        try { return (await api<{url: string}>(`/items/${item.id}/files`, {method: 'POST', body: {name: f.name || 'screenshot.png', mime: f.type, data}})).url; } catch (e) { store.fail(e); return null; }
-      }} /></div>
-
-      <WorkSection item={item} store={store} />
-      <ApprovalsSection item={item} store={store} me={me} />
-
-      <h4>Subitems <span className="count">{children.filter(c => c.completed).length}/{children.length}</span>{children.length > 0 && <span style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}}><ApplyToChildrenButton store={store} item={item} project={project} /></span>}</h4>
-      {children.map(c => (
-        <div key={c.id} className={'sub' + (c.completed ? ' done' : '')}>
-          <Check item={c} project={project} onToggle={status => store.updateItem(c.id, {status})} />
-          {c.type !== 'Task' && <TypeBadge type={c.type} />}
-          <button className="link grow" style={{color: 'var(--text)'}} onClick={() => open(c.id)}>{c.title}</button>
-          {c.assignees.map(a => <Avatar key={a} person={person(a)} size={18} />)}
-        </div>
+      {[...(layout.sections ?? []).filter(k => k in SECTIONS), ...Object.keys(SECTIONS).filter(k => !(layout.sections ?? []).includes(k))].map((k, _n, all) => (
+        <section key={k} className={'psec' + (dragSec === k ? ' dragging' : '')} onDragOver={e => { if (dragSec) e.preventDefault(); }}
+          onDrop={() => { if (dragSec && dragSec !== k) { const next = all.filter(x => x !== dragSec); next.splice(next.indexOf(k), 0, dragSec); setLayout({...layout, sections: next}); } setDragSec(null); }}>
+          <span className="psec-grip" draggable onDragStart={() => setDragSec(k)} onDragEnd={() => setDragSec(null)} title="Drag to move this section"><GripVertical size={13} /></span>
+          {SECTIONS[k]}
+        </section>
       ))}
-      <span className="qa-wrap" style={{display: 'block'}}><input className="inline" style={{width: '100%'}} placeholder="+ Add subitem. Enter to add. @ assign, due: date" value={sub} onChange={e => setSub(e.target.value)} {...qa.props}
-        onKeyDown={async e => {
-          if (qa.keyDown(e)) return;
-          if (e.key !== 'Enter' || !sub.trim()) return;
-          const t = sub; setSub('');
-          // Subitems inherit sprint and assignee from the parent unless set in the text.
-          // The server copies the fields this project inherits (Settings, Subitems inherit).
-          await store.quickAdd(project.id, t, {parentId: item.id});
-        }} />{qa.ui}</span>
-
-      <RelatedLinks store={store} item={item} open={open} />
-
-      <h4><Link2 size={13} /> Dependencies</h4>
-      {blockedBy.map(b => (
-        <div key={b.id} className="dep">
-          <span className="small muted" style={{width: 70}}>Waits for</span>
-          <Check item={b} project={project} onToggle={status => store.updateItem(b.id, {status})} />
-          <button className="link grow" onClick={() => open(b.id)}>{itemKey(b, store.projects)} {b.title}</button>
-          <button className="icon" title="Remove" onClick={() => up({deps: item.deps.filter(d => d !== b.id)})}><X size={13} /></button>
-        </div>
-      ))}
-      {blocking.map(b => (
-        <div key={b.id} className="dep">
-          <span className="small muted" style={{width: 70}}>Blocks</span>
-          <Check item={b} project={project} onToggle={status => store.updateItem(b.id, {status})} />
-          <button className="link grow" onClick={() => open(b.id)}>{itemKey(b, store.projects)} {b.title}</button>
-        </div>
-      ))}
-      <select className="plain-select" value={depPick} onChange={e => { if (e.target.value) up({deps: [...item.deps, e.target.value]}); setDepPick(''); }}>
-        <option value="">+ Add "waits for"...</option>
-        {candidates.map(i => <option key={i.id} value={i.id}>{itemKey(i, store.projects)} {i.title.slice(0, 60)}</option>)}
-      </select>
-
-      <h4>Time <span className="muted">{fmtMinutes(logged)} logged{item.estimate ? ` of ${item.estimate}h` : ''}</span></h4>
-      <div className="time-row">
-        {running
-          ? <><span className="clock-big">{fmtClock(now - Date.parse(running.start))}</span><button className="btn danger" onClick={() => store.stopTimer()}><Pause size={14} /> Stop</button></>
-          : <button className="btn" disabled={!me} onClick={() => store.startTimer(item.id)}><Play size={14} /> Start timer</button>}
-        <span className="spacer" />
-        <input className="inline num" placeholder="min" value={minutes} onChange={e => setMinutes(e.target.value.replace(/[^0-9]/g, ''))}
-          onKeyDown={e => { if (e.key === 'Enter' && Number(minutes) > 0) { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); } }} />
-        <button className="btn" disabled={!(Number(minutes) > 0)} onClick={() => { api('/time', {method: 'POST', body: {itemId: item.id, minutes: Number(minutes)}}).catch(store.fail); setMinutes(''); }}>Log</button>
-      </div>
-      {time.slice(0, 6).map(t => <div key={t.id} className="small muted" style={{padding: '2px 0'}}>{person(t.person)?.name}: {t.minutes ? fmtMinutes(t.minutes) : 'running'} on {new Date(t.start).toLocaleDateString()}</div>)}
-
-      <h4>History</h4>
-      <ActivityList store={store} itemId={item.id} limit={20} />
-
-      <h4>Comments</h4>
-      {comments.map(c => (
-        <div key={c.id} className="comment"><Avatar person={person(c.author)} size={24} /><div><b>{person(c.author)?.name}</b> <span className="muted small">{new Date(c.created).toLocaleString()}</span><div style={{whiteSpace: 'pre-wrap'}}>{c.body}</div></div></div>
-      ))}
-      <textarea className="comment-box" placeholder="Comment. @Name to mention. Ctrl+Enter to send" disabled={!me} value={comment}
-        onChange={e => setComment(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && comment.trim()) { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); } }} />
-      <button className="btn" style={{marginTop: 6}} disabled={!comment.trim()} onClick={() => { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); }}>Send</button>
     </aside>
   );
 }
