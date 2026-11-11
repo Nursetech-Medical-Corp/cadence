@@ -1,7 +1,7 @@
 // Help center with short guides and step-by-step tours. A tour opens the right screen, spotlights the
 // real control, and explains it; Next moves on. Works on the live app, so what you learn is what you use.
 import {useEffect, useLayoutEffect, useState} from 'react';
-import {GraduationCap, Play, X} from 'lucide-react';
+import {GraduationCap, Play, X, Zap, CircleCheck, FolderKanban, Users, GanttChart, Timer, Repeat, LayoutTemplate, Bot, CalendarDays, Keyboard} from 'lucide-react';
 import type {Store} from './store.ts';
 
 type Step = {go?: string; sel?: string; title: string; text: string};
@@ -75,6 +75,12 @@ export const TOURS: Tour[] = [
   ]},
 ];
 
+// A colored icon for each tour on the Learn page.
+const TOUR_ICONS: Record<string, [typeof Play, string]> = {
+  add: [Zap, '#f59e0b'], done: [CircleCheck, '#10b981'], projects: [FolderKanban, '#6d5dfc'], people: [Users, '#0ea5e9'],
+  gantt: [GanttChart, '#ec4899'], sprints: [Timer, '#ef4444'], routines: [Repeat, '#14b8a6'], templates: [LayoutTemplate, '#8b5cf6'],
+  ai: [Bot, '#0f172a'], calendar: [CalendarDays, '#f97316'], keys: [Keyboard, '#64748b'],
+};
 export function HelpPage({start}: {start: (id: string) => void}) {
   return (
     <div className="page" style={{maxWidth: 1000}}>
@@ -83,7 +89,8 @@ export function HelpPage({start}: {start: (id: string) => void}) {
       <p className="small">Training someone new? On Templates, add <b>Learn Cadence: training checklist</b> from the Gallery, then Use it and assign it to them. It lists every tour and feature as steps with dates.</p>
       <div className="gallery">
         {TOURS.map(t => (
-          <div key={t.id} className="chart-card gal-card">
+          <div key={t.id} className="chart-card gal-card learn-card">
+            {(() => { const [Icon, color] = TOUR_ICONS[t.id] ?? [Play, '#6d5dfc']; return <span className="learn-icon" style={{background: color}}><Icon size={20} /></span>; })()}
             <b>{t.title}</b>
             <div className="muted small">{t.summary}</div>
             <div className="muted small">{t.minutes} min</div>
