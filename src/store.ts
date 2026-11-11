@@ -210,7 +210,7 @@ export function useStore(me: string) {
       try { return add(await api<View>('/views', {method: 'POST', body: {projectId, name, kind, config}})); }
       catch (e) {
         // No permission to add shared views here: make it a private view of your own instead.
-        const me = getMe();
+        const me = await api<{person: {id: string} | null}>('/auth/me').then(r => r.person?.id ?? '').catch(() => '');
         if (me && e instanceof Error && /Create and change views/.test(e.message)) {
           try { return add(await api<View>('/views', {method: 'POST', body: {projectId, name, kind, config: {...config, privateTo: me}}})); } catch (e2) { fail(e2); return null; }
         }
