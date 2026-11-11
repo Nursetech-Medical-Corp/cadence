@@ -76,6 +76,8 @@ export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint
   {kind: 'files', label: 'Files', icon: Paperclip, hint: 'Every attachment in the project. Drop files to make a task per file'},
 ];
 export const viewIcon = (k: ViewKind) => VIEW_KINDS.find(v => v.kind === k)?.icon ?? CalendarRange;
+/** A color per view kind, so tabs and the sidebar are easy to scan. */
+export const VIEW_COLORS: Record<string, string> = {list: '#3b82f6', table: '#10b981', board: '#8b5cf6', gantt: '#ec4899', calendar: '#f97316', workload: '#14b8a6', backlog: '#64748b', sprint: '#ef4444', files: '#d97706'};
 
 export function App() {
   const [me, setMeState] = useState(getMe);
@@ -292,7 +294,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
           {active && views.map(v => {
             const Icon = viewIcon(v.kind);
             const on = route.page === 'project' && (route.view === v.id || (!route.view && v === views[0]));
-            return <button key={v.id} className={'nav-btn nav-sub' + (on ? ' active' : '')} onClick={() => go({page: 'project', id: p.id, view: v.id})}><Icon size={14} />{v.name}</button>;
+            return <button key={v.id} className={'nav-btn nav-sub' + (on ? ' active' : '')} onClick={() => go({page: 'project', id: p.id, view: v.id})}><Icon size={14} color={VIEW_COLORS[v.kind]} />{v.name}</button>;
           })}
         </>;
       }} />
@@ -377,6 +379,9 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
   const filtered = useMemo(() => applyFilters(items, config, {project, today: store.today, currentSprint}), [items, config, project, store.today, currentSprint]);
   const sprints = useMemo(() => store.sprints.filter(s => s.projectId === project.id), [store.sprints, project.id]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Drag view tabs to reorder them.
+  const [dragView, setDragView] = useState<string | null>(null);
+  const [overView, setOverView] = useState<string | null>(null);
   const anchor = useRef<string | null>(null);
   useEffect(() => { setSelected(new Set()); }, [view?.id, project.id, JSON.stringify(config.filter ?? null), config.text, config.assignee, (config.types ?? []).join(), config.hideDone]);
   useEffect(() => {
@@ -403,7 +408,15 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
         {isRollup(own) && <button className="tag rollup-tag" onClick={() => go({page: 'project', id: own.id, view: 'settings'})} title="Choose which projects show here">Rollup of {included.length} project{included.length === 1 ? '' : 's'}</button>}
       </div>
       <div className="tabs">
-        {views.map(v => <ViewTab key={v.id} store={store} view={v} active={!settings && view?.id === v.id} project={project} />)}
+        {views.map(v => <span key={v.id} className={'tab-drag' + (dragView === v.id ? ' dragging' : '') + (overView === v.id && dragView && dragView !== v.id ? ' drop' : '')}
+          draggable onDragStart={() => setDragView(v.id)} onDragEnd={() => { setDragView(null); setOverView(null); }}
+          onDragOver={e => { if (dragView) { e.preventDefault(); setOverView(v.id); } }}
+          onDrop={() => {
+            if (!dragView || dragView === v.id) return;
+            const list = views.filter(x => x.id !== dragView); list.splice(list.findIndex(x => x.id === v.id), 0, views.find(x => x.id === dragView)!);
+            list.forEach((x, n) => { if (x.sort !== n) store.updateView(x.id, {sort: n}); });
+            setDragView(null); setOverView(null);
+          }}><ViewTab store={store} view={v} active={!settings && view?.id === v.id} project={project} /></span>)}
         <AddView store={store} project={project} />
         <span className="spacer" />
         <button className={'tab' + (settings ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: 'settings'})}><Settings size={14} /> Settings</button>
@@ -439,7 +452,7 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
   return (
     <span className="picker">
       <button className={'tab' + (active ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: view.id})} onDoubleClick={() => setEditing(true)} onContextMenu={e => { e.preventDefault(); setMenu(true); }}>
-        <Icon size={14} />
+        <Icon size={14} color={VIEW_COLORS[view.kind]} />
         {view.config.locked && <Lock size={11} className="muted" />}{view.config.privateTo && <EyeOff size={11} className="muted" />}
         {editing ? <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setName(view.name); setEditing(false); } }} onClick={e => e.stopPropagation()} /> : view.name}
         {active && !editing && <span data-pop-trigger className="icon" role="button" aria-label="View options" onClick={e => { e.stopPropagation(); setMenu(m => !m); }}><MoreHorizontal size={13} /></span>}

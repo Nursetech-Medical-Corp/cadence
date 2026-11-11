@@ -83,7 +83,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
         return (
           <div key={g.id} className={'column' + (over?.group === g.id && drag ? ' over' : '')}
             onDragOver={e => { e.preventDefault(); if (!colDrag && over?.group !== g.id) setOver({group: g.id, before: null}); }} onDrop={() => !colDrag && drop(g, over?.before ?? null)}>
-            <div className={'col-head' + (reorderable ? ' movable' : '') + (colOver === g.id && colDrag && colDrag !== g.id ? ' col-drop' : '')}
+            <div className={'col-head' + (reorderable ? ' movable' : '') + (colOver === g.id && colDrag && colDrag !== g.id ? ' col-drop' : '')} style={g.color ? {boxShadow: `inset 0 3px 0 ${g.color}`, background: `color-mix(in srgb, ${g.color} 8%, transparent)`} : undefined}
               draggable={reorderable} title={reorderable ? 'Drag to reorder columns' : undefined}
               onDragStart={e => { e.stopPropagation(); setColDrag(g.id); }} onDragEnd={() => { setColDrag(null); setColOver(null); }}
               onDragOver={e => { if (colDrag) { e.preventDefault(); e.stopPropagation(); setColOver(g.id); } }}

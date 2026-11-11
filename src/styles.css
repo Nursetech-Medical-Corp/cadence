@@ -1036,3 +1036,9 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .grid tr:hover .sel-col input { margin-left: 14px; }
 .insert-row td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .locked-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); padding: 4px 24px; background: var(--hover); }
+
+/* View tabs: drag to reorder */
+.tab-drag { display: inline-flex; }
+.tab-drag.dragging { opacity: .4; }
+.tab-drag.drop { box-shadow: inset 2px 0 0 var(--accent); }
+.sprint-tabs { margin: 10px 0 2px; }
