@@ -81,6 +81,8 @@ export function useStore(me: string) {
   const [timeTotals, setTimeTotals] = useState<Map<string, number>>(new Map()); // logged minutes per item
   const [prefs, setPrefs] = useState<Record<string, unknown>>({}); // your own layout (src/customize.ts)
   const [settings, setSettings] = useState<Settings>({custom: DEFAULT_CUSTOM, features: DEFAULT_FEATURES, admin: true});
+  // Your own layout follows whoever you are now (picking a person, or the first load before you are known).
+  useEffect(() => { api<Record<string, unknown>>('/prefs').then(setPrefs).catch(() => {}); }, [me]);
   const lastEvent = useRef<ChangeEvent | null>(null);
   const projectsRef = useRef<Project[]>([]);
   const itemsRef = useRef<Map<string, Item>>(new Map());

@@ -501,6 +501,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
 
       // Your own layout: view settings, tab order, project order (see src/customize.ts).
+      if (a === 'prefs' && m === 'GET') return send(res, 200, actor && !bearer ? tasks.prefs(actor) : {});
       if (a === 'prefs' && m === 'PUT') {
         if (!actor || bearer) throw new Invalid('Pick who you are first');
         tasks.setPref(actor, String(body.key ?? ''), body.value ?? null);
