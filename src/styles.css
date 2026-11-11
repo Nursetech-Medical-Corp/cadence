@@ -1097,10 +1097,6 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .card .time-cell .time-total { font-size: 11.5px; padding: 0 2px; }
 .review-tag { font-size: 10.5px; padding: 0 5px; }
 
-/* Sign-in cards: fields and buttons fill the card */
-.signin-card input.search { width: 100%; }
-.signin-card > .btn { width: 100%; justify-content: center; }
-
 /* Customization */
 .mine-note { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; margin-top: 8px; }
@@ -1182,24 +1178,51 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 
 .computed.over { color: var(--danger); font-weight: 600; }
 
-/* Sign-in page */
-.auth-tabs { width: 100%; }
-.auth-tabs button { flex: 1; }
-.signin-card .link { align-self: center; }
-
-/* Sign-in, create account, reset, invite and setup screens: a centered card on a soft background. */
-.signin { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
-  background: radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent),
-              radial-gradient(900px 500px at 110% 110%, color-mix(in srgb, #0ea5e9 14%, transparent), transparent), var(--bg); }
-.signin-card { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; background: var(--card); border: 1px solid var(--line);
-  border-radius: 16px; padding: 26px 24px; box-shadow: 0 20px 50px rgba(15, 23, 42, .10); }
-.signin-card h1 { font-size: 1.35em; }
-.signin-card input.search { height: 40px; font-size: 15px; }
-.signin-card > .btn.primary { height: 40px; font-size: 15px; }
-.signin-card .google-btn { width: 100%; justify-content: center; height: 40px; }
-.signin-card .or { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
-.signin-card .or::before, .signin-card .or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
-@media (max-width: 480px) { .signin { place-items: start center; padding-top: 48px; } .signin-card { padding: 22px 18px; box-shadow: none; } }
+/* Sign-in, emailed link, invite and setup screens: the Nursetech look (colors from the logo), whatever the app theme. */
+.signin { --nt-navy: #243F4F; --nt-teal: #9BB9BA; --nt-text: #4A5F6B; --nt-muted: #7A8C96; --nt-line: #E3EAEC; --nt-ring: 0 0 0 3px rgba(155, 185, 186, .55);
+  color-scheme: light; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 32px 16px;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 15px; line-height: 1.5; color: var(--nt-text);
+  background: radial-gradient(ellipse 900px 520px at 50% -8%, rgba(155, 185, 186, .25), transparent 70%), #F4F7F8; }
+.signin-card { width: 100%; max-width: 420px; display: flex; flex-direction: column; align-items: stretch; gap: 14px; background: #fff;
+  border: 1px solid var(--nt-line); border-radius: 16px; padding: 36px; box-shadow: 0 10px 30px rgba(36, 63, 79, .08); }
+.signin-logo { height: 44px; width: auto; align-self: center; margin-bottom: 6px; }
+.signin h1 { display: block; margin: 0; font-size: 22px; font-weight: 600; line-height: 1.25; color: var(--nt-navy); text-align: center; }
+.signin-sub { margin: -6px 0 0; font-size: 14.5px; color: var(--nt-text); text-align: center; }
+.signin-sub b { color: var(--nt-navy); font-weight: 600; word-break: break-all; }
+.signin-note { margin: 0; font-size: 14px; color: var(--nt-muted); }
+.signin-note a { color: var(--nt-navy); font-weight: 600; }
+.signin-form { display: flex; flex-direction: column; gap: 12px; }
+.signin-field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 500; color: var(--nt-navy); }
+.signin-field input { height: 44px; padding: 0 12px; border: 1px solid #CBD6DA; border-radius: 10px; background: #fff; color: #1B2B35; font: inherit; font-size: 15px; font-weight: 400; outline: none; }
+.signin-field input:focus { border-color: var(--nt-teal); box-shadow: var(--nt-ring); }
+.signin-btn { height: 44px; width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 1px solid var(--nt-navy);
+  background: var(--nt-navy); color: #fff; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.signin-btn:hover:not(:disabled) { background: #1C3341; }
+.signin-btn.ghost { background: #fff; color: var(--nt-navy); border-color: #CBD6DA; }
+.signin-btn.ghost:hover:not(:disabled) { background: #F4F7F8; }
+.signin-btn:disabled { opacity: .55; cursor: not-allowed; }
+.signin-btn[aria-busy] { opacity: .85; cursor: progress; }
+.signin-google { height: 44px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px solid #CBD6DA; border-radius: 10px; background: #fff;
+  color: #1F2A30; font-size: 15px; font-weight: 600; text-decoration: none; }
+.signin-google:hover { background: #F8FAFB; border-color: #B7C6CB; }
+.signin-google.busy { pointer-events: none; opacity: .75; }
+.signin-or { display: flex; align-items: center; gap: 12px; color: var(--nt-muted); font-size: 13px; }
+.signin-or::before, .signin-or::after { content: ''; flex: 1; border-top: 1px solid var(--nt-line); }
+.signin-link { align-self: center; padding: 2px 4px; border: 0; background: none; color: var(--nt-navy); font: inherit; font-size: 14px; font-weight: 500;
+  text-decoration: underline; text-decoration-color: var(--nt-teal); text-underline-offset: 3px; cursor: pointer; border-radius: 6px; }
+.signin-link:hover { text-decoration-color: var(--nt-navy); }
+.signin-error { padding: 10px 12px; border-radius: 10px; background: #FEF3F2; border: 1px solid #FECDCA; color: #B42318; font-size: 14px; }
+.signin-sent-icon { width: 56px; height: 56px; border-radius: 50%; align-self: center; display: grid; place-items: center; background: rgba(155, 185, 186, .28); color: var(--nt-navy); }
+.signin-spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .45); border-top-color: #fff; animation: signin-spin .7s linear infinite; }
+.signin-spin.dark { border-color: rgba(36, 63, 79, .25); border-top-color: var(--nt-navy); }
+@keyframes signin-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .signin-spin { animation-duration: 2s; } }
+.signin :is(button, a):focus-visible { outline: none; box-shadow: var(--nt-ring); }
+.signin-foot { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 13px; color: var(--nt-muted); text-align: center; }
+@media (max-width: 480px) {
+  .signin { justify-content: flex-start; padding: 20px 10px; }
+  .signin-card { padding: 24px; }
+}
 
 /* Phones: a tab bar at the bottom (My work, Inbox, new task, Search, Spaces), a roomier menu, rows that keep the title. */
 .tabbar { display: none; }

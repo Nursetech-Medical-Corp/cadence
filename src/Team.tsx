@@ -1,7 +1,7 @@
 // Sign-in page, Team page (people, roles and their permissions, sign-in and Google), and per-project access.
 import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
-import {Check as CheckIcon, CircleUser, Copy, KeyRound, LogIn, Mail, Plus, Shield, Trash2} from 'lucide-react';
+import {Check as CheckIcon, CircleUser, Copy, KeyRound, Mail, Plus, Shield, Trash2} from 'lucide-react';
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
@@ -13,33 +13,56 @@ type Member = {id: string; name: string; email: string; color: string; role: str
 export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
   person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; signInGoogle?: boolean; signInLink?: boolean; caps: Record<string, string[]>};
 
-/** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
-/** The card every sign-in screen sits in: the brand, then the form. */
-function AuthCard({children}: {children: React.ReactNode}) {
-  return <div className="signin"><div className="signin-card"><div className="brand" style={{fontSize: '1.2em'}}><span className="brand-mark" /> Cadence</div>{children}</div></div>;
+/** The card every sign-in screen sits in: the Nursetech logo, the form, and a short footer. */
+function AuthCard({children, help = true}: {children: React.ReactNode; help?: boolean}) {
+  return (
+    <div className="signin">
+      <main className="signin-card">
+        <img className="signin-logo" src="/nursetech-logo.png" alt="Nursetech Medical" height={44} />
+        {children}
+      </main>
+      <footer className="signin-foot">{help && <span>Need access? Ask an admin for an invite.</span>}<span>Nursetech Medical</span></footer>
+    </div>
+  );
 }
+type InputProps = React.InputHTMLAttributes<HTMLInputElement>;
+/** A labeled input on the sign-in screens. */
+const Field = ({label, ...p}: {label: string} & InputProps) => <label className="signin-field"><span>{label}</span><input {...p} /></label>;
+const AuthError = ({msg}: {msg: string}) => msg ? <div className="signin-error" role="alert">{msg}</div> : null;
+/** A full-width button that shows a spinner and is disabled while its request runs. */
+function AuthButton({busy, busyText, ghost, children, ...p}: {busy?: boolean; busyText?: string; ghost?: boolean} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...p} className={'signin-btn' + (ghost ? ' ghost' : '')} disabled={p.disabled || busy} aria-busy={busy || undefined}>
+    {busy ? <><span className="signin-spin" aria-hidden="true" />{busyText ?? children}</> : children}</button>;
+}
+const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 
+/** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
 export function SetupServer() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [err, setErr] = useState('');
-  const go = async () => {
+  const [busy, setBusy] = useState(false);
+  const go = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (pw !== pw2) return setErr('The two passwords do not match');
+    setErr(''); setBusy(true);
     try { await api('/auth/setup', {method: 'POST', body: {name, email, password: pw}}); location.hash = '/mywork'; location.reload(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(message(e)); setBusy(false); }
   };
   return (
-    <AuthCard>
-        <h1 style={{margin: '8px 0 4px'}}>Set up this server</h1>
-        <div className="muted small">Create the owner account. It becomes admin of every workspace here. Invite everyone else from the Team page.</div>
-        <input className="search" placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} />
-        <input className="search" placeholder="Email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} />
-        <input className="search" type="password" placeholder="Password (8 or more characters)" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
-        <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
-        {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-        <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!email.trim() || pw.length < 8} onClick={go}><LogIn size={14} /> Create account</button>
+    <AuthCard help={false}>
+      <h1>Set up this server</h1>
+      <p className="signin-sub">Create the owner account. It becomes admin of every workspace here. Invite everyone else from the Team page.</p>
+      <form className="signin-form" onSubmit={go}>
+        <Field label="Your name" autoFocus autoComplete="name" value={name} onChange={e => setName(e.target.value)} />
+        <Field label="Email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} />
+        <Field label="Password (8 or more characters)" type="password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
+        <Field label="Type it again" type="password" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} />
+        <AuthError msg={err} />
+        <AuthButton type="submit" busy={busy} busyText="Creating account..." disabled={!email.trim() || pw.length < 8}>Create account</AuthButton>
+      </form>
     </AuthCard>
   );
 }
@@ -47,13 +70,16 @@ export function SetupServer() {
 /** Signed in, but not a member of this workspace: go to one you belong to, or sign out. */
 export function NoAccess({me}: {me: Me}) {
   const list = me.memberOf ?? [];
+  const [busy, setBusy] = useState(false);
   useEffect(() => { if (list.length === 1) switchWorkspace(list[0].id); }, [list]);
   return (
     <AuthCard>
-        <h1 style={{margin: '8px 0 4px'}}>{list.length ? 'Pick a workspace' : 'No workspace yet'}</h1>
-        <div className="muted small">Signed in as <b>{me.account}</b>. {list.length ? 'You are not a member of this one.' : 'Ask an admin to invite this email.'}</div>
-        {list.map(w => <button key={w.id} className="btn" style={{width: '100%', justifyContent: 'center'}} onClick={() => switchWorkspace(w.id)}>{w.name}</button>)}
-        <button className="btn ghost" style={{width: '100%', justifyContent: 'center'}} onClick={async () => { await api('/auth/logout', {method: 'POST'}); location.reload(); }}>Sign out</button>
+      <h1>{list.length ? 'Pick a workspace' : 'No workspace yet'}</h1>
+      <p className="signin-sub">Signed in as <b>{me.account}</b>. {list.length ? 'You are not a member of this one.' : 'Ask an admin to invite this email.'}</p>
+      <div className="signin-form">
+        {list.map(w => <AuthButton key={w.id} onClick={() => switchWorkspace(w.id)}>{w.name}</AuthButton>)}
+        <AuthButton ghost busy={busy} busyText="Signing out..." onClick={async () => { setBusy(true); await api('/auth/logout', {method: 'POST'}); location.reload(); }}>Sign out</AuthButton>
+      </div>
     </AuthCard>
   );
 }
@@ -66,36 +92,68 @@ export function SignIn({google, emailLink, signup}: {google: boolean; emailLink:
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('error') ?? '');
-  const [note, setNote] = useState('');
-  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
-  const submit = async () => {
-    setError(''); setNote('');
+  const [busy, setBusy] = useState(false);
+  const [toGoogle, setToGoogle] = useState(false);
+  const [sent, setSent] = useState('');
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setError(''); setBusy(true);
     try {
-      if (mode === 'new') { const r = await api<{workspace: string}>('/auth/signup', {method: 'POST', body: {name, email, password}}); switchWorkspace(r.workspace); }
-      else if (usePassword) { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); }
-      else { const r = await api<{message: string}>('/auth/email-link', {method: 'POST', body: {email}}); setNote(r.message); }
-    } catch (e) { fail(e); }
+      if (mode === 'new') { const r = await api<{workspace: string}>('/auth/signup', {method: 'POST', body: {name, email, password}}); switchWorkspace(r.workspace); return; }
+      if (usePassword) { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); return; }
+      await api('/auth/email-link', {method: 'POST', body: {email}});
+      setSent(email.trim());
+    } catch (e) { setError(message(e)); }
+    setBusy(false);
   };
-  const go = (m: typeof mode) => { setMode(m); setError(''); setNote(''); };
-  const withPassword = mode === 'new' || usePassword;
+  const switchTo = (m: typeof mode, pw = usePassword) => { setMode(m); setUsePassword(pw); setError(''); };
+  const sub = google && emailLink ? 'Use your Nursetech Google account, or get a sign-in link by email.'
+    : google ? 'Use your Nursetech Google account.' : emailLink ? 'Get a sign-in link by email.' : 'Sign in with your email and password.';
+  const form = usePassword || emailLink;
+
+  if (sent) return (
+    <AuthCard>
+      <div className="signin-sent-icon"><Mail size={24} /></div>
+      <h1>Check your email</h1>
+      <p className="signin-sub">If there is an account for <b>{sent}</b>, a sign-in link is on its way.</p>
+      <p className="signin-sub">The link works once, for 15 minutes.</p>
+      <button type="button" className="signin-link" onClick={() => setSent('')}>Use a different email</button>
+    </AuthCard>
+  );
+  if (mode === 'new') return (
+    <AuthCard>
+      <h1>Create your account</h1>
+      <p className="signin-sub">You get your own workspace to start in. Others can invite you into theirs.</p>
+      <form className="signin-form" onSubmit={submit}>
+        <Field label="Your name" autoFocus autoComplete="name" value={name} onChange={e => setName(e.target.value)} />
+        <Field label="Email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} />
+        <Field label="Password (8 or more characters)" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
+        <AuthError msg={error} />
+        <AuthButton type="submit" busy={busy} busyText="Creating account..." disabled={!email.trim() || password.length < 8}>Create account</AuthButton>
+      </form>
+      <button type="button" className="signin-link" onClick={() => switchTo('in')}>Back to sign in</button>
+    </AuthCard>
+  );
   return (
     <AuthCard>
-      <h1 style={{margin: '8px 0 4px'}}>{mode === 'in' ? 'Sign in' : 'Create your account'}</h1>
-      {pendingConnect() && <div className="muted small">Sign in to finish connecting your AI app to Cadence.</div>}
-      <div className="seg auth-tabs"><button className={mode === 'in' ? 'on' : ''} onClick={() => go('in')}>Sign in</button><button className={mode === 'new' ? 'on' : ''} onClick={() => go('new')}>Create account</button></div>
-      {mode === 'new' && signup !== 'open' ? <div className="muted small">Accounts here are by invitation. Ask a workspace admin to invite your email.</div> : <>
-        {google && mode === 'in' && <><a className="btn google-btn" href="/auth/google/start"><GoogleMark /> Continue with Google</a>{(emailLink || usePassword) && <div className="or"><span>or</span></div>}</>}
-        {mode === 'new' && <input className="search" placeholder="Your name" autoComplete="name" value={name} onChange={e => setName(e.target.value)} />}
-        {(withPassword || emailLink) && <input className="search" placeholder="Email" type="email" autoComplete="username" autoFocus value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => !withPassword && e.key === 'Enter' && email.trim() && submit()} />}
-        {withPassword && <input className="search" type="password" placeholder={mode === 'new' ? 'Password (8 or more characters)' : 'Password'} autoComplete={mode === 'new' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}
-        {error && <div className="small" style={{color: 'var(--danger)'}}>{error}</div>}
-        {note && <div className="small" style={{color: 'var(--ok)'}}>{note}</div>}
-        {(withPassword || emailLink) && <button className="btn primary" style={{padding: 8}} disabled={!email.trim() || (withPassword && !password)} onClick={submit}>
-          {withPassword ? <><LogIn size={14} /> {mode === 'in' ? 'Sign in' : 'Create account'}</> : <><Mail size={14} /> Email me a sign-in link</>}</button>}
-        {mode === 'in' && !usePassword && <button className="link small" onClick={() => { setUsePassword(true); setError(''); setNote(''); }}>Use a password instead</button>}
-        {mode === 'in' && usePassword && (google || emailLink) && <button className="link small" onClick={() => { setUsePassword(false); setError(''); setNote(''); }}>{emailLink ? 'Email me a sign-in link instead' : 'Back'}</button>}
-        {mode === 'new' && <div className="muted small">You get your own workspace to start in. Others can invite you into theirs.</div>}
-      </>}
+      <h1>Sign in to Cadence</h1>
+      <p className="signin-sub">{sub}</p>
+      {pendingConnect() && <p className="signin-note">Sign in to finish connecting your AI app to Cadence.</p>}
+      {!form && <AuthError msg={error} />}
+      {google && <a className={'signin-google' + (toGoogle ? ' busy' : '')} href="/auth/google/start" aria-busy={toGoogle || undefined} onClick={() => setToGoogle(true)}>
+        {toGoogle ? <span className="signin-spin dark" aria-hidden="true" /> : <GoogleMark size={18} />} {toGoogle ? 'Opening Google...' : 'Continue with Google'}</a>}
+      {google && form && <div className="signin-or"><span>or</span></div>}
+      {form && <form className="signin-form" onSubmit={submit}>
+        <Field label="Email" type="email" autoComplete="username" autoFocus={!google} value={email} onChange={e => setEmail(e.target.value)} />
+        {usePassword && <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />}
+        <AuthError msg={error} />
+        <AuthButton type="submit" busy={busy} busyText={usePassword ? 'Signing in...' : 'Sending link...'} disabled={!email.trim() || (usePassword && !password)}>
+          {usePassword ? 'Sign in' : 'Email me a sign-in link'}</AuthButton>
+      </form>}
+      {(google || emailLink) && <button type="button" className="signin-link" onClick={() => switchTo('in', !usePassword)}>
+        {!usePassword ? 'Use a password instead' : emailLink ? 'Email me a sign-in link instead' : 'Hide password sign-in'}</button>}
+      {signup === 'open' && <button type="button" className="signin-link" onClick={() => switchTo('new')}>Create an account</button>}
     </AuthCard>
   );
 }
@@ -103,22 +161,26 @@ export function SignIn({google, emailLink, signup}: {google: boolean; emailLink:
 /** The page a sign-in link opens. Only the button uses the link, so mail scanners that open it do not. */
 export function EmailLinkSignIn({token}: {token: string}) {
   const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
   const go = async () => {
+    setErr(''); setBusy(true);
     try { await api('/auth/email-link/use', {method: 'POST', body: {token}}); location.hash = '/mywork'; location.reload(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setErr(message(e)); setBusy(false); }
   };
   return (
     <AuthCard>
-      <h1 style={{margin: '8px 0 4px'}}>Sign in to Cadence</h1>
-      <div className="muted small">The link works once, for 15 minutes.</div>
-      {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-      <button className="btn primary" style={{padding: 8}} autoFocus onClick={go}><LogIn size={14} /> Sign in</button>
-      {err && <a className="link small" href="#/signin">Back to sign in</a>}
+      <h1>Sign in to Cadence</h1>
+      <p className="signin-sub">Press the button to finish signing in. The link works once, for 15 minutes.</p>
+      <div className="signin-form">
+        <AuthError msg={err} />
+        <AuthButton autoFocus busy={busy} busyText="Signing in..." onClick={go}>Sign in</AuthButton>
+      </div>
+      {err && <a className="signin-link" href="#/signin">Back to sign in</a>}
     </AuthCard>
   );
 }
 
-const GoogleMark = () => <svg width="16" height="16" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.8 6.1C12.4 13.6 17.7 9.5 24 9.5z" /><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z" /><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.8-6.1z" /><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.8-5.8l-7.4-5.7c-2.1 1.4-4.8 2.2-8.4 2.2-6.3 0-11.6-4.1-13.5-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z" /></svg>;
+const GoogleMark = ({size = 16}: {size?: number}) => <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.7 13.2l7.8 6.1C12.4 13.6 17.7 9.5 24 9.5z" /><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z" /><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.8l7.8-6.1z" /><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.8-5.8l-7.4-5.7c-2.1 1.4-4.8 2.2-8.4 2.2-6.3 0-11.6-4.1-13.5-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z" /></svg>;
 
 export function TeamPage({store, me}: {store: Store; me: Me}) {
   const [people, setPeople] = useState<Member[]>([]);
@@ -422,40 +484,48 @@ export function AcceptInvite({secret}: {secret: string}) {
   const [pw2, setPw2] = useState('');
   const [addPw, setAddPw] = useState(false);
   useEffect(() => { api<NonNullable<typeof info>>(`/invites/${secret}`).then(i => { setInfo(i); setName(i.name ?? ''); setAddPw(!i.passwordless); }).catch(e => setErr(e instanceof Error ? e.message : String(e))); }, [secret]);
-  const join = async () => {
+  const [busy, setBusy] = useState(false);
+  const join = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ready || busy) return;
     if (!info?.hasAccount && addPw && pw !== pw2) return setErr('The two passwords do not match');
+    setErr(''); setBusy(true);
     try {
       const r = await api<{google?: boolean}>(`/invites/${secret}/accept`, {method: 'POST', body: {name, password: pw}});
       if (r.google) { location.href = '/auth/google/start'; return; }
       location.hash = '/mywork'; location.reload();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setErr(message(e)); setBusy(false); }
   };
   // An existing account joins signed in as itself, or with its password; staff accounts sign in with Google first.
   const needSignIn = !!info?.hasAccount && !info.signedIn && (!info.hasPassword || info.staff);
   const needPw = !!info?.hasAccount && !info.signedIn && !needSignIn;
   const ready = !!name.trim() && !needSignIn && (needPw ? pw.length >= 8 : !addPw || pw.length >= 8);
   return (
-    <AuthCard>
-        {info ? <>
-          <h1 style={{margin: '8px 0 4px'}}>Join {info.workspace}</h1>
-          <div className="muted small">{info.invitedBy ? `${info.invitedBy} invited ` : 'You were invited as '}<b>{info.email}</b> as {info.role}.</div>
-          <input className="search" placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
-          {needSignIn && <div className="muted small">You already have a Cadence account on this server. <a className="link" href="#/signin">Sign in</a> first, then open this link again.</div>}
+    <AuthCard help={false}>
+      {info ? <>
+        <h1>Join {info.workspace}</h1>
+        <p className="signin-sub">{info.invitedBy ? `${info.invitedBy} invited ` : 'You were invited as '}<b>{info.email}</b> as {info.role}.</p>
+        <form className="signin-form" onSubmit={join}>
+          <Field label="Your name" autoFocus autoComplete="name" value={name} onChange={e => setName(e.target.value)} />
+          {needSignIn && <p className="signin-note">You already have a Cadence account on this server. <a href="#/signin">Sign in</a> first, then open this link again.</p>}
           {needPw && <>
-            <div className="muted small">You already have a Cadence account on this server. Enter its password to join, or sign in first and open this link again.</div>
-            <input className="search" type="password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
+            <p className="signin-note">You already have a Cadence account on this server. Enter its password to join, or sign in first and open this link again.</p>
+            <Field label="Your password" type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} />
           </>}
-          {!info.hasAccount && info.staff && <div className="muted small">Next you sign in with your Google account.</div>}
+          {!info.hasAccount && info.staff && <p className="signin-note">Next you sign in with your Nursetech Google account.</p>}
           {!info.hasAccount && !info.staff && (addPw ? <>
-            <input className="search" type="password" placeholder={info.passwordless ? 'Password (optional, 8 or more characters)' : 'Choose a password (8 or more characters)'} autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
-            <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
-          </> : <div className="muted small">No password needed: you sign in with an emailed link or Google. <button className="link small" onClick={() => setAddPw(true)}>Add a password (optional)</button></div>)}
-          {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-          <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!ready} onClick={join}><LogIn size={14} /> Join workspace</button>
-        </> : <>
-          <h1 style={{margin: '8px 0 4px'}}>Invite</h1>
-          <div className="small" style={{color: err ? 'var(--danger)' : undefined}}>{err || 'Checking your invite...'}</div>
-        </>}
+            <Field label={info.passwordless ? 'Password (optional, 8 or more characters)' : 'Choose a password (8 or more characters)'} type="password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
+            <Field label="Type it again" type="password" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} />
+          </> : <p className="signin-note">No password needed: you sign in with an emailed link or Google.</p>)}
+          <AuthError msg={err} />
+          <AuthButton type="submit" busy={busy} busyText="Joining..." disabled={!ready}>Join workspace</AuthButton>
+        </form>
+        {!info.hasAccount && !info.staff && info.passwordless && !addPw && <button type="button" className="signin-link" onClick={() => setAddPw(true)}>Add a password (optional)</button>}
+      </> : <>
+        <h1>Invite</h1>
+        {err ? <AuthError msg={err} /> : <p className="signin-sub">Checking your invite...</p>}
+        {err && <a className="signin-link" href="#/signin">Go to sign in</a>}
+      </>}
     </AuthCard>
   );
 }
