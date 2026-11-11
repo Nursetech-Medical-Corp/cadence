@@ -19,6 +19,8 @@ import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEm
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
 import {allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
+import {addAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
+import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
 import {handleMcpHttp} from './mcp-http.ts';
@@ -107,6 +109,12 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateEvents(tasks);
   migrateOAuth(accounts.db);
   startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
+  // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
+  startAgents(tasks, {post: async (url, payload) => {
+    if (!(await safeTarget(url))) throw new Error(`Webhook target not allowed: ${url}`);
+    const r = await fetch(url, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000)});
+    if (!r.ok) throw new Error(`Webhook answered ${r.status}`);
+  }});
   if (info.main) tasks.seedIfEmpty();
   migrate(tasks.db); // marks the first person as admin once people exist
   // Every workspace gets an All projects rollup at the top, once. Deleting it is respected.
@@ -259,6 +267,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
       const canSee = (projectId: string) => caps(actor, projectId, !!bearer).has('view');
+      // An AI agent on "review" (with a token): the change waits for its owner unless it follows an approved AI SOP.
+      const held = (op: string, args: unknown[]) => !!bearer && needsReview(tasks, actor) && !approvedSop(tasks, actor!, op, args);
       const seesItem = (itemId: string) => { try { return canSee(tasks.item(itemId).projectId); } catch { return false; } };
 
       // ---- Sign-in (always reachable) ----
@@ -429,18 +439,23 @@ If you did not ask for it, ignore this email.`)
 
       // ---- API tokens for AI agents and integrations ----
       if (a === 'tokens') {
-        if (!b && m === 'GET') return send(res, 200, listTokens(tasks.db, !ws.requireLogin || isAdmin(actor) ? undefined : actor ?? ''));
+        if (!b && m === 'GET') {
+          if (!ws.requireLogin || isAdmin(actor)) return send(res, 200, listTokens(tasks.db));
+          const mine = new Set([actor ?? '', ...(actor ? agentsOf(tasks, actor).map(x => x.id) : [])]);
+          return send(res, 200, listTokens(tasks.db).filter(t => mine.has(t.person)));
+        }
         if (!b && m === 'POST') {
           const person = body.person ?? actor;
           if (!person) throw new Invalid('Pick who the token acts as');
-          if (person !== actor) needAdmin();
+          const ownAgent = !!actor && agentsOf(tasks, actor).some(x => x.id === person);
+          if (person !== actor && !ownAgent) needAdmin();
           if (bearer) throw new Denied('Tokens cannot create tokens');
           return send(res, 201, createToken(tasks.db, person, String(body.name ?? 'Token')));
         }
         if (b && m === 'DELETE') {
           const t = listTokens(tasks.db).find(x => x.id === b);
           if (!t) throw new NotFound('Token not found');
-          if (t.person !== actor) needAdmin();
+          if (t.person !== actor && !(actor && agentsOf(tasks, actor).some(x => x.id === t.person))) needAdmin();
           deleteToken(tasks.db, b); return send(res, 200, {ok: true});
         }
       }
@@ -851,6 +866,7 @@ If you did not ask for it, ignore this email.`)
           need(body.projectId, 'create');
           for (const k of Object.keys(body)) if (!ITEM_FIELDS.has(k) && k !== 'projectId') delete body[k];
           for (const d of (body.deps ?? []) as string[]) need(tasks.item(d).projectId, 'view');
+          if (held('createItem', [body, actor])) return send(res, 202, propose(tasks, actor!, 'createItem', [body, actor]));
           return send(res, 201, tasks.createItem(body, actor));
         }
         if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); return send(res, 201, tasks.quickAdd(body, actor)); }
@@ -867,9 +883,10 @@ If you did not ask for it, ignore this email.`)
           for (const d of (body.deps ?? []) as string[]) need(tasks.item(d).projectId, 'view');
           if (body.parentId) need(tasks.item(body.parentId).projectId, 'view');
           if (body.projectId && body.projectId !== it.projectId) need(body.projectId, 'create');
+          if (held('updateItem', [it.id, body, actor])) return send(res, 202, propose(tasks, actor!, 'updateItem', [it.id, body, actor]));
           return send(res, 200, tasks.updateItem(it.id, body, actor, {keep: q('keep') === '1'}));
         }
-        if (it && !c && m === 'DELETE') { need(it.projectId, 'delete'); return send(res, 200, tasks.deleteItem(it.id, actor)); }
+        if (it && !c && m === 'DELETE') { need(it.projectId, 'delete'); if (held('deleteItem', [it.id, actor])) return send(res, 202, propose(tasks, actor!, 'deleteItem', [it.id, actor])); return send(res, 200, tasks.deleteItem(it.id, actor)); }
       }
 
       if (a === 'timesheet') {
@@ -1010,9 +1027,42 @@ If you did not ask for it, ignore this email.`)
       }
       if (a === 'items' && b && c === 'approval-state' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.approvalState(it.id)); }
 
+      // ---- AI agents owned by people, and the changes they propose ----
+      if (a === 'agents') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (!b && m === 'GET') return send(res, 200, q('all') === '1' && (isAdmin(actor) || !ws.requireLogin) ? listAgents(tasks) : listAgents(tasks).filter(x => x.owner === actor));
+        if (!b && m === 'POST') { if (bearer) throw new Denied('Add agents in the app, not with a token'); return send(res, 201, addAgent(tasks, actor, body)); }
+        if (b && !c && m === 'PATCH') { if (bearer) throw new Denied('Change agents in the app, not with a token'); return send(res, 200, saveAgentSettings(tasks, b, body, actor)); }
+        if (b && c === 'token' && m === 'POST') {
+          if (bearer) throw new Denied('Tokens cannot create tokens');
+          if (!agentsOf(tasks, actor).some(x => x.id === b)) needAdmin();
+          const tk = createToken(tasks.db, b, String(body.name ?? 'Agent token'));
+          return send(res, 201, {...tk, mcpUrl: `${publicOrigin(req)}/mcp?ws=${info.id}&key=${tk.token}`});
+        }
+      }
+      if (a === 'proposals') {
+        if (!actor) throw new Invalid('Pick who you are first');
+        if (!b && m === 'GET') {
+          const all = q('all') === '1' && (isAdmin(actor) || !ws.requireLogin);
+          const agentQ = q('agent');
+          if (agentQ && !all && !agentsOf(tasks, actor).some(x => x.id === agentQ) && agentQ !== actor) throw new Denied('Not your agent');
+          return send(res, 200, listProposals(tasks, {owner: all || agentQ ? undefined : actor, agent: agentQ, state: q('state')}));
+        }
+        if (b && !c && m === 'GET') { const p0 = getProposal(tasks, b); if (p0.owner !== actor && p0.agent !== actor) needAdmin(); return send(res, 200, p0); }
+        if (b && c === 'decide' && m === 'POST') {
+          if (bearer) throw new Denied('A person decides proposals in the app');
+          const p0 = getProposal(tasks, b);
+          if (p0.itemId) need(tasks.item(p0.itemId).projectId, 'edit');
+          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined}));
+        }
+      }
       // ---- Human and AI work: claims, reviews, work log, files ----
       if (a === 'ai') {
-        if (b === 'queue' && m === 'GET') return send(res, 200, tasks.aiQueue(q('agent') ?? null, q('projectId')).filter(x => canSee(x.item.projectId)));
+        if (b === 'queue' && m === 'GET') {
+          const owner = q('owner'), mineIds = owner ? new Set(agentsOf(tasks, owner).map(x => x.id)) : null;
+          return send(res, 200, tasks.aiQueue(q('agent') ?? null, q('projectId')).filter(x => canSee(x.item.projectId))
+            .filter(x => !mineIds || (x.review?.agent && mineIds.has(x.review.agent)) || x.item.assignees.some(a => mineIds.has(a))));
+        }
         const it = body.itemId ? tasks.findItem(body.itemId) : null;
         if (it) need(it.projectId, b === 'log' ? 'comment' : 'edit');
         if (b === 'claim' && m === 'POST') return send(res, 200, tasks.claimTask(it!.id, actor ?? '', body.note ?? ''));

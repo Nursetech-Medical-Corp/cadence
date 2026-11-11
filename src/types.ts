@@ -24,7 +24,7 @@ export type Recur = {
   spawned?: string;
 };
 
-export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'};
+export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'; owner?: string | null};
 
 export type Project = {
   id: string; name: string; key: string;

@@ -1310,3 +1310,12 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .cal-sync h4 { margin: 0; }
 .cal-sync-list { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .danger-text { color: var(--danger); }
+.proposals { border: 1px solid var(--accent-line, var(--line)); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; background: var(--accent-soft); }
+.proposals h3 { margin: 0 0 4px; }
+.proposal { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.proposal-head { display: flex; align-items: center; gap: 6px; }
+.proposal-args { max-height: 160px; overflow: auto; background: var(--bg2); padding: 6px; border-radius: 6px; font-size: 11px; }
+.agent-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
+.agent-grid label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.agent-key { word-break: break-all; font-size: 11px; }

@@ -3,6 +3,7 @@ import {monday} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, listEvents, timeblockItem, updateEvent} from './events.ts';
 import {allBusy, flushGoogle} from './gcal.ts';
+import {agentInbox, applySuggestion, approvedSop, listProposals, needsReview, propose} from './agents.ts';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
@@ -173,14 +174,33 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('list_events', 'Meetings and calendar events between two dates (Cadence events plus synced Google events), repeating ones expanded. mine: only where you organize or attend.',
     {from: z.string(), to: z.string(), project: z.string().optional(), mine: z.boolean().optional()}, true,
     i => listEvents(tasks, {from: i.from, to: i.to, person: actor, projectId: i.project ? projectId(i.project) : undefined, mine: i.mine}, seesProject));
-  tool('create_event', 'Schedule a meeting or other event. Attendees get invitations (through Google Calendar when the organizer connected one). Weekly meetings belong here, not as tasks.',
-    {...eventShape, title: z.string(), start: z.string()}, false, async i => { if (!actor) throw new Error('Run as a person (the organizer)'); return synced(createEvent(tasks, toEvent(i), actor)); });
+  // AI agents on "review" draft calendar changes for their owner, who approves them on the AI work page.
+  const held = () => !!actor && needsReview(tasks, actor);
+  tool('create_event', 'Schedule a meeting or other event. Attendees get invitations (through Google Calendar when the organizer connected one). Weekly meetings belong here, not as tasks. AI agents: held for your owner to approve.',
+    {...eventShape, title: z.string(), start: z.string()}, false, async i => { if (!actor) throw new Error('Run as a person (the organizer)'); const ev = toEvent(i); return held() ? propose(tasks, actor, 'event.create', [ev]) : synced(createEvent(tasks, ev, actor)); });
   tool('update_event', 'Change an event. For a repeating event, scope "one" with occurrence (that occurrence\'s original start) changes only that one. Attendees can send response to answer.',
     {event: z.string(), ...eventShape, scope: z.enum(['all', 'one']).optional(), occurrence: z.string().optional(), response: z.enum(['accepted', 'declined', 'tentative']).optional()}, false,
-    async i => { const {event, scope, occurrence, ...rest} = i; return synced(updateEvent(tasks, event, toEvent(rest), actor, {scope, occurrence})); });
+    async i => { const {event, scope, occurrence, ...rest} = i; const ev = toEvent(rest); return held() && !rest.response ? propose(tasks, actor!, 'event.update', [event, ev, {scope, occurrence}]) : synced(updateEvent(tasks, event, ev, actor, {scope, occurrence})); });
   tool('delete_event', 'Cancel an event (attendees are told). scope "one" with occurrence cancels one occurrence of a repeating event.',
     {event: z.string(), scope: z.enum(['all', 'one']).optional(), occurrence: z.string().optional()}, false,
-    async i => synced(deleteEvent(tasks, i.event, actor, {scope: i.scope, occurrence: i.occurrence})));
+    async i => held() ? propose(tasks, actor!, 'event.delete', [i.event, {scope: i.scope, occurrence: i.occurrence}]) : synced(deleteEvent(tasks, i.event, actor, {scope: i.scope, occurrence: i.occurrence})));
+
+  // ---- AI agents: what to look at, suggesting work, proposals ----
+  const meAgent = () => { const a = me(); if ((tasks.db.prepare('select kind from people where id = ?').get(a) as {kind?: string} | undefined)?.kind !== 'ai') throw new Error('This tool is for AI agent accounts'); return a; };
+  tool('agent_inbox', 'Start every run here (AI agents). New tasks assigned to your owner, work you may claim (within your settings), work sent back to you, and decisions on your proposals since the time you pass (default: last 24 hours). Store now and pass it as since next time.',
+    {since: z.string().optional()}, true, i => agentInbox(tasks, meAgent(), i.since));
+  tool('suggest_work', 'Suggest a task for a person and their agent: a new task (project and title) or an existing item. Your owner approves it; then the task is assigned to the person and the agent, already accepted. Tag sop with an approved AI SOP id to skip approval.',
+    {title: z.string().optional(), item: z.string().optional(), project: z.string().optional(), for_person: z.string().describe('Who the work is for (name or id); usually your owner'),
+     reason: z.string().describe('Why this is worth doing and how you would do it'), sop: z.string().optional(), estimate: z.number().optional().describe('Hours'), due: z.string().optional()}, false,
+    i => {
+      const agent = meAgent();
+      if (!i.item && (!i.project || !i.title)) throw new Error('Pass item, or project and title');
+      const sug = {title: i.title, item: i.item ? tasks.findItem(i.item).id : undefined, projectId: i.project ? projectId(i.project) : undefined, forPerson: personId(i.for_person), reason: i.reason, sop: i.sop, estimate: i.estimate, due: i.due, agent};
+      const sop = i.sop && approvedSop(tasks, agent, 'createItem', [{tags: [i.sop]}]);
+      return sop ? applySuggestion(tasks, sug, agent) : propose(tasks, agent, 'suggestWork', [sug], i.reason);
+    });
+  tool('my_proposals', 'Your proposals and their state (pending, approved, rejected, failed) with the approver\'s note.', {state: z.enum(['pending', 'approved', 'rejected', 'failed']).optional()}, true,
+    i => listProposals(tasks, {agent: meAgent(), state: i.state}).map(p => ({id: p.id, summary: p.summary, state: p.state, note: p.note, created: p.created, decidedAt: p.decidedAt})));
   tool('find_free_time', 'First open slots when you and the listed people are all free, inside your work hours (Calendar settings). Uses Cadence events and connected Google calendars.',
     {attendees: z.array(z.string()), duration: z.number().describe('Minutes'), from: z.string().describe('YYYY-MM-DD'), to: z.string().describe('YYYY-MM-DD'), max: z.number().optional()}, true,
     async i => {

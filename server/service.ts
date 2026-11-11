@@ -165,7 +165,14 @@ export class Tasks {
 
   // People. No passwords yet: the UI picks who you are. Real auth is a later iteration.
   listPeople(): Person[] {
-    return this.db.prepare('select * from people order by coalesce(sort, 1e9), name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai'}));
+    return this.db.prepare('select * from people order by coalesce(sort, 1e9), name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai', owner: (r.owner as string) ?? null}));
+  }
+  /** An AI agent is never the only one on a task: assigning an agent adds the person it belongs to. */
+  withOwners(assignees: string[]) {
+    if (!assignees.length) return assignees;
+    const rows = this.db.prepare(`select owner from people where kind = 'ai' and owner is not null and id in (${assignees.map(() => '?').join(',')})`).all(...assignees) as {owner: string}[];
+    const add = rows.map(r => r.owner).filter(o => !assignees.includes(o) && this.db.prepare('select 1 from people where id = ?').get(o));
+    return add.length ? [...assignees, ...new Set(add)] : assignees;
   }
   /** Puts people in the given order (pickers and sorting by assignee follow it). */
   reorderPeople(ids: string[]) {
@@ -297,7 +304,7 @@ export class Tasks {
     const item: Item = {
       id: id(), projectId: p.id, parentId: input.parentId ?? null, number: (max.n as number) + 1,
       type: input.type ?? (p.types.includes('Task') ? 'Task' : p.types[0] ?? 'Task'), title, body: input.body ?? '', status,
-      priority: input.priority ?? 0, assignees: input.assignees ?? [], start: input.start ?? null, due: input.due ?? null,
+      priority: input.priority ?? 0, assignees: this.withOwners(input.assignees ?? []), start: input.start ?? null, due: input.due ?? null,
       estimate: input.estimate ?? null, tags: input.tags ?? [], sprint: input.sprint ?? null,
       sort: input.sort ?? (max.s as number) + 1, recur: input.recur ?? null, fields: input.fields ?? {},
       createdBy: actor, created: t, updated: t, deps: input.deps ?? [],
@@ -316,6 +323,7 @@ export class Tasks {
     this.log('create', actor, item, null, item);
     this.fire({kind: 'created'}, item);
     for (const a of item.assignees) this.notify(a, actor, item.id, 'assigned', `assigned you ${p.key}-${item.number}: ${item.title}`);
+    this.assigned(item.assignees, actor, item);
     return item;
   }
 
@@ -364,6 +372,7 @@ export class Tasks {
     validatePatch(patch, new Set(this.listPeople().map(x => x.id)), p.types);
     if (patch.fields) checkFieldValues(patch.fields, p.fields, iid);
     next.assignees = [...new Set(next.assignees)];
+    if (patch.assignees !== undefined) next.assignees = this.withOwners(next.assignees);
     if ((patch.start !== undefined || patch.due !== undefined) && next.start && next.due && next.start > next.due) throw new Invalid('Start must be on or before due');
     const wasDone = before.completed !== null;
     const isDone = p.statuses.find(s => s.id === next.status)?.category === 'done';
@@ -389,6 +398,7 @@ export class Tasks {
     const ref = `${p.key}-${next.number}`;
     for (const a of next.assignees.filter(a => !before.assignees.includes(a)))
       this.notify(a, actor, iid, 'assigned', `assigned you ${ref}: ${next.title}`);
+    this.assigned(next.assignees.filter(a => !before.assignees.includes(a)), actor, next);
     if (!wasDone && isDone) {
       for (const who of this.watchers(next)) this.notify(who, actor, iid, 'completed', `completed ${ref}: ${next.title}`);
       this.spawnRecurrence(next, p, actor);
@@ -666,6 +676,10 @@ export class Tasks {
   }
 
   // Notifications
+  private assignListeners = new Set<(a: {person: string; actor: string | null; item: Item}) => void>();
+  /** Every time someone is added to an item's assignees, including when they assign themselves. */
+  onAssign(fn: (a: {person: string; actor: string | null; item: Item}) => void) { this.assignListeners.add(fn); return () => this.assignListeners.delete(fn); }
+  private assigned(people: string[], actor: string | null, item: Item) { for (const person of people) for (const fn of this.assignListeners) { try { fn({person, actor, item}); } catch (e) { console.error('Assign hook failed', e); } } }
   private notifyListeners = new Set<(n: {person: string; actor: string | null; itemId: string | null; kind: string; text: string}) => void>();
   onNotify(fn: (n: {person: string; actor: string | null; itemId: string | null; kind: string; text: string}) => void) { this.notifyListeners.add(fn); return () => this.notifyListeners.delete(fn); }
   private notify(person: string, actor: string | null, itemId: string | null, kind: string, text: string) {

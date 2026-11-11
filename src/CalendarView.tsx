@@ -23,7 +23,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
   const [adding, setAdding] = useState<{day: string; text: string} | null>(null);
 
   const c = parseDay(cursor);
-  const first = mode === 'month' ? iso(new Date(c.getFullYear(), c.getMonth(), 1)) : cursor;
+  const first = mode === 'month' && !hours ? iso(new Date(c.getFullYear(), c.getMonth(), 1)) : cursor;
   const start = addDays(first, -((parseDay(first).getDay() + 6) % 7));
   const weeks = mode === 'month' ? Math.ceil((daysBetween(start, iso(new Date(c.getFullYear(), c.getMonth() + 1, 0))) + 1) / 7) : 1;
   const days = Array.from({length: weeks * 7}, (_, n) => addDays(start, n));
