@@ -1132,7 +1132,7 @@ export class Tasks {
     return Object.fromEntries(this.db.prepare('select key, value from prefs where person = ?').all(person).map(r => [r.key as string, j(r.value, null)]));
   }
   setPref(person: string, key: string, value: unknown) {
-    if (!/^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects)$/.test(key)) throw new Invalid('Unknown preference');
+    if (!/^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything))$/.test(key)) throw new Invalid('Unknown preference');
     if (value === null || value === undefined) { this.db.prepare('delete from prefs where person = ? and key = ?').run(person, key); return; }
     const text = JSON.stringify(value);
     if (text.length > 50_000) throw new Invalid('That layout is too large');

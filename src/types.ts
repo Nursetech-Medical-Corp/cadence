@@ -37,6 +37,8 @@ export type Project = {
 export type InheritKey = 'assignees' | 'sprint' | 'priority' | 'tags' | 'due' | 'start' | `f:${string}`;
 
 export type ProjectSettings = {
+  /** Optional header at the top of the space: a color band or an uploaded picture. */
+  cover?: {gradient: number} | {image: string; v: number} | null;
   inherit: InheritKey[];
   automations: Rule[];
   webhooks: {id: string; url: string; events: string[]}[];

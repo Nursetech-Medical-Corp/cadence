@@ -204,3 +204,26 @@ test('customization: personal layouts are per person; locked areas are admin onl
     assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {hideDone: true}}, cookie: o})).status, 200);
   } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
 });
+
+test('headers: JPEG pictures only, your own personal headers only, removable', async () => {
+  const tasks = new Tasks(openDb(':memory:'), () => '2026-11-10');
+  tasks.dataDir = mkdtempSync(join(tmpdir(), 'tasks-covers-'));
+  const mw = apiMiddleware(tasks);
+  const server = createServer((req, res) => mw(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as {port: number}).port}/api`;
+  const call = (path: string, init: {method?: string; body?: unknown; person?: string} = {}) =>
+    fetch(base + path, {method: init.method ?? 'GET', headers: {'content-type': 'application/json', ...(init.person ? {'x-person': init.person} : {})}, body: init.body === undefined ? undefined : JSON.stringify(init.body)});
+  try {
+    const [a, b] = tasks.listPeople();
+    const jpeg = 'data:image/jpeg;base64,' + Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 0xff, 0xd9]).toString('base64');
+    assert.equal((await call('/covers', {method: 'POST', body: {name: `mywork-${a.id}`, data: 'data:image/png;base64,iVBORw0KGgo='}, person: a.id})).status, 400, 'PNG refused');
+    assert.equal((await call('/covers', {method: 'POST', body: {name: '../../etc', data: jpeg}, person: a.id})).status, 400, 'odd names refused');
+    assert.equal((await call('/covers', {method: 'POST', body: {name: `mywork-${b.id}`, data: jpeg}, person: a.id})).status, 403, 'not someone else');
+    assert.equal((await call('/covers', {method: 'POST', body: {name: `mywork-${a.id}`, data: jpeg}, person: a.id})).status, 200);
+    const got = await call(`/covers/mywork-${a.id}`);
+    assert.equal(got.headers.get('content-type'), 'image/jpeg');
+    assert.equal((await call(`/covers/mywork-${a.id}`, {method: 'DELETE', person: a.id})).status, 200);
+    assert.equal((await call(`/covers/mywork-${a.id}`)).status, 404);
+  } finally { server.close(); }
+});

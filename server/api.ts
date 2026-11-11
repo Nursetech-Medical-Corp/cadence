@@ -3,7 +3,7 @@
 // the signed-in account (accounts.ts).
 // Every write is checked against the actor's role in the item's project (see auth.ts).
 import type {IncomingMessage, ServerResponse} from 'node:http';
-import {readFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
@@ -20,7 +20,7 @@ import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
 import {migrateApprovals} from './approvals.ts';
 import {archiveWorkspace, createWorkspace, listWorkspaces, publicInfo, reorderWorkspaces, updateWorkspace, workspaceDir, type WorkspaceInfo} from './workspaces.ts';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
@@ -690,6 +690,31 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const it = tasks.findItem(b); need(it.projectId, m === 'GET' ? 'view' : 'comment');
         if (m === 'GET') return send(res, 200, tasks.itemFiles(it.id));
         if (m === 'POST') return send(res, 201, tasks.attachFile(it.id, actor, String(body.name ?? 'file'), String(body.mime ?? ''), String(body.data ?? '')));
+      }
+      // Cover headers: space-<spaceId>, mywork-<personId>, everything-<personId>; JPEG only, kept in <data>/covers.
+      if (a === 'covers') {
+        const name = String(b ?? body.name ?? '');
+        if (!/^(space|mywork|everything)-[\w-]{1,40}$/.test(name)) throw new Invalid('Unknown header');
+        const file = join(tasks.dataDir, 'covers', `${name}.jpg`);
+        if (m === 'GET') {
+          if (!existsSync(file)) throw new NotFound('No header picture');
+          res.statusCode = 200; res.setHeader('content-type', 'image/jpeg'); res.setHeader('x-content-type-options', 'nosniff');
+          res.setHeader('cache-control', 'private, max-age=31536000, immutable');
+          res.end(readFileSync(file)); return;
+        }
+        const [kind, owner] = [name.split('-')[0], name.slice(name.indexOf('-') + 1)];
+        if (kind === 'space') need(owner, 'settings');
+        else if (owner !== actor) throw new Denied('You can only change your own headers');
+        if (m === 'POST') {
+          const mm = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(body.data ?? ''));
+          if (!mm) throw new Invalid('Send the picture as a JPEG');
+          const bytes = Buffer.from(mm[1], 'base64');
+          if (bytes.length > 1_500_000) throw new Invalid('The picture is too large');
+          if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Invalid('That is not a JPEG picture');
+          mkdirSync(dirname(file), {recursive: true}); writeFileSync(file, bytes);
+          return send(res, 200, {ok: true});
+        }
+        if (m === 'DELETE') { rmSync(file, {force: true}); return send(res, 200, {ok: true}); }
       }
       if (a === 'files' && b && m === 'GET') {
         const f = readFile(tasks, b);

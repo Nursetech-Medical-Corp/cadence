@@ -1,5 +1,6 @@
 // Everything, across every workspace: a dashboard you arrange, one calendar, a personal timeline, and a list.
 // Edits (dates, done) go straight to the item's own workspace. Opening an item from another workspace switches to it.
+import {CoverHeader, type Cover} from './Cover.tsx';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ChevronLeft, ChevronRight, LayoutDashboard, CalendarDays, GanttChart, List as ListIcon, Plus, RotateCcw} from 'lucide-react';
 import type {Item, Project} from './types.ts';
@@ -66,6 +67,7 @@ export function Everything({store, open}: {store: Store; open: (id: string) => v
   const ctx = {rows: shown, update, complete, go, today: store.today};
   return (
     <div className="page every" style={{maxWidth: 'none'}}>
+      {getMe() && <CoverHeader name={`everything-${getMe()}`} value={store.prefs['cover:everything'] as Cover | undefined} onChange={c => store.setPref('cover:everything', c)} />}
       <div className="every-head">
         <h1>Everything</h1>
         <span className="muted">All your workspaces in one place. Changes save to each item's own workspace.</span>

@@ -1,5 +1,6 @@
 // My Work: a personal daily dashboard. Widgets can be added, removed, resized and dragged into a new order.
 // Layout is saved per person in this browser.
+import {CoverHeader, type Cover} from './Cover.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {GripVertical, Plus, RotateCcw, X} from 'lucide-react';
@@ -57,6 +58,7 @@ export function MyWork({store, me, open}: {store: Store; me: string; open: (id: 
 
   return (
     <div className="page dash">
+      {me && <CoverHeader name={`mywork-${me}`} value={store.prefs['cover:mywork'] as Cover | undefined} onChange={c => store.setPref('cover:mywork', c)} />}
       <div className="dash-head">
         <div>
           <h1>{hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, {name.split(' ')[0]}</h1>

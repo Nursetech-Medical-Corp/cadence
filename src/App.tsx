@@ -1,4 +1,5 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {CoverHeader} from './Cover.tsx';
 import {saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
 import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
@@ -419,6 +420,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
 
   return <>
     <header className="head">
+      {!isRollup(own) && <CoverHeader name={`space-${own.id}`} value={own.settings.cover} onChange={cover => store.updateProject(own.id, {settings: {...own.settings, cover}})} />}
       <div className="head-top">
         <span className="crumb">Spaces /</span>
         <InlineText value={project.name} onSave={name => name && store.updateProject(project.id, {name})} className="h1-edit" />
