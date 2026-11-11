@@ -13,6 +13,7 @@ import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type No
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
+import {exportMine, importMine} from './personal.ts';
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
@@ -205,7 +206,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const ct = String(req.headers['content-type'] ?? '');
         if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout')) return send(res, 415, {error: 'Send JSON with content-type application/json'});
       }
-      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
+      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
@@ -602,6 +603,16 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
       }
 
+      // My data: everything this person can see plus their layouts, and a merging restore of it.
+      if (a === 'me' && b === 'export' && m === 'GET') {
+        if (!actor) throw new Denied('Sign in first');
+        res.setHeader('content-disposition', `attachment; filename="cadence-my-data-${new Date().toISOString().slice(0, 10)}.json"`);
+        return send(res, 200, exportMine(tasks, actor, canSee));
+      }
+      if (a === 'me' && b === 'import' && m === 'POST') {
+        if (!actor || bearer) throw new Denied('Sign in first');
+        return send(res, 200, importMine(tasks, actor, body.data, body.what === 'prefs' ? 'prefs' : 'all'));
+      }
       // Your own layout: view settings, tab order, project order (see src/customize.ts).
       if (a === 'prefs' && m === 'PUT') {
         if (!actor || bearer) throw new Invalid('Pick who you are first');

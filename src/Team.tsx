@@ -147,6 +147,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         <h1><CircleUser size={20} /> My account</h1>
         {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
         {me.account && <AccountCard me={me} />}
+      {me.person && <MyDataCard />}
         {self && <section className="set-card">
           <div className="set-card-head"><h3>Password and notifications</h3></div>
           <div className="set-item">
@@ -160,6 +161,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         </section>}
         {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
         {self && <TokensCard people={[self]} admin={false} me={self.id} />}
+        {me.person && <MyDataCard />}
       </div>
     );
   }
@@ -170,6 +172,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
 
       {me.account && <AccountCard me={me} />}
+      {me.person && <MyDataCard />}
       {me.owner && <section className="set-card">
         <div className="set-card-head"><h3>Server</h3><span className="muted small">You set this server up, so you decide who can create an account.</span></div>
         <div className="set-item"><span className="grow">Who can create an account</span>
@@ -500,6 +503,35 @@ function AccountCard({me}: {me: Me}) {
         <button className="btn" disabled={!email.trim() || !pw} onClick={link}>Link account</button>
       </div>
       {msg && <div className="small muted">{msg}</div>}
+    </section>
+  );
+}
+
+/** My data: download what you can see plus your layouts, or merge a download back in (personal spaces and layouts). */
+function MyDataCard() {
+  const [msg, setMsg] = useState('');
+  const download = async () => {
+    try {
+      const data = await api<unknown>('/me/export');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], {type: 'application/json'}));
+      const a = document.createElement('a'); a.href = url; a.download = `cadence-my-data-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+  };
+  const restore = async (file: File | undefined, what: 'all' | 'prefs') => {
+    if (!file) return;
+    try {
+      const r = await api<{prefs: number; prefsSkipped: number; spacesCreated: number; itemsAdded: number; viewsAdded: number}>('/me/import', {method: 'POST', body: {data: JSON.parse(await file.text()), what}});
+      setMsg(`Restored: ${r.prefs} layout settings, ${r.spacesCreated} personal spaces, ${r.itemsAdded} items, ${r.viewsAdded} views${r.prefsSkipped ? ` (${r.prefsSkipped} settings had nothing to match here)` : ''}.`);
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
+  };
+  return (
+    <section className="set-card">
+      <div className="set-card-head"><h3>My data</h3><span className="muted small">Download everything you can see (spaces, items, comments, sprints), your time, your private views and your layouts. Restoring merges: your personal spaces come back and your layouts apply; shared spaces are never overwritten.</span></div>
+      <div className="set-item"><span className="grow">Download my data (JSON)</span><button className="btn small" onClick={download}>Download</button></div>
+      <div className="set-item"><span className="grow">Restore personal spaces and layouts</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'all'); e.target.value = ''; }} /></label></div>
+      <div className="set-item"><span className="grow">Restore layouts only</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'prefs'); e.target.value = ''; }} /></label></div>
+      {msg && <p className="small">{msg}</p>}
     </section>
   );
 }

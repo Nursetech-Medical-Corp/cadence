@@ -57,3 +57,34 @@ test('personal spaces: any member makes one, it stays private (even from admins)
     assert.equal((await call(`/projects/${pid}`, {method: 'DELETE', cookie: m})).status, 200);
   } finally { server.close(); }
 });
+
+test('my data: export holds only what I can see; import restores personal spaces and layouts without duplicates', async () => {
+  const {tasks, server, call, admin, a, m} = await harness();
+  try {
+    // A space only the admin can see.
+    const secret = (await call('/projects', {method: 'POST', body: {name: 'Board only'}, cookie: a})).json;
+    await call(`/projects/${secret.id}`, {method: 'PATCH', body: {settings: {...secret.settings, access: {default: 'none', members: {}}}}, cookie: a});
+    await call('/items', {method: 'POST', body: {projectId: secret.id, title: 'Cap table'}, cookie: a});
+    const mine = (await call('/projects', {method: 'POST', body: {name: 'My notes', personal: true}, cookie: m})).json;
+    const parent = (await call('/items', {method: 'POST', body: {projectId: mine.id, title: 'Plan'}, cookie: m})).json;
+    await call('/items', {method: 'POST', body: {projectId: mine.id, title: 'Step one', parentId: parent.id}, cookie: m});
+
+    const dump = (await call('/me/export', {cookie: m})).json;
+    assert.equal(dump.app, 'cadence-personal');
+    assert.ok(!dump.spaces.some((s: {project: {id: string}}) => s.project.id === secret.id), 'no spaces I cannot see');
+    assert.ok(dump.spaces.some((s: {project: {id: string}}) => s.project.id === mine.id));
+
+    // Importing again changes nothing; after losing the space, it comes back with its tree.
+    const again = (await call('/me/import', {method: 'POST', body: {data: dump}, cookie: m})).json;
+    assert.equal(again.itemsAdded, 0); assert.equal(again.spacesCreated, 0);
+    tasks.deleteProject(mine.id);
+    const back = (await call('/me/import', {method: 'POST', body: {data: dump}, cookie: m})).json;
+    assert.equal(back.spacesCreated, 1); assert.equal(back.itemsAdded, 2);
+    const p = tasks.listProjects().find(x => x.name === 'My notes')!;
+    assert.ok(p.settings.access?.private && p.settings.access.members[dump.person.id] === 'admin');
+    const items = tasks.listItems({projectId: p.id});
+    assert.equal(items.find(i => i.title === 'Step one')!.parentId, items.find(i => i.title === 'Plan')!.id);
+    assert.ok(!(await call('/projects', {cookie: a})).json.some((x: {id: string}) => x.id === p.id), 'restored space is still private');
+    assert.equal(admin.admin, true);
+  } finally { server.close(); }
+});
