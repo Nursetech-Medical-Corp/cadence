@@ -1,0 +1,644 @@
+import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X} from 'lucide-react';
+import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
+import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
+import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
+import {AppearanceButton} from './appearance.tsx';
+import {ListView} from './ListView.tsx';
+import {TableView} from './TableView.tsx';
+import {BoardView} from './BoardView.tsx';
+import {BulkBar} from './BulkBar.tsx';
+import {FilterButton, countRules, matchFilter} from './FilterBuilder.tsx';
+import {SortButton} from './Sorting.tsx';
+import {NewFromTemplate, NewProjectMenu} from './TemplateMenus.tsx';
+import {QuickCapture, ShortcutsDialog, moveFocus, targetIds, useHotkeys, type ActionId} from './Hotkeys.tsx';
+import {ItemPanel} from './ItemPanel.tsx';
+import {DataPage, downloadCsv} from './DataPage.tsx';
+import {MyWork} from './MyWork.tsx';
+import {AcceptInvite, SignIn, type Me} from './Team.tsx';
+import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
+import {QuickViewHost} from './QuickView.tsx';
+import {FileDrop, FilesView} from './FilesView.tsx';
+import {ProjectList, includedIn, isRollup, rollupProject} from './ProjectNav.tsx';
+import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
+import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
+import {PropertyPanel} from './Fields.tsx';
+
+// Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
+const GanttView = lazy(() => import('./GanttView.tsx').then(m => ({default: m.GanttView})));
+const CalendarView = lazy(() => import('./CalendarView.tsx').then(m => ({default: m.CalendarView})));
+const WorkloadView = lazy(() => import('./WorkloadView.tsx').then(m => ({default: m.WorkloadView})));
+const BacklogView = lazy(() => import('./BacklogView.tsx').then(m => ({default: m.BacklogView})));
+const SprintView = lazy(() => import('./SprintView.tsx').then(m => ({default: m.SprintView})));
+const SettingsView = lazy(() => import('./SettingsView.tsx').then(m => ({default: m.SettingsView})));
+const HistoryPage = lazy(() => import('./History.tsx').then(m => ({default: m.HistoryPage})));
+const InsightsPage = lazy(() => import('./Insights.tsx').then(m => ({default: m.InsightsPage})));
+const AIWorkPage = lazy(() => import('./AIWork.tsx').then(m => ({default: m.AIWorkPage})));
+const TemplateEditor = lazy(() => import('./TemplateEditor.tsx').then(m => ({default: m.TemplateEditor})));
+const Everything = lazy(() => import('./Everything.tsx').then(m => ({default: m.Everything})));
+const PlanPage = lazy(() => import('./PlanPage.tsx').then(m => ({default: m.PlanPage})));
+const ApprovalsPage = lazy(() => import('./Approvals.tsx').then(m => ({default: m.ApprovalsPage})));
+const RoutinesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.RoutinesPage})));
+const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.TemplatesPage})));
+const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
+
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'invite'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+
+function readRoute(): Route {
+  const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
+  if (page === 'p' && id) return {page: 'project', id, view: view ?? ''};
+  if (page === 'inbox') return {page: 'inbox'};
+  if (page === 'data') return {page: 'data'};
+  if (page === 'history') return {page: 'history'};
+  if (page === 'team') return {page: 'team'};
+  if (page === 'insights') return {page: 'insights'};
+  if (page === 'ai') return {page: 'ai'};
+  if (page === 'templates' && id) return {page: 'template', id};
+  if (page === 'invite' && id) return {page: 'invite', id};
+  if (page === 'today') return {page: 'today'};
+  if (page === 'templates' || page === 'routines' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
+  if (page === 'signin') return {page: 'signin'};
+  return {page: 'mywork'};
+}
+const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : `/${r.page}`; };
+
+export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint: string}[] = [
+  {kind: 'list', label: 'List', icon: List, hint: 'Nested outline, fastest for writing'},
+  {kind: 'table', label: 'Table', icon: Table, hint: 'Spreadsheet with resizable columns'},
+  {kind: 'board', label: 'Board', icon: Kanban, hint: 'Kanban by status, person, type or sprint'},
+  {kind: 'gantt', label: 'Timeline', icon: GanttChart, hint: 'Gantt: drag to schedule, link dependencies'},
+  {kind: 'calendar', label: 'Calendar', icon: CalendarDays, hint: 'Month or week by due date. Drag to reschedule'},
+  {kind: 'workload', label: 'Workload', icon: Users, hint: 'Hours per person per day vs capacity'},
+  {kind: 'backlog', label: 'Backlog', icon: Layers, hint: 'Epics, features, stories. Plan into sprints'},
+  {kind: 'sprint', label: 'Sprint', icon: Zap, hint: 'Sprint board, burndown, capacity'},
+  {kind: 'files', label: 'Files', icon: Paperclip, hint: 'Every attachment in the project. Drop files to make a task per file'},
+];
+export const viewIcon = (k: ViewKind) => VIEW_KINDS.find(v => v.kind === k)?.icon ?? CalendarRange;
+
+export function App() {
+  const [me, setMeState] = useState(getMe);
+  // Sign-in state. When sign-in is required the server decides who you are.
+  const [auth, setAuth] = useState<Me | null>(null);
+  useEffect(() => { api<Me>('/auth/me').then(a => { setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); } }).catch(() => {}); }, []);
+  const store = useStore(me);
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const [route, setRoute] = useState(readRoute);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [unread, setUnread] = useState(0);
+  // Sidebar: drag its edge to resize, collapse it to give views more room, drawer on small screens.
+  const [sideW, setSideW] = useState(() => Number(localStorage.getItem('side-w')) || 248);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('side-collapsed') === '1');
+  const [drawer, setDrawer] = useState(false);
+  const toggleSide = () => {
+    if (matchMedia('(max-width: 760px)').matches) { setDrawer(d => !d); return; }
+    setCollapsed(c => { localStorage.setItem('side-collapsed', c ? '0' : '1'); return !c; });
+  };
+  useEffect(() => { const f = () => setDrawer(false); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = sideW;
+    const move = (ev: PointerEvent) => setSideW(Math.min(420, Math.max(180, w0 + ev.clientX - x0)));
+    const up = (ev: PointerEvent) => { localStorage.setItem('side-w', String(Math.min(420, Math.max(180, w0 + ev.clientX - x0)))); removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+    addEventListener('pointermove', move); addEventListener('pointerup', up);
+  };
+
+  useEffect(() => { const f = () => setRoute(readRoute()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  useEffect(() => { if (store.ready && !store.people.some(p => p.id === me) && store.people[0]) setMe(store.people[0].id); }, [store.ready, store.people]);
+  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}&unread=true`).then(n => setUnread(n.length)).catch(() => {}); }, [me, store.tick]);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      // Undo/redo for item changes. Text fields keep their own native undo.
+      const typing = (e.target as HTMLElement).closest?.('input:not([type=checkbox]):not([type=date]), textarea');
+      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) storeRef.current.redo(); else storeRef.current.undo(); }
+      if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'y') { e.preventDefault(); storeRef.current.redo(); }
+    };
+    addEventListener('keydown', k);
+    return () => removeEventListener('keydown', k);
+  }, []);
+
+  const setMe = (id: string) => { storeMe(id); setMeState(id); };
+  // Opening an item from another workspace switches here first, then opens it once this workspace has loaded.
+  useEffect(() => {
+    const id = sessionStorage.getItem('open-after');
+    if (id && store.items.has(id)) { sessionStorage.removeItem('open-after'); open(id); }
+  }, [store.items]);
+  const open = useCallback((id: string) => setOpenId(id), []);
+  const [capture, setCapture] = useState(false);
+  const [tour, setTour] = useState<string | null>(null);
+  const [shortcuts, setShortcuts] = useState(false);
+  const focus = useRef<string | null>(null);
+  const runRef = useRef<(a: ActionId) => void>(() => {});
+  runRef.current = (a: ActionId) => {
+    const s = storeRef.current;
+    const ids = () => targetIds(focus.current);
+    const sprintFor = async (projectId: string, which: 'now' | 'next') => {
+      const list = s.sprints.filter(x => x.projectId === projectId).sort((x, y) => x.start.localeCompare(y.start));
+      const cur = list.find(x => x.start <= s.today && s.today <= x.end);
+      if (which === 'now') return cur?.id ?? (await s.createSprint(projectId))?.id ?? null;
+      return list.find(x => cur && x.start > cur.start)?.id ?? (await s.createSprint(projectId))?.id ?? null;
+    };
+    switch (a) {
+      case 'palette': setPalette(p => !p); break;
+      case 'capture': setCapture(true); break;
+      case 'help': setShortcuts(true); break;
+      case 'filter': document.querySelector<HTMLInputElement>('.toolbar .search')?.focus(); break;
+      case 'sidebar': toggleSide(); break;
+      case 'goMyWork': go({page: 'mywork'}); break;
+      case 'goInbox': go({page: 'inbox'}); break;
+      case 'goHistory': go({page: 'history'}); break;
+      case 'down': case 'up': focus.current = moveFocus(a === 'down' ? 1 : -1, focus.current); break;
+      case 'open': if (focus.current) open(focus.current); break;
+      case 'select': {
+        const el = focus.current ? document.querySelector<HTMLElement>(`.content [data-id="${focus.current}"]`) : null;
+        const cb = el?.querySelector<HTMLInputElement>('.sel-col input');
+        if (cb) cb.click(); else el?.dispatchEvent(new MouseEvent('click', {bubbles: true, ctrlKey: true}));
+        break;
+      }
+      case 'done': for (const id of ids()) { const it = s.items.get(id); const p = it && s.projects.find(x => x.id === it.projectId); if (!it || !p) continue;
+        s.updateItem(id, {status: it.completed ? (p.statuses.find(x => x.category === 'todo')?.id ?? p.statuses[0].id) : (p.statuses.find(x => x.category === 'done')?.id ?? it.status)}); } break;
+      case 'assignMe': for (const id of ids()) { const it = s.items.get(id); if (it && !it.assignees.includes(me)) s.updateItem(id, {assignees: [...it.assignees, me]}); } break;
+      case 'sprintNow': case 'sprintNext': (async () => { for (const id of ids()) { const it = s.items.get(id); if (it) s.updateItem(id, {sprint: await sprintFor(it.projectId, a === 'sprintNow' ? 'now' : 'next')}); } })(); break;
+      case 'backlog': for (const id of ids()) s.updateItem(id, {sprint: null}); break;
+      default: if (a.startsWith('view')) document.querySelectorAll<HTMLElement>('.tabs > .picker > .tab')[Number(a.slice(4)) - 1]?.click();
+    }
+  };
+  useHotkeys(useCallback((a: ActionId) => runRef.current(a), []));
+  const close = useCallback(() => setOpenId(null), []);
+  // Item links inside descriptions ask to open an item through this event.
+  useEffect(() => { const f = (e: Event) => setOpenId((e as CustomEvent<string>).detail); addEventListener('open-item', f); return () => removeEventListener('open-item', f); }, []);
+
+  const project = route.page === 'project' ? store.projects.find(p => p.id === route.id) : undefined;
+  const projectViews = useMemo(() => project ? store.views.filter(v => v.projectId === project.id).sort((a, b) => a.sort - b.sort) : [], [store.views, project]);
+  const view = route.page === 'project' ? projectViews.find(v => v.id === route.view) ?? (route.view === 'settings' ? undefined : projectViews[0]) : undefined;
+
+  if (route.page === 'invite') return <AcceptInvite secret={route.id} />;
+  if (auth?.required && !auth.person) return <SignIn googleReady={auth.googleReady} />;
+  if (!store.ready) return <div className="loading">{store.error ?? 'Loading...'}</div>;
+
+  return (
+    <StoreContext.Provider value={store}>
+    <div className={'app' + (collapsed ? ' side-collapsed' : '') + (drawer ? ' drawer-open' : '')} style={{'--side-w': `${sideW}px`} as React.CSSProperties}>
+      <div className="side-wrap">
+        <Sidebar store={store} me={me} setMe={setMe} route={route} unread={unread} openPalette={() => setPalette(true)} open={open} onToggle={toggleSide} onCapture={() => setCapture(true)} onShortcuts={() => setShortcuts(true)} signedIn={!!auth?.required} />
+        <div className="side-resize" onPointerDown={startResize} onDoubleClick={() => { setSideW(248); localStorage.setItem('side-w', '248'); }} title="Drag to resize, double-click to reset" />
+      </div>
+      {drawer && <div className="drawer-scrim" onClick={() => setDrawer(false)} />}
+      <button className="side-toggle" onClick={toggleSide} title="Show sidebar"><PanelLeft size={16} /></button>
+      <main className="main">
+        {route.page === 'project' && project && (
+          <ProjectPage store={store} project={project} views={projectViews} view={view} settings={route.view === 'settings'} open={open} />
+        )}
+        <ViewBoundary key={route.page + ((route as {id?: string}).id ?? '')}>
+        {route.page === 'project' && !project && store.ready && <FindProject id={route.id} />}
+        {route.page === 'mywork' && <div className="content"><MyWork store={store} me={me} open={open} /></div>}
+        {route.page === 'inbox' && <div className="content"><Inbox store={store} me={me} open={open} /></div>}
+        {route.page === 'data' && <div className="content"><DataPage store={store} /></div>}
+        {route.page === 'history' && <div className="content"><HistoryPage store={store} open={open} /></div>}
+        {route.page === 'approvals' && <div className="content"><ApprovalsPage store={store} me={me} open={open} /></div>}
+        {route.page === 'help' && <div className="content"><HelpPage start={id => setTour(id)} /></div>}
+        {route.page === 'today' && <div className="content"><Everything store={store} open={open} /></div>}
+        {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
+        {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
+        {route.page === 'routines' && <div className="content"><RoutinesPage store={store} open={open} /></div>}
+        {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}
+        {route.page === 'ai' && <div className="content"><AIWorkPage store={store} open={open} /></div>}
+        {route.page === 'insights' && <div className="content"><InsightsPage store={store} open={open} /></div>}
+        {route.page === 'team' && auth && <div className="content"><TeamPage store={store} me={auth} /></div>}
+        </ViewBoundary>
+      </main>
+      {openId && store.items.has(openId) && <ItemPanel key={openId} store={store} id={openId} close={close} open={open} me={me} />}
+      {palette && <Palette store={store} close={() => setPalette(false)} open={id => { setPalette(false); open(id); }} />}
+      <QuickViewHost />
+      {capture && <QuickCapture store={store} me={me} projectId={route.page === 'project' ? route.id : undefined} close={() => setCapture(false)} />}
+      {shortcuts && <ShortcutsDialog close={() => setShortcuts(false)} />}
+      {tour && TOURS.find(t => t.id === tour) && <TourRunner tour={TOURS.find(t => t.id === tour)!} store={store} close={() => setTour(null)} />}
+      {store.error && <div className="toast">{store.error}</div>}
+      {!store.error && store.notice && <div className="toast">{store.notice} <span className="small" style={{opacity: .6}}>Ctrl+Z undo, Ctrl+Shift+Z redo</span></div>}
+    </div>
+    </StoreContext.Provider>
+  );
+}
+
+function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, onCapture, onShortcuts, signedIn}: {store: Store; me: string; setMe: (id: string) => void; route: Route; unread: number; openPalette: () => void; open: (id: string) => void; onToggle: () => void; onCapture: () => void; onShortcuts: () => void; signedIn: boolean}) {
+  const [who, setWho] = useState(false);
+  const [wsOpen, setWsOpen] = useState(() => localStorage.getItem('side-ws') !== '0');
+  const [newName, setNewName] = useState('');
+  const person = store.people.find(p => p.id === me);
+  const projectId = route.page === 'project' ? route.id : null;
+  // Everything (all workspaces) only makes sense with more than one.
+  const [wsList] = useWorkspaces(store.tick);
+  const wsCount = wsList.length;
+  return (
+    <nav className="sidebar">
+      <div className="brand"><WorkspaceSwitcher store={store} me={me} /><button className="icon" title="Hide sidebar" onClick={onToggle}><PanelLeftClose size={16} /></button></div>
+      <span className="picker" style={{display: 'block'}}>
+        <button data-pop-trigger className="me nav-btn" onClick={() => setWho(o => !o)} title="Switch person">
+          <Avatar person={person} size={22} /><span className="grow">{person?.name ?? 'Pick a person'}</span><ChevronDown size={14} />
+        </button>
+        <Popover open={who} onClose={() => setWho(false)}>
+          {signedIn ? <>
+            <div className="pop-label">Signed in</div>
+            <button className="pop-row" onClick={async () => { await api('/auth/logout', {method: 'POST'}); location.reload(); }}><LogOut size={14} /> Sign out</button>
+          </> : <>
+          <div className="pop-label">Working as (sign-in is off, see Team)</div>
+          {store.people.map(p => <button key={p.id} className={'pop-row' + (p.id === me ? ' on' : '')} onClick={() => { setMe(p.id); setWho(false); }}><Avatar person={p} />{p.name}</button>)}
+          <div className="pop-sep" />
+          <input className="pop-search" placeholder="Add person, Enter" value={newName} onChange={e => setNewName(e.target.value)}
+            onKeyDown={async e => { if (e.key === 'Enter' && newName.trim()) { await store.createPerson(newName); setNewName(''); } }} />
+          </>}
+        </Popover>
+      </span>
+      <button className="nav-btn" onClick={onCapture}><PenLine size={15} /> Quick capture <kbd>C</kbd></button>
+      <button className="nav-btn" onClick={openPalette}><Search size={15} /> Search <kbd>Ctrl K</kbd></button>
+      <button className={'nav-btn' + (route.page === 'mywork' ? ' active' : '')} onClick={() => go({page: 'mywork'})}><Sun size={15} /> My work</button>
+      {wsCount > 1 && <button className={'nav-btn' + (route.page === 'today' ? ' active' : '')} onClick={() => go({page: 'today'})}><Layers size={15} /> Everything</button>}
+      <button className={'nav-btn' + (route.page === 'inbox' ? ' active' : '')} onClick={() => go({page: 'inbox'})}><Bell size={15} /> Inbox {unread > 0 && <span className="badge">{unread}</span>}</button>
+      <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>
+      <button className={'nav-btn' + (route.page === 'ai' ? ' active' : '')} onClick={() => go({page: 'ai'})}><Bot size={15} /> AI work</button>
+
+      <div className="nav-section">Projects
+        <NewProjectMenu store={store} onCreated={id => go({page: 'project', id, view: ''})} />
+      </div>
+      <ProjectList store={store} activeId={projectId} render={(p, n, x) => {
+        const views = store.views.filter(v => v.projectId === p.id).sort((a, b) => a.sort - b.sort);
+        const active = projectId === p.id;
+        return <>
+          <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: views[0]?.id ?? ''})} />
+          {active && views.map(v => {
+            const Icon = viewIcon(v.kind);
+            const on = route.page === 'project' && (route.view === v.id || (!route.view && v === views[0]));
+            return <button key={v.id} className={'nav-btn nav-sub' + (on ? ' active' : '')} onClick={() => go({page: 'project', id: p.id, view: v.id})}><Icon size={14} />{v.name}</button>;
+          })}
+        </>;
+      }} />
+
+      <div className="side-bottom">
+        <RunningTimer store={store} open={open} />
+        <button className="nav-section nav-toggle" onClick={() => setWsOpen(o => { localStorage.setItem('side-ws', o ? '0' : '1'); return !o; })}>
+          Workspace <ChevronDown size={13} style={{marginLeft: 'auto', transform: wsOpen ? 'none' : 'rotate(-90deg)'}} />
+        </button>
+        {wsOpen && <>
+          <button className={'nav-btn' + (route.page === 'plan' ? ' active' : '')} onClick={() => go({page: 'plan'})}><Sparkles size={15} /> Plan and forecast</button>
+          <button className={'nav-btn' + (route.page === 'routines' ? ' active' : '')} onClick={() => go({page: 'routines'})}><Repeat size={15} /> Routines</button>
+          <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
+          <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>
+          <button className={'nav-btn' + (route.page === 'history' ? ' active' : '')} onClick={() => go({page: 'history'})}><History size={15} /> History</button>
+          <button className={'nav-btn' + (route.page === 'team' ? ' active' : '')} onClick={() => go({page: 'team'})}><Shield size={15} /> Team and permissions</button>
+          <button className={'nav-btn' + (route.page === 'data' ? ' active' : '')} onClick={() => go({page: 'data'})}><Database size={15} /> Data and backups</button>
+        </>}
+        <div className="side-row">
+          <button className={'nav-btn' + (route.page === 'help' ? ' active' : '')} onClick={() => go({page: 'help'})} title="Learn and tours"><GraduationCap size={15} /> Learn</button>
+          <button className="nav-btn" onClick={onShortcuts} title="Keyboard shortcuts (?)"><Keyboard size={15} /></button>
+          <AppearanceButton />
+        </div>
+      </div>
+    </nav>
+  );
+}
+/** Click opens the project, double-click renames it in place. */
+/** Click opens the project, double-click renames it in place. Grip, icon kit and star show on hover. */
+function ProjectNavButton({store, project, active, extra, onOpen}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode}; onOpen: () => void}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(project.name);
+  const done = () => { setEditing(false); if (name.trim() && name !== project.name) store.updateProject(project.id, {name: name.trim()}); else setName(project.name); };
+  return (
+    <div role="button" tabIndex={0} className={'nav-btn proj-nav' + (active ? ' active' : '') + (isRollup(project) ? ' is-rollup' : '')} onClick={() => !editing && onOpen()}
+      onKeyDown={e => { if (e.key === 'Enter' && !editing) onOpen(); }} onDoubleClick={() => { setName(project.name); setEditing(true); }} title={isRollup(project) ? 'Work from many projects together. Double-click to rename' : 'Double-click to rename'}>
+      {extra.grip}{extra.icon}
+      {editing
+        ? <input autoFocus className="nav-edit" value={name} onChange={e => setName(e.target.value)} onBlur={done} onClick={e => e.stopPropagation()}
+            onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') { setName(project.name); setEditing(false); } }} />
+        : <span className="grow proj-label">{project.name}</span>}
+      {extra.star}
+    </div>
+  );
+}
+
+
+/** Live clock for the running timer, always visible. */
+function RunningTimer({store, open}: {store: Store; open: (id: string) => void}) {
+  const run = store.running;
+  const now = useNow(!!run);
+  if (!run) return null;
+  const item = store.items.get(run.itemId);
+  return (
+    <div className="timer-chip">
+      <span className="clock">{fmtClock(now - Date.parse(run.start))}</span>
+      <span className="what" onClick={() => open(run.itemId)} title="Open item">{item?.title ?? 'Item'}</span>
+      <button className="icon" title="Stop timer" onClick={() => store.stopTimer()}><Square size={13} fill="currentColor" /></button>
+    </div>
+  );
+}
+
+export function applyFilters(items: Item[], c: ViewConfig, ctx?: {project: Project; today: string; currentSprint: string | null}) {
+  const text = c.text?.toLowerCase();
+  return items.filter(i => (!ctx || matchFilter(i, c.filter, ctx)) &&
+    (!text || i.title.toLowerCase().includes(text) || i.tags.some(t => t.toLowerCase().includes(text))) &&
+    (!c.assignee || (c.assignee === 'none' ? !i.assignees.length : i.assignees.includes(c.assignee))) &&
+    (!c.hideDone || !i.completed) &&
+    (!c.types?.length || c.types.includes(i.type)));
+}
+
+function ProjectPage({store, project: own, views, view, settings, open}: {store: Store; project: Project; views: View[]; view?: View; settings: boolean; open: (id: string) => void}) {
+  // A rollup shows the chosen projects' work together, with their statuses, levels and fields merged.
+  const included = useMemo(() => isRollup(own) ? includedIn(own, store.projects) : [], [own, store.projects]);
+  const project = useMemo(() => isRollup(own) ? rollupProject(own, included) : own, [own, included]);
+  const ids = useMemo(() => new Set([own.id, ...included.map(p => p.id)]), [own.id, included]);
+  const items = useMemo(() => [...store.items.values()].filter(i => ids.has(i.projectId)), [store.items, ids]);
+  const config = view?.config ?? {};
+  const setConfig = (patch: Partial<ViewConfig>) => view && store.updateView(view.id, {config: {...view.config, ...patch}});
+  const currentSprint = useMemo(() => { const t = store.today; const list = store.sprints.filter(s => s.projectId === project.id); return (list.find(s => s.start <= t && t <= s.end) ?? null)?.id ?? null; }, [store.sprints, store.today, project.id]);
+  const filtered = useMemo(() => applyFilters(items, config, {project, today: store.today, currentSprint}), [items, config, project, store.today, currentSprint]);
+  const sprints = useMemo(() => store.sprints.filter(s => s.projectId === project.id), [store.sprints, project.id]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const anchor = useRef<string | null>(null);
+  useEffect(() => { setSelected(new Set()); }, [view?.id, project.id, JSON.stringify(config.filter ?? null), config.text, config.assignee, (config.types ?? []).join(), config.hideDone]);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && selected.size && !(e.target as HTMLElement).closest('input,textarea,.popover')) setSelected(new Set()); };
+    addEventListener('keydown', k); return () => removeEventListener('keydown', k);
+  }, [selected]);
+  const toggle = (id: string, e: {shiftKey: boolean; ctrlKey: boolean; metaKey: boolean}, order: string[]) => {
+    const next = new Set(selected);
+    if (e.shiftKey && anchor.current && order.includes(anchor.current)) {
+      const [a, b] = [order.indexOf(anchor.current), order.indexOf(id)].sort((x, y) => x - y);
+      for (const x of order.slice(a, b + 1)) next.add(x);
+    } else if (next.has(id)) next.delete(id); else next.add(id);
+    anchor.current = id;
+    setSelected(next);
+  };
+  const props = {store, project, items: filtered, allItems: items, sprints, open, config, setConfig, selected, toggle, setSelected};
+
+  return <>
+    <header className="head">
+      <div className="head-top">
+        <span className="crumb">Projects /</span>
+        <InlineText value={project.name} onSave={name => name && store.updateProject(project.id, {name})} className="h1-edit" />
+        <span className="muted small">{items.filter(i => !i.completed).length} open</span>
+        {isRollup(own) && <button className="tag rollup-tag" onClick={() => go({page: 'project', id: own.id, view: 'settings'})} title="Choose which projects show here">Rollup of {included.length} project{included.length === 1 ? '' : 's'}</button>}
+      </div>
+      <div className="tabs">
+        {views.map(v => <ViewTab key={v.id} store={store} view={v} active={!settings && view?.id === v.id} project={project} />)}
+        <AddView store={store} project={project} />
+        <span className="spacer" />
+        <button className={'tab' + (settings ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: 'settings'})}><Settings size={14} /> Settings</button>
+      </div>
+    </header>
+    {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
+    <div className="content">
+      <ViewBoundary key={(view?.id ?? '') + (settings ? 's' : '')}>
+      {settings && <SettingsView store={store} project={own} onDeleted={() => go({page: 'mywork'})} />}
+      {!settings && view?.kind === 'list' && <FileDrop store={store} projectId={own.id}><ListView {...props} /></FileDrop>}
+      {!settings && view?.kind === 'table' && <TableView {...props} />}
+      {!settings && view?.kind === 'board' && <FileDrop store={store} projectId={own.id}><BoardView {...props} /></FileDrop>}
+      {!settings && view?.kind === 'files' && <FilesView {...props} />}
+      {!settings && view?.kind === 'gantt' && <GanttView {...props} />}
+      {!settings && view?.kind === 'calendar' && <CalendarView {...props} />}
+      {!settings && view?.kind === 'workload' && <WorkloadView {...props} />}
+      {!settings && view?.kind === 'backlog' && <BacklogView {...props} />}
+      {!settings && view?.kind === 'sprint' && <SprintView {...props} />}
+      {!settings && !view && <Empty title="No views yet">Add one with + View.</Empty>}
+      </ViewBoundary>
+      {!settings && <BulkBar store={store} project={project} sprints={sprints} selected={new Set([...selected].filter(id => filtered.some(i => i.id === id)))} clear={() => setSelected(new Set())} />}
+    </div>
+  </>;
+}
+
+function ViewTab({store, view, active, project}: {store: Store; view: View; active: boolean; project: Project}) {
+  const [menu, setMenu] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(view.name);
+  const Icon = viewIcon(view.kind);
+  const save = () => { setEditing(false); if (name.trim() && name !== view.name) store.updateView(view.id, {name: name.trim()}); else setName(view.name); };
+  return (
+    <span className="picker">
+      <button className={'tab' + (active ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: view.id})} onDoubleClick={() => setEditing(true)}>
+        <Icon size={14} />
+        {editing ? <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setName(view.name); setEditing(false); } }} onClick={e => e.stopPropagation()} /> : view.name}
+        {active && !editing && <span data-pop-trigger className="icon" role="button" aria-label="View options" onClick={e => { e.stopPropagation(); setMenu(m => !m); }}><MoreHorizontal size={13} /></span>}
+      </button>
+      <Popover open={menu} onClose={() => setMenu(false)}>
+        <button className="pop-row" onClick={() => { setMenu(false); setEditing(true); }}><Pencil size={14} /> Rename</button>
+        <button className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(project.id, view.name + ' copy', view.kind, view.config); if (v) go({page: 'project', id: project.id, view: v.id}); }}><Copy size={14} /> Duplicate</button>
+        {store.projects.length > 1 && <>
+          <div className="pop-label">Copy to project</div>
+          {store.projects.filter(p => p.id !== project.id).map(p => (
+            <button key={p.id} className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(p.id, view.name, view.kind, {...view.config, columns: undefined, sprint: undefined}); if (v) go({page: 'project', id: p.id, view: v.id}); }}><FolderInput size={14} /> {p.name}</button>
+          ))}
+        </>}
+        <div className="pop-sep" />
+        <div className="pop-label">Change type</div>
+        {VIEW_KINDS.map(k => <button key={k.kind} className={'pop-row' + (k.kind === view.kind ? ' on' : '')} onClick={() => { setMenu(false); store.updateView(view.id, {kind: k.kind}); }}><k.icon size={14} /> {k.label}</button>)}
+        <div className="pop-sep" />
+        <button className="pop-row" style={{color: 'var(--danger)'}} onClick={() => { setMenu(false); if (confirm(`Delete view "${view.name}"? Items are not affected.`)) { store.deleteView(view.id); go({page: 'project', id: project.id, view: ''}); } }}><Trash2 size={14} /> Delete view</button>
+      </Popover>
+    </span>
+  );
+}
+
+function AddView({store, project}: {store: Store; project: Project}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="picker">
+      <button data-pop-trigger className="tab" onClick={() => setOpen(o => !o)}><Plus size={14} /> View</button>
+      <Popover open={open} onClose={() => setOpen(false)} className="wide">
+        <div className="pop-label">Add a view</div>
+        {VIEW_KINDS.map(k => (
+          <button key={k.kind} className="pop-row" onClick={async () => { setOpen(false); const v = await store.createView(project.id, k.label, k.kind, k.kind === 'gantt' ? {zoom: 'week'} : {}); if (v) go({page: 'project', id: project.id, view: v.id}); }}>
+            <k.icon size={16} /><span className="grow"><div>{k.label}</div><div className="muted small">{k.hint}</div></span>
+          </button>
+        ))}
+      </Popover>
+    </span>
+  );
+}
+
+function Toolbar({store, project, view, config, setConfig, openItem}: {store: Store; project: Project; view: View; config: ViewConfig; setConfig: (p: Partial<ViewConfig>) => void; openItem: (id: string) => void}) {
+  const [text, setText] = useState(config.text ?? '');
+  const [typesOpen, setTypesOpen] = useState(false);
+  useEffect(() => setText(config.text ?? ''), [view.id]);
+  useEffect(() => { const t = setTimeout(() => { if ((config.text ?? '') !== text) setConfig({text}); }, 300); return () => clearTimeout(t); }, [text]);
+  const types = config.types ?? [];
+  const active = !!(config.text || config.assignee || config.hideDone || types.length || countRules(config.filter));
+  return (
+    <div className="toolbar">
+      <NewFromTemplate store={store} project={project} onCreated={openItem} />
+      <input className="search" placeholder="Filter by title or tag" value={text} onChange={e => setText(e.target.value)} />
+      <select className="plain-select" value={config.assignee ?? ''} onChange={e => setConfig({assignee: e.target.value || undefined})} title="Assignee">
+        <option value="">Anyone</option><option value="none">Unassigned</option>
+        {store.people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <span className="picker">
+        <button data-pop-trigger className={'btn' + (types.length ? ' on' : '')} onClick={() => setTypesOpen(o => !o)}><Filter size={13} /> {types.length ? types.join(', ') : 'All types'}</button>
+        <Popover open={typesOpen} onClose={() => setTypesOpen(false)}>
+          {project.types.map(t => (
+            <button key={t} className={'pop-row' + (types.includes(t) ? ' on' : '')} onClick={() => setConfig({types: types.includes(t) ? types.filter(x => x !== t) : [...types, t]})}>
+              <TypeBadge type={t} /><span className="grow" />{types.includes(t) && '✓'}
+            </button>
+          ))}
+        </Popover>
+      </span>
+      {(view.kind === 'list' || view.kind === 'table' || view.kind === 'board') && <SortButton project={project} config={config} setConfig={setConfig} />}
+      <FilterButton store={store} project={project} sprints={store.sprints.filter(s => s.projectId === project.id)} value={config.filter} onChange={filter => setConfig({filter})} />
+      <button className={'btn' + (config.hideDone ? ' on' : '')} onClick={() => setConfig({hideDone: !config.hideDone})}>{config.hideDone ? 'Done hidden' : 'Showing done'}</button>
+      {view.kind === 'board' && (
+        <select className="plain-select" value={config.groupBy ?? 'status'} onChange={e => setConfig({groupBy: e.target.value as ViewConfig['groupBy']})} title="Group by">
+          <option value="status">Group: Status</option><option value="assignee">Group: Assignee</option><option value="priority">Group: Priority</option><option value="type">Group: Type</option><option value="sprint">Group: Sprint</option>
+        </select>
+      )}
+      {view.kind === 'board' && (
+        <select className="plain-select" value={config.swimlane ?? 'none'} onChange={e => setConfig({swimlane: e.target.value as ViewConfig['swimlane']})} title="Swimlanes">
+          <option value="none">No swimlanes</option><option value="assignee">Lanes: Assignee</option><option value="priority">Lanes: Priority</option><option value="type">Lanes: Type</option><option value="parent">Lanes: Parent</option><option value="worker">Lanes: Human or AI</option>
+        </select>
+      )}
+      {view.kind === 'table' && <ColumnsMenu store={store} project={project} config={config} setConfig={setConfig} />}
+      {(view.kind === 'gantt' || view.kind === 'board') && <button className="btn" onClick={() => store.createSprint(project.id)}><Plus size={13} /> New sprint</button>}
+      {view.kind === 'gantt' && (
+        <select className="plain-select" value={config.colorBy ?? 'type'} onChange={e => setConfig({colorBy: e.target.value as ViewConfig['colorBy']})} title="Bar colors">
+          <option value="type">Color: Type</option><option value="assignee">Color: Person</option><option value="status">Color: Status</option><option value="priority">Color: Priority</option>
+        </select>
+      )}
+      {view.kind === 'board' && <button className={'btn' + (config.covers ? ' on' : '')} title="Show the first image attached to each card" onClick={() => setConfig({covers: !config.covers})}>Card covers</button>}
+      {view.kind === 'gantt' && <button className={'btn' + (config.critical ? ' on' : '')} title="Highlight the tasks with no slack" onClick={() => setConfig({critical: !config.critical})}>Critical path</button>}
+      {view.kind === 'gantt' && <BaselineMenu store={store} project={project} config={config} setConfig={setConfig} />}
+      {view.kind === 'gantt' && (
+        <div className="seg">{(['day', 'week', 'month'] as const).map(z => <button key={z} className={(config.zoom ?? 'week') === z ? 'on' : ''} onClick={() => setConfig({zoom: z})}>{z[0].toUpperCase() + z.slice(1)}</button>)}</div>
+      )}
+      {active && <button className="btn ghost" onClick={() => { setText(''); setConfig({text: '', assignee: undefined, hideDone: false, types: [], filter: undefined}); }}>Clear</button>}
+      <span className="spacer" />
+      <button className="btn ghost" title="Download the rows in this view as CSV" onClick={() => downloadCsv(`${project.key}-${view.name}`, project, applyFilters([...store.items.values()].filter(i => i.projectId === project.id), config, {project, today: store.today, currentSprint: store.sprints.find(s => s.projectId === project.id && s.start <= store.today && store.today <= s.end)?.id ?? null}).sort((a, b) => a.sort - b.sort), store)}><Download size={13} /> Export CSV</button>
+    </div>
+  );
+}
+
+function ColumnsMenu({store, project, config, setConfig}: {store: Store; project: Project; config: ViewConfig; setConfig: (p: Partial<ViewConfig>) => void}) {
+  const [open, setOpen] = useState(false);
+  const hidden = config.hidden ?? DEFAULT_HIDDEN;
+  return (
+    <span className="picker">
+      <button data-pop-trigger className="btn" onClick={() => setOpen(o => !o)}><Columns3 size={13} /> Properties</button>
+      <Popover open={open} onClose={() => setOpen(false)} className="wide">
+        <div className="pop-label">Property visibility</div>
+        <PropertyPanel cols={tableColumns(project)} config={config} setConfig={setConfig} defaultHidden={DEFAULT_HIDDEN} />
+        {config.columns && <button className="pop-row muted" onClick={() => setConfig({columns: undefined})}>Reset widths and order</button>}
+        <div className="pop-sep" />
+        <div className="pop-label">New column</div>
+        <AddField store={store} project={project} />
+      </Popover>
+    </span>
+  );
+}
+
+function Inbox({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
+  const [list, setList] = useState<Notification[]>([]);
+  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}`).then(setList).catch(() => {}); }, [me, store.tick]);
+  const person = (id: string | null) => store.people.find(p => p.id === id);
+  return (
+    <div className="page">
+      <h1>Inbox <span className="spacer" /><button className="btn" onClick={() => api('/notifications/read?person=' + me, {method: 'POST', body: {}}).then(() => setList(l => l.map(n => ({...n, read: true}))))}>Mark all read</button></h1>
+      <div style={{marginTop: 14}}>
+        {list.map(n => (
+          <div key={n.id} className={'note' + (n.read ? ' read' : '')} onClick={() => {
+            if (!n.read) api('/notifications/read?person=' + me, {method: 'POST', body: {ids: [n.id]}});
+            if (n.itemId && store.items.has(n.itemId)) open(n.itemId);
+          }}>
+            <Avatar person={person(n.actor)} size={24} />
+            <span className="grow"><b>{person(n.actor)?.name ?? 'Someone'}</b> {n.text}</span>
+            <span className="muted small">{new Date(n.created).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+      {!list.length && <Empty title="All caught up">You get notified when someone assigns you, mentions you, or comments on or completes your items.</Empty>}
+    </div>
+  );
+}
+
+function Palette({store, close, open}: {store: Store; close: () => void; open: (id: string) => void}) {
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(0);
+  const results = useMemo(() => {
+    const s = q.toLowerCase();
+    return [...store.items.values()].filter(i => !s || i.title.toLowerCase().includes(s) || itemKey(i, store.projects).toLowerCase() === s).slice(0, 12);
+  }, [q, store.items, store.projects]);
+  return (
+    <div className="overlay" onMouseDown={close}>
+      <div className="palette" onMouseDown={e => e.stopPropagation()}>
+        <input autoFocus placeholder="Search items by title or key (GS-3)" value={q} onChange={e => { setQ(e.target.value); setSel(0); }}
+          onKeyDown={e => {
+            if (e.key === 'Escape') { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); close(); }
+            if (e.key === 'ArrowDown') setSel(s => Math.min(s + 1, results.length - 1));
+            if (e.key === 'ArrowUp') setSel(s => Math.max(s - 1, 0));
+            if (e.key === 'Enter' && results[sel]) open(results[sel].id);
+          }} />
+        {results.map((i, n) => (
+          <div key={i.id} className={'pal-row' + (n === sel ? ' sel' : '')} onMouseEnter={() => setSel(n)} onClick={() => open(i.id)}>
+            <span className="muted small">{itemKey(i, store.projects)}</span><TypeBadge type={i.type} /><span className="grow">{i.title}</span><Avatars ids={i.assignees} people={store.people} />
+          </div>
+        ))}
+        {!results.length && <div className="pal-row muted">No matches</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Keeps one broken view from blanking the whole app; shows the error and a way back. */
+class ViewBoundary extends Component<{children: ReactNode}, {error: Error | null}> {
+  state = {error: null as Error | null};
+  static getDerivedStateFromError(error: Error) { return {error}; }
+  componentDidCatch(error: Error) { console.error('View crashed', error); }
+  render() {
+    if (!this.state.error) return <Suspense fallback={<div className="loading">Loading...</div>}>{this.props.children}</Suspense>;
+    return <div className="empty"><div className="empty-title">This view hit a problem</div>
+      <div className="muted small" style={{marginBottom: 10}}>{this.state.error.message}</div>
+      <button className="btn" onClick={() => this.setState({error: null})}>Try again</button></div>;
+  }
+}
+
+/** Timeline baselines: save today's dates under a name, then compare the live plan against it. */
+function BaselineMenu({store, project, config, setConfig}: {store: Store; project: Project; config: ViewConfig; setConfig: (p: Partial<ViewConfig>) => void}) {
+  const [open, setOpen] = useState(false);
+  const list = config.baselines ?? [];
+  const save = () => {
+    const name = prompt('Name this baseline', `Plan ${new Date().toLocaleDateString()}`);
+    if (!name) return;
+    const dates: Record<string, [string | null, string | null]> = {};
+    for (const i of store.items.values()) if (i.projectId === project.id && (i.start || i.due)) dates[i.id] = [i.start, i.due];
+    const next = [...list, {name: name.slice(0, 60), at: new Date().toISOString(), dates}].slice(-10);
+    setConfig({baselines: next, baseline: next.length - 1});
+    setOpen(false);
+  };
+  return (
+    <span className="picker">
+      <button className={'btn' + (config.baseline != null ? ' on' : '')} onClick={() => setOpen(o => !o)} title="Compare the plan with a saved baseline">Baseline{config.baseline != null && list[config.baseline] ? `: ${list[config.baseline].name}` : ''}</button>
+      <Popover open={open} onClose={() => setOpen(false)}>
+        <button className="pop-row" onClick={save}><Plus size={13} /> Save current dates as a baseline</button>
+        {list.length > 0 && <div className="pop-sep" />}
+        <button className={'pop-row' + (config.baseline == null ? ' on' : '')} onClick={() => { setConfig({baseline: null}); setOpen(false); }}>Do not show a baseline</button>
+        {list.map((b, n) => (
+          <div key={b.at} className={'pop-row' + (config.baseline === n ? ' on' : '')}>
+            <button className="grow link-btn" onClick={() => { setConfig({baseline: n}); setOpen(false); }}>{b.name} <span className="muted small">{new Date(b.at).toLocaleDateString()}, {Object.keys(b.dates).length} items</span></button>
+            <button className="icon" title="Delete baseline" onClick={() => setConfig({baselines: list.filter((_, k) => k !== n), baseline: config.baseline === n ? null : config.baseline != null && config.baseline > n ? config.baseline - 1 : config.baseline})}><X size={12} /></button>
+          </div>
+        ))}
+      </Popover>
+    </span>
+  );
+}
+
+/** A link to a project from another workspace: find which one has it and offer to switch. */
+function FindProject({id}: {id: string}) {
+  const [where, setWhere] = useState<{id: string; name: string} | null | undefined>(undefined);
+  useEffect(() => {
+    api<{list: {id: string; name: string}[]}>('/workspaces').then(async r => {
+      for (const w of r.list) if (w.id !== wsId()) {
+        const ps = await fetch('/api/projects', {headers: {'x-workspace': w.id, 'x-person': ''}}).then(x => x.ok ? x.json() : []).catch(() => []);
+        if ((ps as {id: string}[]).some(p => p.id === id)) return setWhere(w);
+      }
+      setWhere(null);
+    }).catch(() => setWhere(null));
+  }, [id]);
+  if (where === undefined) return <Empty title="Looking for this project...">Checking your other workspaces.</Empty>;
+  if (!where) return <Empty title="Project not found">It may have been deleted. Pick a project in the sidebar.</Empty>;
+  return <Empty title={`This project is in ${where.name}`}><button className="btn primary" onClick={() => switchWorkspace(where.id, location.hash.slice(1))}>Open {where.name}</button></Empty>;
+}

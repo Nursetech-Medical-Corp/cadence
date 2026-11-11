@@ -1,0 +1,102 @@
+// Sign-in, sessions, roles and permissions.
+//
+// Open mode (the default on a fresh install): no sign-in, anyone on this computer picks who they are.
+// Once an admin sets a password and turns on "Require sign in", every API call needs a session cookie,
+// the acting person comes from the session, and each action is checked against that person's role
+// in the item's project.
+//
+// Roles are sets of capabilities. A person has a default role; each project can override it per person,
+// and set what everyone else gets (including "no access").
+import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
+import type {Db} from './db.ts';
+
+export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
+export type Cap = typeof CAPS[number];
+export const CAP_LABELS: Record<Cap, string> = {
+  view: 'See the project', comment: 'Comment', create: 'Create items', edit: 'Edit items', delete: 'Delete items',
+  sprints: 'Manage sprints', views: 'Create and change views', templates: 'Use and save templates',
+  settings: 'Project settings (statuses, fields, automations)', export: 'Export data',
+};
+export type Role = {id: string; name: string; caps: Cap[]};
+export const DEFAULT_ROLES: Role[] = [
+  {id: 'admin', name: 'Admin', caps: [...CAPS]},
+  {id: 'editor', name: 'Editor', caps: ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'export']},
+  {id: 'contributor', name: 'Contributor', caps: ['view', 'comment', 'create', 'edit']},
+  {id: 'commenter', name: 'Commenter', caps: ['view', 'comment']},
+  {id: 'viewer', name: 'Viewer', caps: ['view']},
+];
+export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}};
+export type Access = {default: string; members: Record<string, string>}; // role ids, or 'none'
+
+export function migrate(db: Db) {
+  db.exec(`
+    create table if not exists sessions (token text primary key, person text not null, created text not null, expires text not null);
+    create table if not exists workspace (key text primary key, value text not null);
+  `);
+  const cols = db.prepare('pragma table_info(people)').all().map(r => r.name);
+  if (!cols.includes('password')) db.exec('alter table people add column password text');
+  if (!cols.includes('role')) db.exec("alter table people add column role text not null default 'editor'");
+  if (!cols.includes('admin')) db.exec('alter table people add column admin integer not null default 0');
+  if (!cols.includes('active')) db.exec('alter table people add column active integer not null default 1');
+  if (!cols.includes('notify_email')) db.exec('alter table people add column notify_email integer not null default 0');
+  // The first person is the workspace admin until someone says otherwise.
+  if (!(db.prepare('select 1 from people where admin = 1').get())) db.exec('update people set admin = 1 where rowid = (select min(rowid) from people)');
+}
+
+export function getWorkspace(db: Db): Workspace {
+  const r = db.prepare("select value from workspace where key = 'settings'").get() as {value: string} | undefined;
+  const w = r ? JSON.parse(r.value) : {};
+  return {requireLogin: !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google}};
+}
+export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
+  const w = {...getWorkspace(db), ...patch};
+  if (!w.roles.some(r => r.id === 'admin')) throw new Error('The Admin role cannot be removed');
+  w.roles = w.roles.map(r => r.id === 'admin' ? {...r, caps: [...CAPS]} : r);
+  db.prepare("insert into workspace (key, value) values ('settings', ?) on conflict(key) do update set value = excluded.value").run(JSON.stringify(w));
+  return w;
+}
+
+export function hashPassword(pw: string) {
+  if (pw.length < 8) throw new Error('Passwords need at least 8 characters');
+  if (pw.length > 200) throw new Error('Passwords are limited to 200 characters');
+  const salt = randomBytes(16).toString('hex');
+  return `${salt}:${scryptSync(pw, salt, 32).toString('hex')}`;
+}
+export function checkPassword(pw: string, stored: string | null) {
+  if (!stored) return false;
+  const [salt, hash] = stored.split(':');
+  const a = Buffer.from(hash, 'hex'), b = scryptSync(pw, salt, 32);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+const DAYS = 30;
+export function createSession(db: Db, person: string) {
+  const token = randomBytes(32).toString('base64url');
+  const now = new Date();
+  db.prepare('insert into sessions (token, person, created, expires) values (?,?,?,?)').run(token, person, now.toISOString(), new Date(now.getTime() + DAYS * 86400_000).toISOString());
+  return token;
+}
+export function sessionPerson(db: Db, token: string | undefined): string | null {
+  if (!token) return null;
+  const r = db.prepare('select s.person, s.expires, p.active from sessions s join people p on p.id = s.person where s.token = ?').get(token) as {person: string; expires: string; active: number} | undefined;
+  if (!r || r.expires < new Date().toISOString() || !r.active) return null;
+  return r.person;
+}
+export function endSession(db: Db, token: string | undefined) { if (token) db.prepare('delete from sessions where token = ?').run(token); }
+/** Each workspace has its own session cookie, so being signed in to one does not sign you in to another. */
+export const cookieName = (ws = 'main') => ws === 'main' ? 'tasks_session' : `tasks_session_${ws.replace(/[^a-z0-9]/gi, '')}`;
+export function cookieToken(header: string | undefined, ws = 'main') { return new RegExp(`(?:^|;\\s*)${cookieName(ws)}=([^;]+)`).exec(header ?? '')?.[1]; }
+export const sessionCookie = (token: string, ws = 'main') => `${cookieName(ws)}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${DAYS * 86400}`;
+
+/** Capabilities a person has in a project. Workspace admins always have everything. */
+export function capsFor(db: Db, personId: string | null, projectAccess: Access | undefined, strict = false): Set<Cap> {
+  const w = getWorkspace(db);
+  if (!w.requireLogin && !strict) return new Set(CAPS); // open mode (tokens pass strict and always get their role)
+  if (!personId) return new Set();
+  const p = db.prepare('select role, admin, active from people where id = ?').get(personId) as {role: string; admin: number; active: number} | undefined;
+  if (!p || !p.active) return new Set();
+  if (p.admin) return new Set(CAPS);
+  const roleId = projectAccess?.members[personId] ?? (projectAccess && projectAccess.default !== 'inherit' ? projectAccess.default : p.role);
+  if (roleId === 'none') return new Set();
+  return new Set(w.roles.find(r => r.id === roleId)?.caps ?? []);
+}
