@@ -393,6 +393,20 @@ test('projects get default views; views are editable', () => {
   assert.equal(t.listViews(p.id).length, 6);
 });
 
+test('views keep the order of color rules and row fields, and the colors switch', () => {
+  const {t, p} = setup();
+  const list = t.listViews(p.id)[0];
+  const colors = [{rule: {field: 'statusGroup', op: 'is' as const, value: 'done'}, color: '#10b981'}, {rule: {field: 'priority', op: 'is' as const, value: '1'}, color: '#ef4444'}];
+  t.updateView(list.id, {config: {...list.config, colors, rowFields: ['status', 'priority', 'assignees']}});
+  const saved = t.view(list.id).config;
+  assert.deepEqual(saved.colors, colors);
+  assert.deepEqual(saved.rowFields, ['status', 'priority', 'assignees']);
+  t.updateView(list.id, {config: {...saved, colors: [colors[1], colors[0]], colorsOff: true}});
+  const next = t.view(list.id).config;
+  assert.deepEqual(next.colors!.map(c => c.color), ['#ef4444', '#10b981'], 'reordered rules are stored in the new order');
+  assert.equal(next.colorsOff, true, 'switched off, rules kept');
+});
+
 test('export and import round trip, with a snapshot taken before restore', async () => {
   const {mkdtempSync, existsSync} = await import('node:fs');
   const {tmpdir} = await import('node:os');

@@ -1,7 +1,7 @@
 // Conditional colors: rules that tint rows and cards, like "overdue = red" or "priority urgent = orange".
 // The first matching rule wins. Saved with the view.
 import {useState} from 'react';
-import {Palette, Plus, X} from 'lucide-react';
+import {GripVertical, Palette, Plus, X} from 'lucide-react';
 import type {FilterRule, Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
 import {Popover} from './components.tsx';
@@ -22,24 +22,53 @@ export function colorOf(i: Item, rules: ColorRule[] | undefined, ctx: {project: 
   for (const r of rules ?? []) if (matchFilter(i, {join: 'and', rules: [r.rule]}, {...ctx, currentSprint: null})) return r.color;
   return undefined;
 }
+/** A view's color rules, or none while its colors are switched off. */
+export const activeColors = (c: ViewConfig) => c.colorsOff ? undefined : c.colors;
+/** A copy of the list with the entry at `from` moved to position `to`. */
+export function move<T>(list: T[], from: number, to: number): T[] {
+  const l = [...list];
+  if (to < 0 || to >= l.length || from === to) return l;
+  const [m] = l.splice(from, 1);
+  l.splice(to, 0, m);
+  return l;
+}
 /** Style for a tinted row or card. */
 export const tint = (c: string | undefined) => c ? {boxShadow: `inset 3px 0 0 ${c}`, background: `color-mix(in srgb, ${c} 9%, transparent)`} : undefined;
 
 export function ColorRulesButton({store, project, config, setConfig}: {store: Store; project: Project; config: ViewConfig; setConfig: (p: Partial<ViewConfig>) => void}) {
   const [open, setOpen] = useState(false);
+  const [drag, setDrag] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
   const rules = config.colors ?? [];
   const fields = filterFields(project, store, store.sprints.filter(s => s.projectId === project.id));
   const save = (l: ColorRule[]) => setConfig({colors: l});
   const set = (n: number, patch: Partial<FilterRule> | {color: string}) => save(rules.map((r, k) => k !== n ? r : 'color' in patch ? {...r, color: patch.color} : {...r, rule: {...r.rule, ...patch}}));
   return (
     <span className="picker">
-      <button className={'btn' + (rules.length ? ' on' : '')} onClick={() => setOpen(o => !o)} title="Color rows and cards by rules"><Palette size={13} /> Colors{rules.length ? ` ${rules.length}` : ''}</button>
+      <button className={'btn' + (rules.length && !config.colorsOff ? ' on' : '')} onClick={() => setOpen(o => !o)} title="Color rows and cards by rules"><Palette size={13} /> Colors{config.colorsOff ? ' off' : rules.length ? ` ${rules.length}` : ''}</button>
       <Popover open={open} onClose={() => setOpen(false)} className="wide">
+        <div className="color-switch">
+          <button className={'switch' + (config.colorsOff ? '' : ' on')} role="switch" aria-checked={!config.colorsOff} aria-label="Colors" title="Turn all colors on or off. The rules are kept" onClick={() => setConfig({colorsOff: !config.colorsOff})} />
+          <span>{config.colorsOff ? 'Colors are off. Your rules are kept' : 'Colors are on'}</span>
+        </div>
         <div className="pop-label">Color rows and cards when... (the first rule that matches wins)</div>
         {rules.map((r, n) => {
           const f = fields.find(x => x.id === r.rule.field) ?? fields[0];
           return (
-            <div key={n} className="f-row color-rule">
+            <div key={n} className={'f-row color-rule sort-row' + (drag === n ? ' dragging' : '') + (over === n && drag !== null && drag !== n ? ' drop' : '')}
+              onDragOver={e => { if (drag === null) return; e.preventDefault(); setOver(n); }}
+              onDrop={() => { if (drag !== null) save(move(rules, drag, n)); setDrag(null); setOver(null); }}>
+              <span className="sort-grip" role="button" tabIndex={0} title="Drag to change the order. Arrow up and down also move it" draggable
+                onDragStart={e => { e.dataTransfer.setDragImage(e.currentTarget.parentElement!, 8, 12); setDrag(n); }} onDragEnd={() => { setDrag(null); setOver(null); }}
+                onKeyDown={e => {
+                  const to = e.key === 'ArrowUp' ? n - 1 : e.key === 'ArrowDown' ? n + 1 : -1;
+                  if (to < 0 || to >= rules.length) return;
+                  e.preventDefault();
+                  save(move(rules, n, to));
+                  // Rows are keyed by position, so the moved rule now sits in the neighbouring row.
+                  const row = e.currentTarget.parentElement!;
+                  ((to < n ? row.previousElementSibling : row.nextElementSibling)?.querySelector('.sort-grip') as HTMLElement | null)?.focus();
+                }}><GripVertical size={14} /></span>
               <select className="plain-select" value={r.rule.field} onChange={e => { const nf = fields.find(x => x.id === e.target.value)!; set(n, {field: nf.id, op: OPS[nf.kind][0].op, value: nf.options?.[0]?.value ?? ''}); }}>
                 {fields.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
               </select>

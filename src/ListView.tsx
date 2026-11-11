@@ -1,18 +1,18 @@
 import {Fragment, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
-import {colorOf, tint} from './ColorRules.tsx';
+import {activeColors, colorOf, move, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Repeat} from 'lucide-react';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
 import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge} from './components.tsx';
-import type {ViewProps} from './viewProps.ts';
+import {rowFieldsOf, type RowField, type ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
 import {countRules} from './FilterBuilder.tsx';
 
 type Insert = {parentId: string | null; afterSort: number | undefined; beforeSort: number | undefined; depth: number; afterId: string | null; beforeId?: string};
 
-export function ListView({store, project, items: shown, allItems: items, open, selected, toggle, config}: ViewProps) {
+export function ListView({store, project, items: shown, allItems: items, open, selected, toggle, config, setConfig}: ViewProps) {
   const flat = !!(config.types?.length || countRules(config.filter) || config.text || config.assignee);
   const sorts = sortsOf(config);
   const shownIds = new Set(shown.map(i => i.id));
@@ -22,6 +22,9 @@ export function ListView({store, project, items: shown, allItems: items, open, s
   const [dragId, setDragId] = useState<string | null>(null);
   const [quickText, setQuickText] = useState('');
   const [overId, setOverId] = useState<string | null>(null);
+  const [dragField, setDragField] = useState<RowField | null>(null);
+  const [overField, setOverField] = useState<RowField | null>(null);
+  const fields = rowFieldsOf(config);
 
   const kids = new Map<string | null, Item[]>();
   const ids = new Set(items.map(i => i.id));
@@ -57,6 +60,29 @@ export function ListView({store, project, items: shown, allItems: items, open, s
     setDragId(null);
   };
 
+  // Priority, assignee and status: drag one onto another to reorder them in every row of this view. Alt+Left and Alt+Right do the same.
+  const slot = (id: RowField, i: Item) => (
+    <span key={id} data-field={id} title="Drag to reorder. Alt+Left and Alt+Right also move it" draggable
+      className={'meta-slot' + (id === 'assignees' ? ' person-slot' : '') + (dragField === id ? ' dragging' : '') + (overField === id && dragField && dragField !== id ? ' drop' : '')}
+      onDragStart={e => { e.stopPropagation(); setDragField(id); }} onDragEnd={() => { setDragField(null); setOverField(null); }}
+      onDragOver={e => { if (!dragField) return; e.preventDefault(); e.stopPropagation(); setOverField(id); }}
+      onDrop={e => { if (!dragField) return; e.stopPropagation(); setConfig({rowFields: move(fields, fields.indexOf(dragField), fields.indexOf(id))}); setDragField(null); setOverField(null); }}
+      onKeyDown={e => {
+        if (!e.altKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+        e.preventDefault();
+        const from = fields.indexOf(id), to = from + (e.key === 'ArrowLeft' ? -1 : 1);
+        if (to < 0 || to >= fields.length) return;
+        setConfig({rowFields: move(fields, from, to)});
+        // Moving the element can drop keyboard focus, so put it back.
+        const row = e.currentTarget.closest('.row');
+        requestAnimationFrame(() => (row?.querySelector(`[data-field="${id}"] button`) as HTMLElement | null)?.focus());
+      }}>
+      {id === 'priority' ? <PrioritySelect value={i.priority} onChange={priority => store.updateItem(i.id, {priority})} />
+        : id === 'assignees' ? <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact />
+        : <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} />}
+    </span>
+  );
+
   const rows = (parent: string | null, depth: number): React.ReactNode =>
     (kids.get(parent) ?? []).filter(visible).map(i => {
       const children = kids.get(i.id) ?? [];
@@ -65,10 +91,10 @@ export function ListView({store, project, items: shown, allItems: items, open, s
         <Fragment key={i.id}>
           {insert?.beforeId === i.id && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} />}
           <div onClickCapture={e => { if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); e.stopPropagation(); toggle(i.id, e, [...document.querySelectorAll<HTMLElement>('.list .row[data-id]')].map(r => r.dataset.id!)); } }} data-id={i.id}
-            style={tint(colorOf(i, config.colors, {project, today: store.today}))}
+            style={tint(colorOf(i, activeColors(config), {project, today: store.today}))}
             className={'row' + (selected.has(i.id) ? ' sel' : '') + (i.completed ? ' done' : '') + (dragId === i.id ? ' dragging' : '') + (overId === i.id && dragId !== i.id ? ' drop-before' : '')} draggable
             onDragStart={e => { if ((e.target as HTMLElement).closest('input')) { e.preventDefault(); return; } setDragId(i.id); }} onDragEnd={() => { setDragId(null); setOverId(null); }}
-            onDragOver={e => { e.preventDefault(); setOverId(i.id); }} onDrop={() => { dropOn(i); setOverId(null); }}>
+            onDragOver={e => { if (dragField) return; e.preventDefault(); setOverId(i.id); }} onDrop={() => { dropOn(i); setOverId(null); }}>
             <span className="row-gutter">
               <button className="gutter-btn" title="Click to add below. Alt+click to add above" onClick={e => { e.stopPropagation(); if (e.altKey) startInsertBefore(i, depth); else startInsertAfter(i, depth); }}><Plus size={14} /></button>
               <span className="gutter-btn grip" title="Drag to move"><GripVertical size={14} /></span>
@@ -90,10 +116,10 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             <span className="spacer" />
             <span className="row-meta">
               <TimeCell item={i} store={store} compact />
-              <PrioritySelect value={i.priority} onChange={priority => store.updateItem(i.id, {priority})} />
+              {slot(fields[0], i)}
               <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => store.updateItem(i.id, {due})} placeholder="Due" />
-              <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
-              <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} />
+              {slot(fields[1], i)}
+              {slot(fields[2], i)}
               <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button>
             </span>
           </div>

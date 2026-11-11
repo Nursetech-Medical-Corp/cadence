@@ -1,6 +1,6 @@
 import {Fragment, useEffect, useRef, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
-import {colorOf, tint} from './ColorRules.tsx';
+import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, EyeOff, MoreHorizontal, Plus, Trash2, Pencil} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
 import {between, fmtMinutes, type Store} from './store.ts';
@@ -160,7 +160,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
         </tr></thead>
         <tbody>
           {first > 0 && <tr aria-hidden style={{height: first * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
-          {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, config.colors, {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
+          {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
             <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
             {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button></td></tr>
             {insertAt?.id === i.id && <InsertRow cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {

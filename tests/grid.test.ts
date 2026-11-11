@@ -36,3 +36,30 @@ test('sorting: status and dropdowns follow your arranged order, or A to Z when a
   assert.equal(titles(sortItems(items, [{col: 'f:size', dir: 1}], project, {} as never)), 'bca', 'Small, Medium, Large');
   assert.equal(titles(sortItems(items, [{col: 'f:size', dir: 1, by: 'alpha'}], project, {} as never)), 'acb', 'Large, Medium, Small');
 });
+
+test('color rules: moving a rule changes which one wins', async () => {
+  const {colorOf, move} = await import('../src/ColorRules.tsx');
+  const project = {statuses: [], types: ['Task'], fields: []} as never;
+  const item = {id: 'a', title: 'a', status: 'todo', type: 'Task', priority: 2, assignees: [], tags: [], fields: {}, due: '2026-11-01', completed: null} as never;
+  const high = {rule: {field: 'priority', op: 'is', value: '2'}, color: '#f97316'} as const, late = {rule: {field: 'due', op: 'before', value: 'today'}, color: '#ef4444'} as const;
+  const other = {rule: {field: 'priority', op: 'is', value: '1'}, color: '#10b981'} as const;
+  const rules = [high, other, late], ctx = {project, today: '2026-11-10'};
+  assert.equal(colorOf(item, rules, ctx), '#f97316', 'first match wins');
+  const moved = move(rules, 2, 0);
+  assert.deepEqual(moved, [late, high, other]);
+  assert.equal(colorOf(item, moved, ctx), '#ef4444', 'the rule dragged to the top now wins');
+  assert.deepEqual(move(rules, 0, 2), [other, late, high], 'down');
+  assert.deepEqual(move(rules, 0, -1), rules, 'off the top: unchanged');
+  assert.deepEqual(move(rules, 2, 3), rules, 'off the bottom: unchanged');
+  assert.deepEqual(rules, [high, other, late], 'the input list is not changed');
+  const {activeColors} = await import('../src/ColorRules.tsx');
+  assert.deepEqual(activeColors({colors: rules}), rules, 'colors are on by default');
+  assert.equal(colorOf(item, activeColors({colors: rules, colorsOff: true}), ctx), undefined, 'switched off: no color, rules kept');
+});
+
+test('list rows: priority, assignee and status follow the saved order', async () => {
+  const {rowFieldsOf} = await import('../src/viewProps.ts');
+  assert.deepEqual(rowFieldsOf({}), ['priority', 'assignees', 'status'], 'default order');
+  assert.deepEqual(rowFieldsOf({rowFields: ['status', 'priority', 'assignees']}), ['status', 'priority', 'assignees']);
+  assert.deepEqual(rowFieldsOf({rowFields: ['status', 'due', 'status']}), ['status', 'priority', 'assignees'], 'unknown and repeated ids dropped, missing ones added');
+});

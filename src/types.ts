@@ -141,6 +141,10 @@ export type ViewConfig = {
   locked?: boolean; privateTo?: string;
   /** Conditional colors: the first matching rule tints the row or card. */
   colors?: {rule: FilterRule; color: string}[];
+  /** Colors switched off: the rules stay saved but nothing is tinted. */
+  colorsOff?: boolean;
+  /** List rows: the order of the priority, assignee and status fields. Time and due date keep their place. */
+  rowFields?: string[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
   zoom?: 'day' | 'week' | 'month'; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
