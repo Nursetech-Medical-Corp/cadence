@@ -447,7 +447,11 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
 
       // ---- Team, roles, workspace (admins) ----
       if (a === 'team') {
-        if (!b && m === 'GET') return send(res, 200, {people: team(), roles: ws.roles, caps: CAPS.map(id => ({id, label: CAP_LABELS[id]}))});
+        if (!b && m === 'GET') {
+          // Non-admins get only their own row and role names; the permission setup stays with admins.
+          if ((ws.requireLogin || bearer) && !isAdmin(actor)) return send(res, 200, {people: team().filter(p => p.id === actor), roles: ws.roles.map(r => ({id: r.id, name: r.name})), caps: []});
+          return send(res, 200, {people: team(), roles: ws.roles, caps: CAPS.map(id => ({id, label: CAP_LABELS[id]}))});
+        }
         if (b && m === 'PATCH') {
           const self = b === actor;
           // People may change their own password and email preferences; everything else needs an admin.
@@ -487,7 +491,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         }
       }
       if (a === 'workspace') {
-        if (m === 'GET') return send(res, 200, {...ws, forced: loginForced(), google: {clientId: ws.google.clientId, hasSecret: !!ws.google.clientSecret, senderEmail: ws.google.senderEmail ?? null, connected: !!ws.google.refreshToken}});
+        if (m === 'GET') { needAdmin(); return send(res, 200, {...ws, forced: loginForced(), google: {clientId: ws.google.clientId, hasSecret: !!ws.google.clientSecret, senderEmail: ws.google.senderEmail ?? null, connected: !!ws.google.refreshToken}}); }
         if (m === 'PUT') {
           needAdmin();
           if (body.requireLogin && !ws.requireLogin) {

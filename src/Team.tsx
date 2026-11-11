@@ -1,7 +1,7 @@
 // Sign-in page, Team page (people, roles and their permissions, sign-in and Google), and per-project access.
 import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
-import {Check as CheckIcon, Copy, KeyRound, LogIn, Plus, Shield, Trash2} from 'lucide-react';
+import {Check as CheckIcon, CircleUser, Copy, KeyRound, LogIn, Plus, Shield, Trash2} from 'lucide-react';
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
@@ -129,6 +129,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const load = async () => {
     const t = await api<{people: Member[]; roles: Role[]; caps: {id: string; label: string}[]}>('/team');
     setPeople(t.people); setRoles(t.roles); setCaps(t.caps);
+    if (!me.admin) return;
     const w = await api<typeof ws>('/workspace'); setWs(w); setClientId(w!.google.clientId);
   };
   useEffect(() => { load().catch(store.fail); }, [store.tick]);
@@ -137,6 +138,31 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const isAdmin = me.admin;
   const putWs = async (body: object) => { try { await api('/workspace', {method: 'PUT', body}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } };
   const redirect = `${location.origin}/api/auth/google/callback`;
+
+  // Non-admins see only their own account; the team and its permissions are for admins.
+  if (!isAdmin) {
+    const self = people.find(p => p.id === me.person?.id);
+    return (
+      <div className="page settings">
+        <h1><CircleUser size={20} /> My account</h1>
+        {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
+        {me.account && <AccountCard me={me} />}
+        {self && <section className="set-card">
+          <div className="set-card-head"><h3>Password and notifications</h3></div>
+          <div className="set-item">
+            <span className="grow">Email me notifications</span>
+            <input type="checkbox" checked={self.notifyEmail} onChange={e => patch(self.id, {notifyEmail: e.target.checked})} />
+          </div>
+          <div className="set-item">
+            <span className="grow">Password</span>
+            <SetPassword has={self.hasPassword} self={me.required} disabled={false} onSet={(pw, cur) => patch(self.id, {password: pw, currentPassword: cur})} />
+          </div>
+        </section>}
+        {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
+        {self && <TokensCard people={[self]} admin={false} me={self.id} />}
+      </div>
+    );
+  }
 
   return (
     <div className="page settings">
@@ -154,25 +180,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         <div className="muted small">Password reset emails go out through the Gmail sender connected below. Without one, the reset link is printed in the server log for you to pass on.</div>
       </section>}
 
-      {ws && <section className="set-card">
-        <div className="set-card-head"><h3>Customization</h3><span className="muted small">The team setup is what everyone starts from. Choose who changes each part, and which features are on.</span></div>
-        {AREAS.map(([k, label, hint]) => (
-          <div key={k} className="set-item">
-            <span className="grow"><b>{label}</b> <span className="muted small">{hint}</span></span>
-            <select className="plain-select" value={ws.custom[k]} disabled={!isAdmin} onChange={e => putWs({custom: {...ws.custom, [k]: e.target.value}})}>
-              {POLICIES.map(([p, l]) => <option key={p} value={p}>{l}</option>)}
-            </select>
-          </div>
-        ))}
-        <div className="muted small">Each person: everyone can arrange things their own way (saved for them); a bar on the view lets them save it for everyone or go back to the team view.</div>
-        <div className="feature-grid">
-          {(Object.keys(FEATURE_LABELS) as (keyof Features)[]).map(k => (
-            <label key={k} className="small"><input type="checkbox" checked={ws.features[k]} disabled={!isAdmin}
-              onChange={e => putWs({features: {...ws.features, [k]: e.target.checked}})} /> {FEATURE_LABELS[k]}</label>
-          ))}
-        </div>
-      </section>}
-
+      {isAdmin && <InvitesCard roles={roles} signInOn={!!ws?.requireLogin} senderReady={!!ws?.google.connected} />}
       <section className="set-card">
         <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every space unless the space sets its own. Admins can do everything.</span></div>
         {people.map(p => (
@@ -210,8 +218,26 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {isAdmin && <button className="btn" style={{marginTop: 8}} onClick={() => saveRoles([...roles, {id: 'role-' + Math.random().toString(36).slice(2, 7), name: 'New role', caps: ['view', 'comment']}])}><Plus size={14} /> New role</button>}
       </section>
 
+      {ws && <section className="set-card">
+        <div className="set-card-head"><h3>Customization</h3><span className="muted small">The team setup is what everyone starts from. Choose who changes each part, and which features are on.</span></div>
+        {AREAS.map(([k, label, hint]) => (
+          <div key={k} className="set-item">
+            <span className="grow"><b>{label}</b> <span className="muted small">{hint}</span></span>
+            <select className="plain-select" value={ws.custom[k]} disabled={!isAdmin} onChange={e => putWs({custom: {...ws.custom, [k]: e.target.value}})}>
+              {POLICIES.map(([p, l]) => <option key={p} value={p}>{l}</option>)}
+            </select>
+          </div>
+        ))}
+        <div className="muted small">Each person: everyone can arrange things their own way (saved for them); a bar on the view lets them save it for everyone or go back to the team view.</div>
+        <div className="feature-grid">
+          {(Object.keys(FEATURE_LABELS) as (keyof Features)[]).map(k => (
+            <label key={k} className="small"><input type="checkbox" checked={ws.features[k]} disabled={!isAdmin}
+              onChange={e => putWs({features: {...ws.features, [k]: e.target.checked}})} /> {FEATURE_LABELS[k]}</label>
+          ))}
+        </div>
+      </section>}
+
       {me.person && <GoogleCard me={me.person.id} ready={!!ws?.google.clientId && !!ws?.google.hasSecret} />}
-      {isAdmin && <InvitesCard roles={roles} signInOn={!!ws?.requireLogin} senderReady={!!ws?.google.connected} />}
       <TokensCard people={people} admin={isAdmin} me={me.person?.id ?? null} />
 
       {ws && <section className="set-card">

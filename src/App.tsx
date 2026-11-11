@@ -2,7 +2,7 @@ import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useS
 import {CoverHeader} from './Cover.tsx';
 import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
+import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -336,7 +336,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
           {store.settings.features.insights && <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>}
           <button className={'nav-btn' + (route.page === 'history' ? ' active' : '')} onClick={() => go({page: 'history'})}><History size={15} /> History</button>
-          <button className={'nav-btn' + (route.page === 'team' ? ' active' : '')} onClick={() => go({page: 'team'})}><Shield size={15} /> Team and permissions</button>
+          <button className={'nav-btn' + (route.page === 'team' ? ' active' : '')} onClick={() => go({page: 'team'})}>{store.settings.admin ? <><Shield size={15} /> Team and permissions</> : <><CircleUser size={15} /> My account</>}</button>
           <button className={'nav-btn' + (route.page === 'data' ? ' active' : '')} onClick={() => go({page: 'data'})}><Database size={15} /> Data and backups</button>
         </>}
         <div className="side-row">
