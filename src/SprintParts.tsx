@@ -17,7 +17,8 @@ export function Capacity({store, sprint, items}: {store: Store; sprint: Sprint; 
   if (!people.length && !unassigned) return <div className="muted small" style={{marginTop: 8}}>Assign work or set capacity to see load.</div>;
   return (
     <div className="cap">
-      {people.map(p => <CapRow key={p.id} store={store} sprint={sprint} person={p} hours={open.filter(i => i.assignees.includes(p.id)).reduce((a, i) => a + (i.estimate ?? 0), 0)} />)}
+      {/* A shared item's estimate is split evenly between its assignees, as in the Workload view. */}
+      {people.map(p => <CapRow key={p.id} store={store} sprint={sprint} person={p} hours={+open.filter(i => i.assignees.includes(p.id)).reduce((a, i) => a + (i.estimate ?? 0) / i.assignees.length, 0).toFixed(1)} />)}
       {unassigned > 0 && <><span className="muted">Unassigned</span><span /><span className="muted">{unassigned}h</span></>}
     </div>
   );
