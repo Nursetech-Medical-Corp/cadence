@@ -47,13 +47,23 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Area | Tools |
 | --- | --- |
 | Read | `get_guide`, `get_workspace`, `search_items`, `get_item`, `my_work`, `project_summary`, `changes_since`, `history` |
-| Write | `create_item`, `quick_add`, `update_item`, `delete_item`, `add_comment`, `log_time`, `apply_to_subitems`, `revert_change` |
-| Projects | `create_project`, `update_project`, `set_automations` |
+| Write | `create_item`, `quick_add`, `update_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
+| Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
+| Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
+| Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| Inbox | `my_notifications`, `mark_notifications_read` |
+| Projects | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations` |
 | Sprints | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report` |
 | Planning | `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
 | AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
+
+Agents can run a board like a project manager: create and change anything their role allows, set up views,
+import and export items, and track time. They cannot approve: accepting a claim, approving or sending back AI work,
+and signing approvals are refused for AI workers, whatever their role. An agent's own work is timed automatically:
+the clock starts at its first logged step once it is cleared to work and stops when it submits, with the outcome as the note.
+A person's review time is kept as a "review" time entry.
 | Integrations | `upsert_external` (CRM or accounting records), `create_from_email`, `calendar_events`, `gmail_search` |
 
 `calendar_events` and `gmail_search` work after the person connects their Google account on the Team page.

@@ -1,5 +1,6 @@
 // All reads and writes go through here: the HTTP API, MCP server and tests share it,
 // so anything a person can do in the UI an agent can do too.
+import {exportAll} from './backup.ts';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
@@ -1100,19 +1101,88 @@ export class Tasks {
     this.emit({kind: 'view', projectId: v.projectId});
     return v;
   }
-  updateView(vid: string, patch: Partial<Pick<View, 'name' | 'kind' | 'config' | 'sort'>>): View {
+  view(vid: string): View {
     const r = this.db.prepare('select * from views where id = ?').get(vid);
     if (!r) throw new NotFound('View not found');
-    const v = {...toView(r), ...patch};
+    return toView(r);
+  }
+  updateView(vid: string, patch: Partial<Pick<View, 'name' | 'kind' | 'config' | 'sort'>>): View {
+    const v = {...this.view(vid), ...patch};
     this.db.prepare('update views set name=?, kind=?, config=?, sort=? where id=?').run(v.name, v.kind, JSON.stringify(v.config), v.sort, vid);
     this.emit({kind: 'view', projectId: v.projectId});
     return v;
   }
   deleteView(vid: string) {
-    const r = this.db.prepare('select * from views where id = ?').get(vid);
-    if (!r) throw new NotFound('View not found');
+    const v = this.view(vid);
     this.db.prepare('delete from views where id = ?').run(vid);
-    this.emit({kind: 'view', projectId: r.project_id as string});
+    this.emit({kind: 'view', projectId: v.projectId});
+  }
+
+  /** Everything in this workspace as one JSON file (the same as Data and backups, Export). Passwords are left out. */
+  exportWorkspace() { return exportAll(this.db); }
+
+  /** A project's items with readable values (names, not ids), as rows or CSV. */
+  exportItems(projectId: string, format: 'json' | 'csv' = 'json') {
+    const p = this.project(projectId), people = this.listPeople(), sprints = this.listSprints(projectId), totals = this.timeTotals();
+    const items = this.listItems({projectId}), byId = new Map(items.map(i => [i.id, i]));
+    const PRI = ['', 'urgent', 'high', 'medium', 'low'];
+    const rows = items.map(i => ({
+      key: `${p.key}-${i.number}`, title: i.title, type: i.type, status: p.statuses.find(s => s.id === i.status)?.name ?? i.status,
+      priority: PRI[i.priority] ?? '', assignees: i.assignees.map(a => people.find(x => x.id === a)?.name ?? a).join(', '),
+      start: i.start ?? '', due: i.due ?? '', estimate: i.estimate ?? '', tags: i.tags.join(', '), sprint: sprints.find(s => s.id === i.sprint)?.name ?? '',
+      parent: i.parentId && byId.get(i.parentId) ? `${p.key}-${byId.get(i.parentId)!.number}` : '', done: i.completed ? 'yes' : '',
+      hours: totals[i.id] ? Math.round(totals[i.id] / 60 * 100) / 100 : '',
+      ...Object.fromEntries(p.fields.filter(f => i.fields[f.id] != null).map(f => [f.name, Array.isArray(i.fields[f.id]) ? (i.fields[f.id] as unknown[]).join(', ') : i.fields[f.id]])),
+    }) as Record<string, unknown>);
+    if (format !== 'csv') return rows;
+    const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
+    // Spreadsheet formula guard: cells that start like a formula are prefixed so they stay text.
+    const cell = (v: unknown) => { let s = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    return [cols.map(cell).join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n');
+  }
+
+  /**
+   * Adds items from rows with readable values: status, type and priority by name, people by name or email,
+   * columns by name, parent by key or by the title of an earlier row. Bad rows are skipped and reported.
+   */
+  importItems(projectId: string, rows: Record<string, unknown>[], actor: string | null = null) {
+    const p = this.project(projectId), people = this.listPeople();
+    if (!Array.isArray(rows) || !rows.length || rows.length > 1000) throw new Invalid('Send 1 to 1000 rows');
+    const PRI: Record<string, number> = {none: 0, urgent: 1, high: 2, medium: 3, low: 4};
+    const list = (v: unknown) => Array.isArray(v) ? v.map(String) : typeof v === 'string' ? v.split(/[,;]/).map(x => x.trim()).filter(Boolean) : [];
+    const made = new Map<string, string>(), keys: string[] = [], errors: {row: number; error: string}[] = [];
+    rows.forEach((r, n) => {
+      try {
+        const s = (k: string) => r?.[k] == null || r[k] === '' ? undefined : String(r[k]).trim();
+        const title = s('title');
+        if (!title) throw new Invalid('title is required');
+        const sn = s('status'), st = sn ? p.statuses.find(x => x.id === sn || x.name.toLowerCase() === sn.toLowerCase()) : undefined;
+        if (sn && !st) throw new Invalid(`Unknown status "${sn}". Known: ${p.statuses.map(x => x.name).join(', ')}`);
+        const tn = s('type'), type = tn ? p.types.find(x => x.toLowerCase() === tn.toLowerCase()) : undefined;
+        if (tn && !type) throw new Invalid(`Unknown type "${tn}". Known: ${p.types.join(', ')}`);
+        const pn = s('priority'), priority = pn === undefined ? 0 : /^[0-4]$/.test(pn) ? Number(pn) : PRI[pn.toLowerCase()];
+        if (priority === undefined) throw new Invalid(`Unknown priority "${pn}"`);
+        const assignees = list(r.assignees ?? r.assignee).map(a => {
+          const hit = people.find(x => x.id === a || x.name.toLowerCase() === a.toLowerCase() || x.email?.toLowerCase() === a.toLowerCase());
+          if (!hit) throw new Invalid(`Unknown person "${a}"`);
+          return hit.id;
+        });
+        const parentRef = s('parent');
+        const parentId = parentRef ? made.get(parentRef.toLowerCase()) ?? this.findItem(parentRef).id : null;
+        const fields: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries((r.fields ?? {}) as Record<string, unknown>)) {
+          const f = p.fields.find(x => x.id === k || x.name.toLowerCase() === k.toLowerCase());
+          if (!f) throw new Invalid(`Unknown column "${k}"`);
+          fields[f.id] = v;
+        }
+        const est = s('estimate');
+        const it = this.createItem({projectId, title, ...(type ? {type} : {}), ...(st ? {status: st.id} : {}), priority, assignees,
+          start: s('start') ?? null, due: s('due') ?? null, estimate: est === undefined ? null : Number(est), tags: list(r.tags), body: s('body') ?? '', parentId, fields}, actor);
+        made.set(title.toLowerCase(), it.id);
+        keys.push(`${p.key}-${it.number}`);
+      } catch (e) { errors.push({row: n + 1, error: e instanceof Error ? e.message : String(e)}); }
+    });
+    return {created: keys.length, keys, errors};
   }
 
   // ---- Planning (see planner.ts). Methods here so the permission guard covers them. ----

@@ -518,6 +518,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           need(b, 'settings');
           return send(res, 200, tasks.updateProject(b, body));
         }
+        if (b && c === 'export' && m === 'GET') {
+          need(b, 'export');
+          const out = tasks.exportItems(b, q('format') === 'csv' ? 'csv' : 'json');
+          if (typeof out === 'string') { res.statusCode = 200; res.setHeader('content-type', 'text/csv; charset=utf-8'); res.end(out); return; }
+          return send(res, 200, out);
+        }
+        if (b && c === 'import' && m === 'POST') { need(b, 'create'); return send(res, 200, tasks.importItems(b, body.rows, actor)); }
         if (b && m === 'DELETE') { needAdmin(); tasks.deleteProject(b); return send(res, 200, {ok: true}); }
       }
 

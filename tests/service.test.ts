@@ -656,3 +656,52 @@ test('timing: AI work is timed from its first step to submit, reviews are timed,
   assert.equal(t.stopTimer(dave.id), null);
   assert.equal(t.listTime({itemId: task.id, person: dave.id}).length, 1);
 });
+
+test('MCP: an agent runs the board (views, import, export, timesheet) but cannot approve', async () => {
+  const {migrateAiWork} = await import('../server/aiwork.ts');
+  const {t, dave, p} = setup();
+  migrateAiWork(t);
+  const bot = t.createPerson({name: 'secretary-bot-1'});
+  t.db.prepare("update people set kind = 'ai' where id = ?").run(bot.id);
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await createMcpServer(t, 'secretary-bot-1').connect(st);
+  const client = new Client({name: 'test', version: '1'});
+  await client.connect(ct);
+  const call = async (name: string, args: Record<string, unknown>) => {
+    const r: any = await client.callTool({name, arguments: args});
+    if (r.isError) throw new Error(r.content[0].text);
+    return JSON.parse(r.content[0].text);
+  };
+  // Import with readable values, a parent by title, and one bad row reported.
+  const imp = await call('import_items', {project: 'WEB', rows: [
+    {title: 'Launch site', type: 'Epic', priority: 'high', assignees: 'David'},
+    {title: 'Write copy', parent: 'Launch site', due: '2026-11-20', estimate: 3, status: 'To do'},
+    {title: 'Broken', status: 'Nope'},
+  ]});
+  assert.equal(imp.created, 2);
+  assert.match(imp.errors[0].error, /Unknown status/);
+  const csv = await call('export_items', {project: 'WEB', format: 'csv'});
+  assert.match(csv, /^key,title,type,status/);
+  assert.match(csv, /WEB-2,Write copy,.*WEB-1/);
+  // Views: create, change settings (merged), lock blocks changes until unlocked, reorder.
+  const v = await call('create_view', {project: 'WEB', name: 'Urgent first', kind: 'table', config: {sorts: [{col: 'priority', dir: 1}]}});
+  const u = await call('update_view', {view: v.id, config: {hideDone: true, locked: true}});
+  assert.deepEqual(u.config.sorts, [{col: 'priority', dir: 1}]);
+  await assert.rejects(call('update_view', {view: v.id, name: 'x'}), /locked/);
+  await call('update_view', {view: v.id, config: {locked: false}});
+  const views = await call('list_views', {project: 'WEB'});
+  await call('reorder_views', {project: 'WEB', views: [v.id, ...views.filter((x: {id: string}) => x.id !== v.id).map((x: {id: string}) => x.id)]});
+  assert.equal((await call('list_views', {project: 'WEB'}))[0].id, v.id);
+  // Time: set a day, read the week.
+  await call('set_day_time', {item: 'WEB-2', date: '2026-11-10', hours: 1.5});
+  const week = await call('get_timesheet', {week: '2026-11-12'});
+  assert.equal(week.weekStart, '2026-11-09');
+  assert.equal(week.rows[0].minutes[1], 90);
+  // Approving is for people.
+  const task = t.createItem({projectId: p.id, title: 'Research', fields: {worker: 'ai'}}, dave.id);
+  await call('claim_task', {item: task.id});
+  await assert.rejects(call('decide_claim', {item: task.id, accept: true}), /person/);
+  t.decideClaim(task.id, dave.id, true);
+  await call('submit_work', {item: task.id, report: 'Done'});
+  await assert.rejects(call('review_work', {item: task.id, approve: true}), /person/);
+});

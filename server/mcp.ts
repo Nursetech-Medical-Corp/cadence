@@ -1,4 +1,5 @@
 // MCP server over stdio. Shares the SQLite file with the web app; the UI updates live.
+import {addDays} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -89,6 +90,52 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     i => tasks.startTimer(tasks.findItem(i.item).id, me(), i.kind ?? 'work'));
   tool('stop_timer', 'Stop your running timer, with an optional note such as the outcome. Submitting work stops it for you.', {note: z.string().optional()}, false,
     i => tasks.stopTimer(me(), i.note) ?? {stopped: false, reason: 'No timer was running'});
+  // ---- Views: what the board shows (filters, sorts, grouping, columns, colors) ----
+  const VIEW_CONFIG_DOC = 'View config keys: filter {join: and|or, rules: [{field, op: is|is-not|contains|empty|not-empty|before|after|gte|lte, value}]}, '
+    + 'sorts [{col, dir: 1|-1, by?: order|alpha}] (col: title, status, type, priority, assignees, due, start, estimate, sprint, key, created, updated, or f:<fieldId>), '
+    + 'groupBy status|priority|assignee|type|sprint, swimlane, hidden [column ids], columns [{id, width}], calcs {columnId: sum|avg|count|min|max}, '
+    + 'colors [{rule, color: #rrggbb}], hideDone, types [type names], text (search), zoom day|week|month, covers, locked, privateTo (your person id).';
+  tool('list_views', 'List the views (tabs) of a project with their settings.', {project: z.string()}, true, i => tasks.listViews(projectId(i.project), actor));
+  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files']),
+    config: z.record(z.string(), z.any()).optional()}, false, i => tasks.createView({projectId: projectId(i.project), name: i.name, kind: i.kind, config: i.config ?? {}}));
+  tool('update_view', 'Change a view: rename it, or change its settings (merged into the current ones unless replace is true). Locked views must be unlocked first (config.locked false). ' + VIEW_CONFIG_DOC,
+    {view: z.string().describe('View id'), name: z.string().optional(), config: z.record(z.string(), z.any()).optional(), replace: z.boolean().optional()}, false, i => {
+      const v = tasks.view(i.view);
+      if (v.config.locked && i.config?.locked !== false) throw new Error('This view is locked. Send config {locked: false} to unlock it first.');
+      return tasks.updateView(v.id, {...(i.name ? {name: i.name} : {}), ...(i.config ? {config: i.replace ? i.config : {...v.config, ...i.config}} : {})});
+    });
+  tool('delete_view', 'Delete a view (the items stay).', {view: z.string()}, false, i => { tasks.deleteView(i.view); return {ok: true}; });
+  tool('reorder_views', 'Put a project\'s view tabs in this order.', {project: z.string(), views: z.array(z.string()).describe('View ids, first tab first')}, false,
+    i => tasks.reorderViews(projectId(i.project), i.views));
+
+  // ---- Data in and out ----
+  tool('export_items', 'Export a project\'s items with readable values (names, not ids), as JSON rows or CSV text.', {project: z.string(), format: z.enum(['json', 'csv']).optional()}, true,
+    i => tasks.exportItems(projectId(i.project), i.format ?? 'json'));
+  tool('import_items', 'Add many items at once. Each row: {title, type?, status?, priority? (urgent|high|medium|low), assignees? (names), start?, due?, estimate? (hours), tags?, body?, '
+    + 'parent? (key like GS-3, or the title of an earlier row), fields? {column name: value}}. Bad rows are skipped and reported; nothing is replaced.',
+    {project: z.string(), rows: z.array(z.record(z.string(), z.any())).max(1000)}, false, i => tasks.importItems(projectId(i.project), i.rows, actor));
+  tool('export_workspace', 'Export everything in this workspace as one JSON backup (admins). Restoring a backup replaces all data, so that stays in the app.', {}, true, () => tasks.exportWorkspace());
+
+  // ---- Projects, comments, notifications ----
+  tool('delete_project', 'Delete a project and its items (admins). Pass confirm with the exact project name.', {project: z.string(), confirm: z.string()}, false, i => {
+    const p = tasks.project(projectId(i.project));
+    if (i.confirm !== p.name) throw new Error(`To delete, pass confirm "${p.name}"`);
+    tasks.deleteProject(p.id); return {ok: true};
+  });
+  tool('create_rollup', 'Add a rollup project that shows work from every project (or some) together.', {name: z.string().optional()}, false, i => tasks.createRollup(i.name || undefined));
+  tool('resolve_comment', 'Mark a comment (often one assigned to someone) resolved, or open it again.', {comment: z.string().describe('Comment id'), resolved: z.boolean().optional()}, false,
+    i => tasks.resolveComment(i.comment, actor, i.resolved ?? true));
+  tool('my_notifications', 'Your notifications, newest first.', {unread_only: z.boolean().optional()}, true, i => tasks.listNotifications(me(), !!i.unread_only));
+  tool('mark_notifications_read', 'Mark your notifications read (all, or these ids).', {ids: z.array(z.string()).optional()}, false, i => { tasks.markRead(me(), i.ids); return {ok: true}; });
+
+  // ---- Time ----
+  tool('list_time', 'Time entries for an item or a person (kind work or review; minutes can be fractional).', {item: z.string().optional(), person: z.string().optional()}, true,
+    i => tasks.listTime({itemId: i.item ? tasks.findItem(i.item).id : undefined, person: i.person ? personId(i.person) : undefined}));
+  tool('get_timesheet', 'A person\'s week: minutes per task per day, Monday first.', {week: z.string().describe('Any date in the week, YYYY-MM-DD'), person: z.string().optional()}, true,
+    i => tasks.timesheet(i.person ? personId(i.person) : me(), addDays(i.week, -((new Date(i.week + 'T00:00:00').getDay() + 6) % 7))));
+  tool('set_day_time', 'Set the hours logged on one task for one day (replaces that day\'s entries; 0 clears).', {item: z.string(), date: z.string(), hours: z.number().min(0).max(24), person: z.string().optional()}, false,
+    i => tasks.setDayMinutes(i.person ? personId(i.person) : me(), tasks.findItem(i.item).id, i.date, i.hours * 60));
+  tool('delete_time_entry', 'Delete a time entry by id.', {id: z.string()}, false, i => { tasks.deleteTime(i.id); return {ok: true}; });
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
     i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : (actor ?? (() => { throw new Error('Pass person, or start the MCP server with --as <person>'); })()), minutes: i.minutes, note: i.note, date: i.date}));
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
