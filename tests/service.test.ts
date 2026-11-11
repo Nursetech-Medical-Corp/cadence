@@ -726,3 +726,20 @@ test('weekends: dates dropped on Saturday or Sunday move to Monday, moves keep t
   assert.deepEqual(offWeekend('2026-11-12', '2026-11-15', false), ['2026-11-12', '2026-11-16'], 'resize: only the Sunday end moves');
   assert.deepEqual(offWeekend(null, '2026-11-14'), [null, '2026-11-16']);
 });
+
+test('export and restore: personal layouts and workspace settings come back; Google secrets never leave', async () => {
+  const {exportAll, importAll} = await import('../server/backup.ts');
+  const {migrate, saveWorkspace, getWorkspace} = await import('../server/auth.ts');
+  const {t, dave} = setup();
+  migrate(t.db);
+  t.setPref(dave.id, 'projects', ['a', 'b']);
+  saveWorkspace(t.db, {custom: {viewSettings: 'locked', viewOrder: 'personal', projectOrder: 'shared'}, google: {clientId: 'id', clientSecret: 'shh', refreshToken: 'tok'}});
+  const dump = JSON.parse(JSON.stringify(exportAll(t.db)));
+  assert.ok(!JSON.stringify(dump).includes('shh') && !JSON.stringify(dump).includes('tok'), 'no Google secrets in the file');
+  t.setPref(dave.id, 'projects', null);
+  saveWorkspace(t.db, {custom: {viewSettings: 'personal', viewOrder: 'personal', projectOrder: 'personal'}});
+  importAll(t.db, dump, process.env.TASKS_BACKUPS ?? 'data/backups-test');
+  assert.deepEqual(t.prefs(dave.id).projects, ['a', 'b']);
+  assert.equal(getWorkspace(t.db).custom.viewSettings, 'locked');
+  assert.equal(getWorkspace(t.db).google.clientSecret, 'shh', 'restore keeps the Google setup that is already there');
+});

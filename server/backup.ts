@@ -7,9 +7,11 @@
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import type {Db} from './db.ts';
+import {getWorkspace, saveWorkspace, type Workspace} from './auth.ts';
 
-// Exports include history, AI work logs, approvals, templates and file records. Secrets (passwords, sessions, tokens) never leave.
-const TABLES = ['people', 'projects', 'sprints', 'views', 'items', 'comments', 'time_entries', 'notifications', 'activity', 'work_log', 'approvals', 'templates', 'files'] as const;
+// Exports include history, AI work logs, approvals, templates, file records, personal layouts and workspace settings.
+// Secrets (passwords, sessions, tokens, Google keys) never leave.
+const TABLES = ['people', 'projects', 'sprints', 'views', 'items', 'comments', 'time_entries', 'notifications', 'activity', 'work_log', 'approvals', 'templates', 'files', 'prefs'] as const;
 const DIR = () => process.env.TASKS_BACKUPS ?? 'data/backups';
 const SETTINGS_FILE = (dir: string) => join(dir, 'settings.json');
 
@@ -36,7 +38,9 @@ export function saveSettings(patch: Partial<BackupSettings>, dir = DIR()) {
 export function snapshot(db: Db, reason: 'auto' | 'manual' | 'before-restore' = 'auto', dir = DIR()) {
   mkdirSync(dir, {recursive: true});
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const file = join(dir, `tasks-${stamp}-${reason}.db`);
+  // Two snapshots in the same second get a counter, so neither overwrites nor fails.
+  let file = join(dir, `tasks-${stamp}-${reason}.db`);
+  for (let n = 2; existsSync(file); n++) file = join(dir, `tasks-${stamp}-${n}-${reason}.db`);
   db.exec(`vacuum into '${file.replace(/'/g, "''")}'`);
   if (reason === 'auto') prune(dir);
   return file;
@@ -98,24 +102,28 @@ export function exportAll(db: Db) {
   const data: Record<string, unknown[]> = {};
   const has = new Set(db.prepare("select name from sqlite_master where type = 'table'").all().map(r => r.name as string));
   for (const t of TABLES) if (has.has(t)) data[t] = db.prepare(`select * from ${t}`).all().map(r => t === 'people' ? {...r, password: null} : r);
-  return {app: 'cadence', version: 1, exported: new Date().toISOString(), tables: data};
+  // Workspace settings travel too (roles, customization, features); Google secrets and the sign-in switch do not.
+  const w = has.has('workspace') ? getWorkspace(db) : null;
+  return {app: 'cadence', version: 1, exported: new Date().toISOString(), ...(w ? {settings: {roles: w.roles, custom: w.custom, features: w.features}} : {}), tables: data};
 }
 
-export function importAll(db: Db, dump: {app?: string; version?: number; tables?: Record<string, Record<string, unknown>[]>}, dir = DIR()) {
+export function importAll(db: Db, dump: {app?: string; version?: number; settings?: Partial<Workspace>; tables?: Record<string, Record<string, unknown>[]>}, dir = DIR()) {
   if (!['cadence', 'tasks'].includes(dump?.app ?? '') || !dump.tables) throw new Error('Not a Cadence export file');
   const before = snapshot(db, 'before-restore', dir);
   db.exec('begin');
   try {
     const has = new Set(db.prepare("select name from sqlite_master where type = 'table'").all().map(r => r.name as string));
-    for (const t of [...TABLES].reverse()) if (has.has(t)) db.exec(`delete from ${t}`);
+    // Tables missing from an older export are left as they are.
+    for (const t of [...TABLES].reverse()) if (has.has(t) && t in dump.tables) db.exec(`delete from ${t}`);
     for (const t of TABLES) {
-      if (!has.has(t)) continue;
+      if (!has.has(t) || !(t in dump.tables)) continue;
       const cols = (db.prepare(`pragma table_info(${t})`).all() as {name: string}[]).map(c => c.name);
       for (const row of dump.tables[t] ?? []) {
         const keys = cols.filter(c => c in row);
         db.prepare(`insert into ${t} (${keys.join(',')}) values (${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k] as never));
       }
     }
+    if (dump.settings && has.has('workspace')) { const {roles, custom, features} = dump.settings; saveWorkspace(db, {...(roles ? {roles} : {}), ...(custom ? {custom} : {}), ...(features ? {features} : {})}); }
     db.exec('commit');
   } catch (e) {
     db.exec('rollback');
