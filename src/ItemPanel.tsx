@@ -19,6 +19,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
   const [comments, setComments] = useState<Comment[]>([]);
   const [time, setTime] = useState<TimeEntry[]>([]);
   const [comment, setComment] = useState('');
+  const [commentFor, setCommentFor] = useState('');
   const [sub, setSub] = useState('');
   const qa = useQuickAssist(store, store.projects.find(p => p.id === item?.projectId)?.types ?? [], sub, setSub);
   const [minutes, setMinutes] = useState('');
@@ -136,12 +137,20 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
     comments: <>
       <h4>Comments</h4>
       {comments.map(c => (
-        <div key={c.id} className="comment"><Avatar person={person(c.author)} size={24} /><div><b>{person(c.author)?.name}</b> <span className="muted small">{new Date(c.created).toLocaleString()}</span><div style={{whiteSpace: 'pre-wrap'}}>{c.body}</div></div></div>
+        <div key={c.id} className={'comment' + (c.assignee && !c.resolved ? ' assigned' : '') + (c.resolved ? ' resolved' : '')}><Avatar person={person(c.author)} size={24} /><div className="grow"><b>{person(c.author)?.name}</b> <span className="muted small">{new Date(c.created).toLocaleString()}</span>
+          {c.assignee && <span className="comment-assign">{c.resolved ? 'Resolved' : 'For'} {person(c.assignee)?.name}
+            <button className="link-btn small" onClick={() => api(`/comments/${c.id}`, {method: 'PATCH', body: {resolved: !c.resolved}}).catch(store.fail)}>{c.resolved ? 'Reopen' : 'Resolve'}</button></span>}
+          <div style={{whiteSpace: 'pre-wrap'}}>{c.body}</div></div></div>
       ))}
       <textarea className="comment-box" placeholder="Comment. @Name to mention. Ctrl+Enter to send" disabled={!me} value={comment}
         onChange={e => setComment(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && comment.trim()) { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); } }} />
-      <button className="btn" style={{marginTop: 6}} disabled={!comment.trim()} onClick={() => { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment}}).catch(store.fail); setComment(''); }}>Send</button>
+        onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && comment.trim()) { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment, assignee: commentFor || undefined}}).catch(store.fail); setComment(''); setCommentFor(''); } }} />
+      <div className="time-row" style={{marginTop: 6}}>
+        <button className="btn" disabled={!comment.trim()} onClick={() => { api(`/items/${item.id}/comments`, {method: 'POST', body: {body: comment, assignee: commentFor || undefined}}).catch(store.fail); setComment(''); setCommentFor(''); }}>Send</button>
+        <select className="plain-select" value={commentFor} onChange={e => setCommentFor(e.target.value)} title="Assign this comment: it shows in their My Work until resolved">
+          <option value="">Not assigned</option>{store.people.map(p => <option key={p.id} value={p.id}>Assign to {p.name}</option>)}
+        </select>
+      </div>
     </>,
   };
   return (

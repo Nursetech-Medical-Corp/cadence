@@ -11,11 +11,12 @@ import {sprintState} from './SprintParts.tsx';
 import {DashGrid, fromFlow, place, type Cell} from './DashGrid.tsx';
 import {describeRecur} from './recur.ts';
 
-type WidgetId = 'focus' | 'week' | 'upcoming' | 'nodate' | 'done' | 'time' | 'sprints' | 'projects' | 'inbox' | 'waiting' | 'recurring' | 'quick' | 'chart' | 'chart2' | 'flow';
+type WidgetId = 'comments' | 'focus' | 'week' | 'upcoming' | 'nodate' | 'done' | 'time' | 'sprints' | 'projects' | 'inbox' | 'waiting' | 'recurring' | 'quick' | 'chart' | 'chart2' | 'flow';
 /** w: columns spanned (1 to 3). h: height in rows of ROW px, or undefined to fit content. */
 type Slot = {id: WidgetId; w: number; h?: number};
 const ROW = 80;
 const WIDGETS: Record<WidgetId, {title: string; hint: string}> = {
+  comments: {title: 'Comments for me', hint: 'Comments assigned to you, until you resolve them'},
   quick: {title: 'Quick add', hint: 'Add a task for yourself to any project'},
   focus: {title: 'Today and overdue', hint: 'What needs doing now'},
   week: {title: 'This week', hint: 'Seven-day strip with your due items'},
@@ -32,7 +33,7 @@ const WIDGETS: Record<WidgetId, {title: string; hint: string}> = {
   chart2: {title: 'Chart 2', hint: 'A second chart with its own settings'},
   flow: {title: 'Cumulative flow', hint: 'Work per stage over time for a project'},
 };
-const DEFAULT: Slot[] = [{id: 'quick', w: 3}, {id: 'focus', w: 1}, {id: 'week', w: 2}, {id: 'sprints', w: 1}, {id: 'time', w: 1}, {id: 'upcoming', w: 1}, {id: 'inbox', w: 1}];
+const DEFAULT: Slot[] = [{id: 'quick', w: 3}, {id: 'comments', w: 1}, {id: 'focus', w: 1}, {id: 'week', w: 2}, {id: 'sprints', w: 1}, {id: 'time', w: 1}, {id: 'upcoming', w: 1}, {id: 'inbox', w: 1}];
 // Older saved layouts used {wide}; convert them.
 const loadLayout = (key: string): Slot[] => {
   const raw = JSON.parse(localStorage.getItem(key) ?? 'null') as (Slot & {wide?: boolean})[] | null;
@@ -91,6 +92,7 @@ function Widget({id, store, me, mine, open}: {id: WidgetId; store: Store; me: st
     : <div className="muted small" style={{padding: 8}}>{empty}</div>;
 
   if (id === 'quick') return <QuickAdd store={store} me={me} />;
+  if (id === 'comments') return <AssignedComments store={store} me={me} open={open} />;
   if (id === 'focus') return list(openItems.filter(i => i.due && i.due <= t).sort(byDue), 'Nothing due today. Nice.');
   if (id === 'upcoming') return list(openItems.filter(i => i.due && i.due > t && i.due <= addDays(t, 14)).sort(byDue), 'Nothing due in the next two weeks.');
   if (id === 'nodate') return list(openItems.filter(i => !i.due).sort((a, b) => (a.priority || 9) - (b.priority || 9)), 'Everything has a date.');
@@ -248,4 +250,17 @@ function FlowWidget({store}: {store: Store}) {
     </svg>}
     <div className="legend"><span><i style={{background: '#94a3b8'}} />Not started</span><span><i style={{background: 'var(--accent)'}} />Active</span><span><i style={{background: 'var(--ok)'}} />Done</span><span className="muted">last 30 days</span></div>
   </div>;
+}
+
+type AssignedComment = {id: string; itemId: string; author: string; body: string; created: string; item: Item};
+function AssignedComments({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
+  const [list, setList] = useState<AssignedComment[]>([]);
+  useEffect(() => { if (me) api<AssignedComment[]>(`/assigned-comments?person=${me}`).then(setList).catch(() => {}); }, [me, store.tick]);
+  if (!list.length) return <div className="muted small" style={{padding: 8}}>No comments waiting on you.</div>;
+  return <div>{list.slice(0, 20).map(c => (
+    <div key={c.id} className="row" style={{alignItems: 'flex-start', cursor: 'pointer'}} onClick={() => open(c.itemId)}>
+      <Avatar person={store.people.find(p => p.id === c.author)} size={18} />
+      <span className="grow small"><b>{itemKey(c.item, store.projects)}</b> {c.body.slice(0, 120)}</span>
+      <button className="btn small" onClick={e => { e.stopPropagation(); api(`/comments/${c.id}`, {method: 'PATCH', body: {resolved: true}}).then(() => setList(l => l.filter(x => x.id !== c.id))).catch(store.fail); }}>Resolve</button>
+    </div>))}</div>;
 }

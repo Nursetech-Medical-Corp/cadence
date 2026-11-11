@@ -92,7 +92,7 @@ export type Item = {
   deps: string[]; // ids of items that block this one (finish-to-start)
 };
 
-export type Comment = {id: string; itemId: string; author: string; body: string; created: string};
+export type Comment = {id: string; itemId: string; author: string; body: string; created: string; assignee?: string | null; resolved?: string | null};
 export type TimeEntry = {id: string; itemId: string; person: string; start: string; end: string | null; minutes: number | null; note: string | null};
 export type Notification = {id: string; person: string; itemId: string | null; kind: string; text: string; actor: string | null; created: string; read: boolean};
 

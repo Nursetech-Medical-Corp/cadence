@@ -557,3 +557,15 @@ test('view templates: save a view with its settings, add it to another project, 
   assert.equal(made.config.groupBy, 'assignee');
   assert.throws(() => t.createTemplate({kind: 'view', name: 'x', data: {name: 'x', kind: 'spreadsheet'}}), /View kind/);
 });
+
+test('assigned comments: notify the assignee, list until resolved', () => {
+  const {t, dave, sam, p} = setup();
+  const i = t.createItem({projectId: p.id, title: 'Budget'}, dave.id);
+  const c = t.addComment(i.id, dave.id, 'Can you check the Q3 number?', sam.id);
+  assert.match(t.listNotifications(sam.id)[0].text, /assigned you a comment/);
+  assert.deepEqual(t.assignedComments(sam.id).map(x => x.id), [c.id]);
+  t.resolveComment(c.id, sam.id, true);
+  assert.equal(t.assignedComments(sam.id).length, 0);
+  assert.ok(t.listComments(i.id)[0].resolved);
+  assert.throws(() => t.addComment(i.id, dave.id, 'x', 'nobody'), /Unknown person|not found/i);
+});

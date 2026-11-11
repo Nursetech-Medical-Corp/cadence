@@ -476,7 +476,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (it) need(it.projectId, 'view');
         if (it && c === 'comments') {
           if (m === 'GET') return send(res, 200, tasks.listComments(it.id));
-          if (m === 'POST') { need(it.projectId, 'comment'); if (!actor && !body.author) throw new Invalid('Pick who you are before commenting'); return send(res, 201, tasks.addComment(it.id, actor ?? body.author, body.body ?? '')); }
+          if (m === 'POST') { need(it.projectId, 'comment'); if (!actor && !body.author) throw new Invalid('Pick who you are before commenting'); return send(res, 201, tasks.addComment(it.id, actor ?? body.author, body.body ?? '', body.assignee || null)); }
         }
         if (it && !c && m === 'GET') return send(res, 200, it);
         if (it && !c && m === 'PATCH') {
@@ -623,6 +623,17 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         return;
       }
 
+      if (a === 'comments' && b && m === 'PATCH') {
+        const r = tasks.db.prepare('select item_id from comments where id = ?').get(b) as {item_id: string} | undefined;
+        if (!r) throw new NotFound('Comment not found');
+        need(tasks.item(r.item_id).projectId, 'comment');
+        return send(res, 200, tasks.resolveComment(b, actor, !!body.resolved));
+      }
+      if (a === 'assigned-comments' && m === 'GET') {
+        const person = ws.requireLogin ? actor : q('person') ?? actor;
+        if (!person) throw new Invalid('person is required');
+        return send(res, 200, tasks.assignedComments(person).filter(c => canSee(c.item!.projectId)));
+      }
       if (a === 'my-work' && m === 'GET') {
         const person = ws.requireLogin ? actor : q('person') ?? actor;
         if (!person) throw new Invalid('person is required');

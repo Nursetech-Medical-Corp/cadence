@@ -79,9 +79,11 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('update_item', 'Change fields on an item. Only send fields to change.', {item: z.string(), project: z.string().optional(), ...itemFields}, false,
     i => { const {item, project, ...rest} = i; const patch = toPatch(rest); if (project) patch.projectId = projectId(project); return tasks.updateItem(tasks.findItem(item).id, patch, actor); });
   tool('delete_item', 'Delete an item and its children.', {item: z.string()}, false, i => tasks.deleteItem(tasks.findItem(i.item).id));
-  tool('add_comment', 'Comment on an item. @FirstName mentions notify people.', {item: z.string(), body: z.string()}, false, i => {
+  tool('add_comment', 'Comment on an item. @FirstName mentions notify people. Set assignee (a person name or id) to make it a to-do for them until resolved.', {item: z.string(), body: z.string(), assignee: z.string().optional()}, false, i => {
     if (!actor) throw new Error('Start the MCP server with --as <person> to comment');
-    return tasks.addComment(tasks.findItem(i.item).id, actor, i.body);
+    const who = i.assignee ? tasks.listPeople().find(p => p.id === i.assignee || p.name.toLowerCase() === i.assignee!.toLowerCase())?.id : null;
+    if (i.assignee && !who) throw new Error(`Unknown person ${i.assignee}`);
+    return tasks.addComment(tasks.findItem(i.item).id, actor, i.body, who ?? null);
   });
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
     i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : (actor ?? (() => { throw new Error('Pass person, or start the MCP server with --as <person>'); })()), minutes: i.minutes, note: i.note, date: i.date}));

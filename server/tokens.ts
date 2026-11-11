@@ -48,6 +48,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     updateItem: (id, patch) => { need(projOfItem(id), 'edit'); if (patch?.projectId) need(patch.projectId, 'create'); for (const d of patch?.deps ?? []) need(projOfItem(d), 'view'); },
     deleteItem: (id) => need(projOfItem(id), 'delete'),
     addComment: (id) => need(projOfItem(id), 'comment'),
+    resolveComment: (cid) => { const r = tasks.db.prepare('select item_id from comments where id = ?').get(cid) as {item_id: string} | undefined; if (r) need(projOfItem(r.item_id), 'comment'); },
     logTime: (i) => need(projOfItem(i.itemId), 'edit'),
     applyToChildren: (id) => need(projOfItem(id), 'edit'),
     createSprint: (i) => need(i.projectId, 'sprints'),

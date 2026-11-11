@@ -122,6 +122,10 @@ function stripPeople(n: PackNode & {assignees?: string[]}): PackNode {
 /** Per-item state that must not be copied: AI review progress, external record ids, item links. */
 const cleanFields = (f: Record<string, unknown>) => Object.fromEntries(Object.entries(f).filter(([k]) => !['review', 'ext', 'links', 'follow'].includes(k)));
 
+function toComment(r: Row): Comment {
+  return {id: r.id as string, itemId: r.item_id as string, author: r.author as string, body: r.body as string, created: r.created as string, assignee: (r.assignee as string) ?? null, resolved: (r.resolved as string) ?? null};
+}
+
 function toSprint(r: Row): Sprint {
   return {id: r.id as string, projectId: r.project_id as string, name: r.name as string, start: r.start as string, end: r.end as string, goal: r.goal as string, capacity: j(r.capacity, {}), created: r.created as string};
 }
@@ -479,19 +483,33 @@ export class Tasks {
   // Comments, with @mentions by first name.
   listComments(itemId: string): Comment[] {
     return this.db.prepare('select * from comments where item_id = ? order by created').all(itemId)
-      .map(r => ({id: r.id as string, itemId: r.item_id as string, author: r.author as string, body: r.body as string, created: r.created as string}));
+      .map(toComment);
   }
-  addComment(itemId: string, author: string, body: string): Comment {
+  /** Open comments assigned to a person, newest first, with their item. */
+  assignedComments(person: string) {
+    return this.db.prepare('select * from comments where assignee = ? and resolved is null order by created desc').all(person).map(toComment)
+      .map(c => ({...c, item: this.db.prepare('select * from items where id = ?').get(c.itemId) ? this.item(c.itemId) : null})).filter(c => c.item);
+  }
+  resolveComment(cid: string, actor: string | null, resolved: boolean) {
+    const r = this.db.prepare('select * from comments where id = ?').get(cid);
+    if (!r) throw new NotFound('Comment not found');
+    this.db.prepare('update comments set resolved = ? where id = ?').run(resolved ? now() : null, cid);
+    this.emit({kind: 'comment', itemId: r.item_id as string});
+    return toComment(this.db.prepare('select * from comments where id = ?').get(cid)!);
+  }
+  addComment(itemId: string, author: string, body: string, assignee: string | null = null): Comment {
     const item = this.item(itemId);
     this.person(author);
     if (!body.trim()) throw new Invalid('Comment is empty');
-    const c: Comment = {id: id(), itemId, author, body: body.trim(), created: now()};
-    this.db.prepare('insert into comments (id,item_id,author,body,created) values (?,?,?,?,?)').run(c.id, c.itemId, c.author, c.body, c.created);
+    if (assignee) this.person(assignee);
+    const c: Comment = {id: id(), itemId, author, body: body.trim(), created: now(), assignee, resolved: null};
+    this.db.prepare('insert into comments (id,item_id,author,body,created,assignee) values (?,?,?,?,?,?)').run(c.id, c.itemId, c.author, c.body, c.created, assignee);
     this.emit({kind: 'comment', itemId});
     const p = this.project(item.projectId);
     const ref = `${p.key}-${item.number}`;
     const mentioned = this.listPeople().filter(pp => new RegExp(`@${pp.name.split(' ')[0]}\\b`, 'i').test(c.body)).map(pp => pp.id);
-    for (const m of mentioned) this.notify(m, author, itemId, 'mention', `mentioned you on ${ref}: ${c.body.slice(0, 80)}`);
+    if (assignee && assignee !== author) this.notify(assignee, author, itemId, 'assigned-comment', `assigned you a comment on ${ref}: ${c.body.slice(0, 80)}`);
+    for (const m of mentioned.filter(x => x !== assignee)) this.notify(m, author, itemId, 'mention', `mentioned you on ${ref}: ${c.body.slice(0, 80)}`);
     for (const w of this.watchers(item).filter(w => !mentioned.includes(w))) this.notify(w, author, itemId, 'comment', `commented on ${ref}: ${c.body.slice(0, 80)}`);
     return c;
   }
