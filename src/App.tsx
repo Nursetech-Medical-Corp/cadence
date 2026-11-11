@@ -21,7 +21,6 @@ import {MyWork} from './MyWork.tsx';
 import {NotifySettings} from './NotifySettings.tsx';
 import {setBadge} from './device.ts';
 import {AcceptInvite, EmailLinkSignIn, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
-import {resumeConnect} from './ConnectedApps.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
 import {ContextMenus} from './ContextMenu.tsx';
@@ -30,6 +29,7 @@ import {ProjectList, includedIn, isRollup, rollupProject} from './ProjectNav.tsx
 import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
 import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
+import {resumeConnect} from './ConnectedApps.tsx';
 
 // Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
 const GanttView = lazy(() => import('./GanttView.tsx').then(m => ({default: m.GanttView})));
