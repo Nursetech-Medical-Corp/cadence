@@ -1,6 +1,7 @@
 // Everything, across every workspace: a dashboard you arrange, one calendar, a personal timeline, and a list.
 // Edits (dates, done) go straight to the item's own workspace. Opening an item from another workspace switches to it.
-import {CoverHeader, type Cover} from './Cover.tsx';
+import {CoverHeader} from './Cover.tsx';
+import type {Cover} from './types.ts';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ChevronLeft, ChevronRight, LayoutDashboard, CalendarDays, GanttChart, List as ListIcon, Plus, RotateCcw} from 'lucide-react';
 import type {Item, Project} from './types.ts';

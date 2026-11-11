@@ -144,7 +144,8 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
     return () => { alive = false; removeEventListener('keydown', k); removeEventListener('resize', r); };
   }, [n]);
   const next = () => n < steps.length - 1 ? setN(n + 1) : close();
-  const missing = step.need && !store.views.some(v => v.kind === step.need && realProjects(store.projects).some(p => p.id === v.projectId)) ? projectFor(store, step.need) : undefined;
+  const real = realProjects(store.projects);
+  const missing = step.need && !real.some(p => store.views.some(v => v.projectId === p.id && v.kind === step.need)) ? real[0] : undefined;
   const addView = async () => {
     const label = VIEW_LABELS[step.need!] ?? step.need!;
     const v = missing && await store.createView(missing.id, label, step.need as ViewKind);

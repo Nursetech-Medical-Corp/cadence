@@ -4,7 +4,7 @@ import {exportAll} from './backup.ts';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
-import {addUnit, daysBetween, iso, monday, offWeekend} from '../src/dates.ts';
+import {addUnit, daysBetween, iso, monday, onWorkdays} from '../src/dates.ts';
 import {PRIORITY_WORDS, parseQuickAdd} from '../src/quickadd.ts';
 import {nextOccurrence} from '../src/recur.ts';
 import {Invalid, NotFound} from './errors.ts';
@@ -397,7 +397,7 @@ export class Tasks {
       if (!d || i.completed || !(i.start || i.due)) return;
       const s0 = i.start ? addUnit(i.start, d, 'day') : null, d0 = i.due ? addUnit(i.due, d, 'day') : null;
       // Saturday and Sunday roll to Monday when the project skips weekends, keeping the length.
-      const [start, due] = rules.skipWeekends ? offWeekend(s0, d0, true) : [s0, d0];
+      const [start, due] = onWorkdays(rules.skipWeekends, s0, d0, true);
       this.updateItem(i.id, {...(start ? {start} : {}), ...(due ? {due} : {})}, actor);
     };
     if (delta) for (const c of this.listItems({parentId: next.id})) if (c.fields.follow === 'parent') move(c, delta);

@@ -80,20 +80,23 @@ function prune(dir: string) {
   for (const x of retention(listSnapshots(dir), getSettings(dir))) if (!x.keptAs) rmSync(join(dir, x.name));
 }
 
-/** Takes an auto snapshot when the newest one is older than the interval. Call on start and periodically. */
-/** Copies uploaded files not yet in the backup folder. Files are written once and never changed, so this is complete. */
-/** Copies new or changed files (attachments, header pictures) into the backup folder under the same name. */
-export function mirrorFiles(filesDir: string, dir = DIR(), as = 'files') {
+/** Copies files into the backup folder under the same name: new ones, and with changed: true also ones that changed. */
+export function mirrorFiles(filesDir: string, dir = DIR(), as = 'files', changed = false) {
   if (!existsSync(filesDir)) return 0;
   const to = join(dir, as);
   mkdirSync(to, {recursive: true});
   let n = 0;
   for (const f of readdirSync(filesDir)) {
     const src = join(filesDir, f), dst = join(to, f);
-    if (!existsSync(dst) || statSync(src).mtimeMs > statSync(dst).mtimeMs) { copyFileSync(src, dst); n++; }
+    const old = statSync(dst, {throwIfNoEntry: false});
+    if (!old || (changed && statSync(src).mtimeMs > old.mtimeMs)) { copyFileSync(src, dst); n++; }
   }
   return n;
 }
+/** Attachments are written once; header pictures can be replaced, so they are compared by time. */
+export const mirrorUploads = (dataDir: string, dir = DIR()) => mirrorFiles(join(dataDir, 'files'), dir) + mirrorFiles(join(dataDir, 'covers'), dir, 'covers', true);
+
+/** Takes an auto snapshot when the newest one is older than the interval. Call on start and periodically. */
 export function maybeSnapshot(db: Db, dir = DIR()) {
   const s = getSettings(dir);
   if (!s.enabled) return null;

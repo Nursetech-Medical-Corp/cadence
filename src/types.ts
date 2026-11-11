@@ -38,7 +38,7 @@ export type InheritKey = 'assignees' | 'sprint' | 'priority' | 'tags' | 'due' | 
 
 export type ProjectSettings = {
   /** Optional header at the top of the space: a color band or an uploaded picture. */
-  cover?: {gradient: number} | {image: string; v: number; x?: number; y?: number} | null;
+  cover?: Cover | null;
   inherit: InheritKey[];
   automations: Rule[];
   webhooks: {id: string; url: string; events: string[]}[];
@@ -162,7 +162,12 @@ export type Activity = {id: number; at: string; actor: string | null; kind: 'cre
 export type BurnPoint = {date: string; remaining: number; remainingHours: number; ideal: number; idealHours: number; done: number};
 
 /** Who may change each area, and which optional features are on (Team page, Customization). */
-export type Customization = {viewSettings: 'personal' | 'shared' | 'locked'; viewOrder: 'personal' | 'shared' | 'locked'; projectOrder: 'personal' | 'shared' | 'locked'};
+export const POLICY_IDS = ['personal', 'shared', 'locked'] as const;
+export type Policy = typeof POLICY_IDS[number];
+export type Area = 'viewSettings' | 'viewOrder' | 'projectOrder';
+export type Customization = Record<Area, Policy>;
+/** A space or page header: a color band, or an uploaded picture shown at x, y (0 to 100). */
+export type Cover = {gradient: number} | {image: string; v: number; x?: number; y?: number};
 export type Features = {timeTracking: boolean; aiWork: boolean; approvals: boolean; routines: boolean; insights: boolean};
 export const DEFAULT_CUSTOM: Customization = {viewSettings: 'personal', viewOrder: 'personal', projectOrder: 'personal'};
 export const DEFAULT_FEATURES: Features = {timeTracking: true, aiWork: true, approvals: true, routines: true, insights: true};

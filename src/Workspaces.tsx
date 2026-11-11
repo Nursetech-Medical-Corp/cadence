@@ -10,10 +10,10 @@ import {Empty, Popover, itemKey} from './components.tsx';
 export type Workspace = {id: string; name: string; color: string; icon: string; logo?: string; sort: number};
 const COLORS = ['#7c5cff', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1', '#64748b'];
 
-export function useWorkspaces(tick?: number) {
+export function useWorkspaces() {
   const [list, setList] = useState<Workspace[]>([]);
   const reload = () => api<{list: Workspace[]}>('/workspaces').then(r => setList(r.list)).catch(() => {});
-  useEffect(() => { reload(); }, [tick]);
+  useEffect(() => { reload(); }, []);
   return [list, reload] as const;
 }
 
@@ -24,7 +24,7 @@ export function WsMark({w, size = 22}: {w?: Workspace; size?: number}) {
 
 /** The workspace button at the top of the sidebar: switch, add, rename, and open Today across all of them. */
 export function WorkspaceSwitcher({store, me}: {store: Store; me: string}) {
-  const [list, reload] = useWorkspaces(store.tick);
+  const [list, reload] = useWorkspaces();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<'list' | 'new' | 'edit'>('list');
   const [name, setName] = useState('');
@@ -98,5 +98,3 @@ export function WorkspaceSwitcher({store, me}: {store: Store; me: string}) {
     </span>
   );
 }
-
-

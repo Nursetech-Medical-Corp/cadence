@@ -7,8 +7,8 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
-import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorFiles, retention, saveSettings, snapshot} from './backup.ts';
-import {CAPS, CAP_LABELS, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, type Access, type Cap} from './auth.ts';
+import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, retention, saveSettings, snapshot} from './backup.ts';
+import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts} from './accounts.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
@@ -21,6 +21,7 @@ import {migrateAiWork, readFile} from './aiwork.ts';
 import {migrateApprovals} from './approvals.ts';
 import {archiveWorkspace, createWorkspace, listWorkspaces, publicInfo, reorderWorkspaces, updateWorkspace, workspaceDir, type WorkspaceInfo} from './workspaces.ts';
 import {dirname, join} from 'node:path';
+import {decodeImage} from './images.ts';
 import {seedSampleWorkspaces} from './demo.ts';
 import type {ChangeEvent, Project} from '../src/types.ts';
 
@@ -101,7 +102,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
-  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorFiles(join(tasks.dataDir, 'files'), bdir); mirrorFiles(join(tasks.dataDir, 'covers'), bdir, 'covers'); } catch (e) { console.error('Snapshot failed', e); } };
+  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
   setInterval(auto, 10 * 60 * 1000).unref();
   // Due-date automations and sprint rollover, checked on start and hourly.
@@ -115,9 +116,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const eventProject = (e: ChangeEvent): string | null =>
     e.kind === 'item' ? e.item.projectId : e.kind === 'item-deleted' || e.kind === 'sprint' || e.kind === 'view' ? e.projectId : e.kind === 'project' ? e.project.id : null;
   const broadcast = (e: ChangeEvent) => {
-    const pid = eventProject(e);
+    const pid = eventProject(e), checkAccess = !!pid && getWorkspace(tasks.db).requireLogin;
     for (const [c, who] of clients) {
-      if (pid && getWorkspace(tasks.db).requireLogin) {
+      if (checkAccess) {
         try { if (!capsFor(tasks.db, who, (tasks.project(pid).settings as {access?: Access}).access).has('view')) continue; } catch { continue; }
       }
       c.write(`data: ${JSON.stringify(e)}\n\n`);
@@ -401,9 +402,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const patch: Record<string, unknown> = {};
           if (body.requireLogin !== undefined) patch.requireLogin = !!body.requireLogin;
           if (body.roles) patch.roles = body.roles;
-          const pol = (v: unknown) => v === 'personal' || v === 'shared' || v === 'locked' ? v : null;
-          if (body.custom) patch.custom = Object.fromEntries(Object.entries(ws.custom).map(([k, v]) => [k, pol((body.custom as Record<string, unknown>)[k]) ?? v]));
-          if (body.features) patch.features = Object.fromEntries(Object.entries(ws.features).map(([k, v]) => [k, typeof (body.features as Record<string, unknown>)[k] === 'boolean' ? (body.features as Record<string, boolean>)[k] : v]));
+          if (body.custom) patch.custom = body.custom;
+          if (body.features) patch.features = body.features;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});
@@ -424,10 +424,10 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'views') {
         if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
         if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
-        if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); if (ws.custom.viewOrder === 'locked') needAdmin(); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
+        if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); if (areaLocked(tasks.db, 'viewOrder')) needAdmin(); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
         if (b) need(tasks.view(b).projectId, 'views');
         // Only the owner can make a view private to themselves; nobody can make it private to someone else.
-        if (b && m === 'PATCH') { if (body.config && ws.custom.viewSettings === 'locked' && !('locked' in body.config && Object.keys(body.config).length === 1)) needAdmin(); if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
+        if (b && m === 'PATCH') { if (body.config && areaLocked(tasks.db, 'viewSettings') && settingsChanged(tasks.view(b).config, body.config)) needAdmin(); if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
       }
 
@@ -497,11 +497,10 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
       if (a === 'backups') {
         if (m === 'GET') return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
-        if (m === 'POST') { needAdmin(); mirrorFiles(join(tasks.dataDir, 'files'), bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
+        if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
       }
 
       // Your own layout: view settings, tab order, project order (see src/customize.ts).
-      if (a === 'prefs' && m === 'GET') return send(res, 200, actor && !bearer ? tasks.prefs(actor) : {});
       if (a === 'prefs' && m === 'PUT') {
         if (!actor || bearer) throw new Invalid('Pick who you are first');
         tasks.setPref(actor, String(body.key ?? ''), body.value ?? null);
@@ -524,7 +523,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           // Access rules decide who can do anything, so only admins may change them.
           if (body.settings && JSON.stringify((body.settings as {access?: Access}).access ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) needAdmin();
           need(b, 'settings');
-          if (body.sort !== undefined && ws.custom.projectOrder === 'locked') needAdmin();
+          if (body.sort !== undefined && areaLocked(tasks.db, 'projectOrder')) needAdmin();
           return send(res, 200, tasks.updateProject(b, body));
         }
         if (b && c === 'export' && m === 'GET') {
@@ -707,11 +706,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (kind === 'space') need(owner, 'settings');
         else if (owner !== actor) throw new Denied('You can only change your own headers');
         if (m === 'POST') {
-          const mm = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(body.data ?? ''));
-          if (!mm) throw new Invalid('Send the picture as a JPEG');
-          const bytes = Buffer.from(mm[1], 'base64');
-          if (bytes.length > 1_500_000) throw new Invalid('The picture is too large');
-          if (bytes[0] !== 0xff || bytes[1] !== 0xd8) throw new Invalid('That is not a JPEG picture');
+          const bytes = decodeImage(body.data, ['jpeg'], 1_500_000);
           mkdirSync(dirname(file), {recursive: true}); writeFileSync(file, bytes);
           return send(res, 200, {ok: true});
         }

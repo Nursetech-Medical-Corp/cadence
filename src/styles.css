@@ -350,7 +350,6 @@ body > .popover.wide { min-width: 260px; }
 /* My work dashboard */
 .dash { max-width: 1240px; }
 .dash-head { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
 .widget { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); min-height: 120px; }
 .widget.wide { grid-column: 1 / -1; } .widget.dragging { opacity: .4; }
 .widget-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
@@ -405,7 +404,6 @@ body > .popover.wide { min-width: 260px; }
   .title-wrap { min-width: 0; }
   .panel { width: 100vw; padding: 12px 14px 60px; }
   .props { grid-template-columns: 90px 1fr; }
-  .dash-grid { grid-template-columns: 1fr; }
   .week-strip { grid-template-columns: repeat(7, minmax(70px, 1fr)); overflow-x: auto; }
   .split { flex-direction: column; height: auto; }
   .split > .right { width: auto; border-left: 0; border-top: 1px solid var(--line); }
@@ -471,9 +469,7 @@ a.btn { text-decoration: none; }
 .btn.small { padding: 2px 7px; font-size: .82em; }
 
 /* Dashboard grid: 3 columns, widgets span 1 to 3 and snap in height, live reorder while dragging. */
-.dash-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: dense; }
-@media (max-width: 1000px) { .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .dash-grid { grid-template-columns: 1fr; } .widget { grid-column: auto !important; } }
+@media (max-width: 760px) { .widget { grid-column: auto !important; } }
 .widget { position: relative; display: flex; flex-direction: column; transition: box-shadow .15s, border-color .15s, height .12s; }
 .widget-body { flex: 1; min-height: 0; overflow: auto; }
 .widget .grip { color: var(--muted); cursor: grab; display: inline-flex; padding: 2px; border-radius: 4px; margin-left: -4px; }
@@ -1127,13 +1123,12 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 /* Cover headers */
 .cover { position: relative; height: 150px; border-radius: 12px; margin: 0 0 12px; }
 .head > .cover { margin: 0 0 8px; height: 120px; }
-.cover-actions { position: absolute; right: 12px; bottom: 10px; opacity: 0; transition: opacity .12s; }
+.cover-actions { position: absolute; right: 12px; bottom: 10px; opacity: 0; transition: opacity .12s; display: flex; gap: 6px; }
 .cover:hover .cover-actions, .cover-actions:focus-within { opacity: 1; }
 /* "Add header" sits on its own short line at the top (never over other controls) and shows on hover. */
 .cover-add { display: flex; height: 24px; margin-bottom: 2px; }
 .cover-add > .picker { opacity: 0; transition: opacity .12s; }
 .page:hover > .cover-add > .picker, .head:hover > .cover-add > .picker, .cover-add > .picker:focus-within { opacity: 1; }
-.cover-actions { display: flex; gap: 6px; }
 .cover-actions.on { opacity: 1; }
 .cover.repositioning { cursor: grab; outline: 2px solid var(--accent); }
 .cover.repositioning:active { cursor: grabbing; }

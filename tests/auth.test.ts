@@ -202,6 +202,11 @@ test('customization: personal layouts are per person; locked areas are admin onl
     assert.equal((await call('/bootstrap', {cookie: s})).json.settings.custom.viewSettings, 'locked');
     assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {hideDone: true}}, cookie: s})).status, 403);
     assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {hideDone: true}}, cookie: o})).status, 200);
+    // Locking (or making private) is not a settings change, even when the whole config is sent.
+    assert.equal((await call(`/views/${view.id}`, {method: 'PATCH', body: {config: {...tasks.view(view.id).config, locked: true}}, cookie: s})).status, 200);
+    // Unknown policies are ignored wherever settings are saved.
+    await call('/workspace', {method: 'PUT', body: {custom: {viewOrder: 'bogus'}}, cookie: o});
+    assert.equal((await call('/bootstrap', {cookie: o})).json.settings.custom.viewOrder, 'personal');
   } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
 });
 

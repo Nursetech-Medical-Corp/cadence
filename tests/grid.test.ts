@@ -38,7 +38,8 @@ test('sorting: status and dropdowns follow your arranged order, or A to Z when a
 });
 
 test('color rules: moving a rule changes which one wins', async () => {
-  const {colorOf, move} = await import('../src/ColorRules.tsx');
+  const {colorOf} = await import('../src/ColorRules.tsx');
+  const {move} = await import('../src/components.tsx');
   const project = {statuses: [], types: ['Task'], fields: []} as never;
   const item = {id: 'a', title: 'a', status: 'todo', type: 'Task', priority: 2, assignees: [], tags: [], fields: {}, due: '2026-11-01', completed: null} as never;
   const high = {rule: {field: 'priority', op: 'is', value: '2'}, color: '#f97316'} as const, late = {rule: {field: 'due', op: 'before', value: 'today'}, color: '#ef4444'} as const;

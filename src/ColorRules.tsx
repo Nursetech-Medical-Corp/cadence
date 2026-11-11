@@ -4,7 +4,7 @@ import {useState} from 'react';
 import {GripVertical, Palette, Plus, X} from 'lucide-react';
 import type {FilterRule, Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
-import {Popover} from './components.tsx';
+import {Popover, move} from './components.tsx';
 import {OPS, filterFields, matchFilter} from './FilterBuilder.tsx';
 
 export type ColorRule = {rule: FilterRule; color: string};
@@ -24,14 +24,6 @@ export function colorOf(i: Item, rules: ColorRule[] | undefined, ctx: {project: 
 }
 /** A view's color rules, or none while its colors are switched off. */
 export const activeColors = (c: ViewConfig) => c.colorsOff ? undefined : c.colors;
-/** A copy of the list with the entry at `from` moved to position `to`. */
-export function move<T>(list: T[], from: number, to: number): T[] {
-  const l = [...list];
-  if (to < 0 || to >= l.length || from === to) return l;
-  const [m] = l.splice(from, 1);
-  l.splice(to, 0, m);
-  return l;
-}
 /** Style for a tinted row or card. */
 export const tint = (c: string | undefined) => c ? {boxShadow: `inset 3px 0 0 ${c}`, background: `color-mix(in srgb, ${c} 9%, transparent)`} : undefined;
 

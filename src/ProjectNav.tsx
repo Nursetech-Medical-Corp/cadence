@@ -70,11 +70,11 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     const at = list.findIndex(p => p.id === target) + (after ? 1 : 0);
     list.splice(at, 0, ordered.find(p => p.id === drag)!);
     if (mode === 'mine') store.setPref('projects', list.map(p => p.id));
-    else if (mode === 'team') list.forEach((p, n) => { if (p.sort !== n) store.updateProject(p.id, {sort: n}); });
+    else list.forEach((p, n) => { if (p.sort !== n) store.updateProject(p.id, {sort: n}); });
   };
   const row = (p: Project, fav: boolean) => {
     const n = ordered.indexOf(p);
-    const grip = !q && !fav && mode !== 'none' ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
+    const grip = !q && !fav ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
     const star = <button className={'proj-star' + (favs.includes(p.id) ? ' on' : '')} title={favs.includes(p.id) ? 'Remove from favorites' : 'Add to favorites'} onClick={e => { e.stopPropagation(); toggleFav(p.id); }} onKeyDown={e => e.stopPropagation()}><Star size={12} /></button>;
     const icon = <IconKit store={store} project={p} index={n} />;
     const menu = <ProjectMenu project={p} />;

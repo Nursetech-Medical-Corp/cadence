@@ -35,9 +35,12 @@ export function skipWeekend(s: string) { const w = parseDay(s).getDay(); return 
 /** Moves a start and due off Saturday and Sunday to Monday. keepLength: the due date moves as far as the start did. */
 export function offWeekend(start: string | null, due: string | null, keepLength = false): [string | null, string | null] {
   const s = start ? skipWeekend(start) : null;
-  const extra = keepLength && start && s ? daysBetween(start, s) : 0;
-  return [s, due ? skipWeekend(extra ? addDays(due, extra) : due) : null];
+  const extra = keepLength && start ? daysBetween(start, s!) : 0;
+  return [s, due ? skipWeekend(addDays(due, extra)) : null];
 }
+/** offWeekend when the space skips weekends, else the dates as they are. */
+export const onWorkdays = (skip: boolean | undefined, start: string | null, due: string | null, keepLength = false): [string | null, string | null] =>
+  skip ? offWeekend(start, due, keepLength) : [start, due];
 export function daysBetween(a: string, b: string) {
   return Math.round((parseDay(b).getTime() - parseDay(a).getTime()) / 86400000);
 }

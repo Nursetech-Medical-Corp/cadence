@@ -9,7 +9,7 @@
 // and set what everyone else gets (including "no access").
 import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
 import type {Db} from './db.ts';
-import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from '../src/types.ts';
+import {DEFAULT_CUSTOM, DEFAULT_FEATURES, POLICY_IDS, type Area, type Customization, type Features} from '../src/types.ts';
 import {Invalid} from './errors.ts';
 
 export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
@@ -53,8 +53,25 @@ export function getWorkspace(db: Db): Workspace {
   return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google},
     custom: {...DEFAULT_CUSTOM, ...w.custom}, features: {...DEFAULT_FEATURES, ...w.features}};
 }
+/** Whether a view config change touches its settings, not just its lock or privacy. */
+export const settingsChanged = (before: object, after: object) => {
+  const b = before as Record<string, unknown>, a = after as Record<string, unknown>;
+  return [...new Set([...Object.keys(b), ...Object.keys(a)])].some(k => k !== 'locked' && k !== 'privateTo' && JSON.stringify(b[k]) !== JSON.stringify(a[k]));
+};
+/** Locked areas of the team setup are changed only by admins (see src/customize.ts). */
+export const areaLocked = (db: Db, area: Area) => getWorkspace(db).custom[area] === 'locked';
+
 export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
   const cur = getWorkspace(db);
+  // Unknown policies and non-boolean feature switches keep the current value (API and restores alike).
+  if (patch.custom) patch = {...patch, custom: Object.fromEntries(Object.entries(cur.custom).map(([k, v]) => {
+    const n = (patch.custom as Record<string, unknown>)[k];
+    return [k, (POLICY_IDS as readonly unknown[]).includes(n) ? n : v];
+  })) as Customization};
+  if (patch.features) patch = {...patch, features: Object.fromEntries(Object.entries(cur.features).map(([k, v]) => {
+    const n = (patch.features as Record<string, unknown>)[k];
+    return [k, typeof n === 'boolean' ? n : v];
+  })) as Features};
   const w = {...cur, requireLogin: !!stored(db).requireLogin, ...patch};
   if (!w.roles.some(r => r.id === 'admin')) throw new Error('The Admin role cannot be removed');
   w.roles = w.roles.map(r => r.id === 'admin' ? {...r, caps: [...CAPS]} : r);

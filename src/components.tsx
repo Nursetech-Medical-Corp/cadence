@@ -74,13 +74,21 @@ export function Popover({open, onClose, children, className = ''}: {open: boolea
 }
 
 /** Button that opens a list of options. */
+/** A copy of the list with the entry at `from` moved to position `to`. */
+export function move<T>(list: T[], from: number, to: number): T[] {
+  const l = [...list];
+  if (to < 0 || to >= l.length || from === to) return l;
+  const [m] = l.splice(from, 1);
+  l.splice(to, 0, m);
+  return l;
+}
 /** Drag rows of a popover list into a new order. Returns props for row n, and whether it is the one being dragged. */
 export function useDragRows<T>(list: T[], onReorder?: (list: T[]) => void) {
   const [drag, setDrag] = useState<number | null>(null);
   const row = (n: number, enabled = true) => !onReorder || !enabled ? {} : {
     draggable: true, onDragStart: () => setDrag(n), onDragEnd: () => setDrag(null),
     onDragOver: (e: React.DragEvent) => { if (drag !== null) e.preventDefault(); },
-    onDrop: () => { if (drag !== null && drag !== n) { const l = [...list]; const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder(l); } setDrag(null); },
+    onDrop: () => { if (drag !== null && drag !== n) onReorder(move(list, drag, n)); setDrag(null); },
   };
   return {row, dragging: (n: number) => drag === n};
 }

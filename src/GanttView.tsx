@@ -4,7 +4,7 @@ import {api} from './store.ts';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ChevronDown, ChevronRight, MoreHorizontal} from 'lucide-react';
 import type {Item} from './types.ts';
-import {addDays, daysBetween, iso, parseDay, offWeekend} from './dates.ts';
+import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {criticalPath} from './critical.ts';
 import {InlineText, PeoplePicker, TypeBadge} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
@@ -139,7 +139,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
       // Projects that skip weekends: a bar dropped on Saturday or Sunday starts Monday (moves keep their length).
       const off = (id: string, st: string | null, du: string | null, keep: boolean) => {
         const pr = store.projects.find(p => p.id === store.items.get(id)?.projectId);
-        return pr?.settings.dates?.skipWeekends ? offWeekend(st, du, keep) : [st, du];
+        return onWorkdays(pr?.settings.dates?.skipWeekends, st, du, keep);
       };
       if (d.mode === 'group') {
         if (!d.delta) return;

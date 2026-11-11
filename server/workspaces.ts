@@ -4,6 +4,7 @@ import {mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {Invalid, NotFound} from './errors.ts';
+import {decodeImage} from './images.ts';
 
 /** logo: a small image as a data URL (the app shrinks uploads to 128 px). */
 export type WorkspaceInfo = {id: string; name: string; color: string; icon: string; logo?: string; db: string; created: string; sort: number};
@@ -51,9 +52,8 @@ export function createWorkspace(input: {name?: unknown; color?: unknown; icon?: 
 }
 const cleanLogo = (v: unknown) => {
   if (v === '' || v === null) return '';
-  if (typeof v !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v)) throw new Invalid('The logo must be a PNG, JPEG or WebP image');
-  if (v.length > 200_000) throw new Invalid('The logo is too large; use an image under 150 KB');
-  return v;
+  decodeImage(v, ['png', 'jpeg', 'webp'], 150_000);
+  return v as string;
 };
 export function updateWorkspace(id: string, patch: {name?: unknown; color?: unknown; icon?: unknown; logo?: unknown}): WorkspaceInfo {
   const list = listWorkspaces(), w = list.find(x => x.id === id);

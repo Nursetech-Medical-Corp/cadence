@@ -3,7 +3,7 @@
 import {useState} from 'react';
 import {ChevronLeft, ChevronRight, Plus} from 'lucide-react';
 import type {Item} from './types.ts';
-import {addDays, daysBetween, iso, parseDay, offWeekend} from './dates.ts';
+import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {Avatars, PriorityIcon, StatusIcon} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 
@@ -40,8 +40,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
     if (!i || i.due === day) return;
     const shift = i.due ? daysBetween(i.due, day) : 0;
     const start = i.start && i.due ? addDays(i.start, shift) : null;
-    const skip = store.projects.find(p => p.id === i.projectId)?.settings.dates?.skipWeekends;
-    const [st, du] = skip ? offWeekend(start, day, false) : [start, day];
+    const [st, du] = onWorkdays(store.projects.find(p => p.id === i.projectId)?.settings.dates?.skipWeekends, start, day);
     store.updateItem(id, {due: du, ...(st ? {start: st} : {})});
   };
   const step = (n: number) => setCursor(mode === 'month' ? iso(new Date(c.getFullYear(), c.getMonth() + n, 1)) : addDays(cursor, 7 * n));

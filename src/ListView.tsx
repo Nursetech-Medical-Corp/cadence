@@ -1,11 +1,11 @@
 import {Fragment, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
-import {activeColors, colorOf, move, tint} from './ColorRules.tsx';
+import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Repeat} from 'lucide-react';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
-import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge} from './components.tsx';
+import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move} from './components.tsx';
 import {rowFieldsOf, type RowField, type ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
 import {countRules} from './FilterBuilder.tsx';

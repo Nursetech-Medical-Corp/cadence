@@ -98,6 +98,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const patch = async (id: string, body: Record<string, unknown>) => { try { await api(`/team/${id}`, {method: 'PATCH', body}); await load(); } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } };
   const saveRoles = async (r: Role[]) => { setRoles(r); try { await api('/workspace', {method: 'PUT', body: {roles: r}}); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); load(); } };
   const isAdmin = me.admin;
+  const putWs = async (body: object) => { try { await api('/workspace', {method: 'PUT', body}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } };
   const redirect = `${location.origin}/api/auth/google/callback`;
 
   return (
@@ -110,7 +111,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {AREAS.map(([k, label, hint]) => (
           <div key={k} className="set-item">
             <span className="grow"><b>{label}</b> <span className="muted small">{hint}</span></span>
-            <select className="plain-select" value={ws.custom[k]} disabled={!isAdmin} onChange={async e => { try { await api('/workspace', {method: 'PUT', body: {custom: {...ws.custom, [k]: e.target.value}}}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }}>
+            <select className="plain-select" value={ws.custom[k]} disabled={!isAdmin} onChange={e => putWs({custom: {...ws.custom, [k]: e.target.value}})}>
               {POLICIES.map(([p, l]) => <option key={p} value={p}>{l}</option>)}
             </select>
           </div>
@@ -119,7 +120,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         <div className="feature-grid">
           {(Object.keys(FEATURE_LABELS) as (keyof Features)[]).map(k => (
             <label key={k} className="small"><input type="checkbox" checked={ws.features[k]} disabled={!isAdmin}
-              onChange={async e => { try { await api('/workspace', {method: 'PUT', body: {features: {...ws.features, [k]: e.target.checked}}}); location.reload(); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }} /> {FEATURE_LABELS[k]}</label>
+              onChange={e => putWs({features: {...ws.features, [k]: e.target.checked}})} /> {FEATURE_LABELS[k]}</label>
           ))}
         </div>
       </section>}

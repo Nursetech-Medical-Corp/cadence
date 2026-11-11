@@ -1,6 +1,7 @@
 // My Work: a personal daily dashboard. Widgets can be added, removed, resized and dragged into a new order.
 // Layout is saved per person in this browser.
-import {CoverHeader, type Cover} from './Cover.tsx';
+import {CoverHeader} from './Cover.tsx';
+import type {Cover} from './types.ts';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {GripVertical, Plus, RotateCcw, X} from 'lucide-react';

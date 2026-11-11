@@ -3,7 +3,7 @@
 import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
 import type {Tasks} from './service.ts';
-import {capsFor, type Access, type Cap} from './auth.ts';
+import {settingsChanged, areaLocked, capsFor, type Access, type Cap} from './auth.ts';
 
 export function migrateTokens(db: Db) {
   db.exec('create table if not exists tokens (id text primary key, person text not null, name text not null, hash text not null unique, created text not null, last_used text)');
@@ -54,7 +54,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     deleteItem: (id) => need(projOfItem(id), 'delete'),
     addComment: (id) => need(projOfItem(id), 'comment'),
     resolveComment: (cid) => need(projOfItem(tasks.comment(cid).itemId), 'comment'),
-    reorderViews: (pid) => need(pid, 'views'),
+    reorderViews: (pid) => { need(pid, 'views'); if (areaLocked(tasks.db, 'viewOrder') && !isAdmin()) throw new Forbidden('Only admins change the order of views here'); },
     logTime: (i) => { need(projOfItem(i.itemId), 'edit'); selfOrAdmin(i.person, 'log time'); },
     startTimer: (itemId, person) => { need(projOfItem(itemId), 'edit'); self(person, 'run timers'); },
     stopTimer: (person) => self(person, 'stop timers'),
@@ -62,7 +62,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     deleteTime: (eid) => { const e = tasks.timeEntry(eid); need(projOfItem(e.itemId), 'edit'); selfOrAdmin(e.person, 'delete time'); },
     listNotifications: (person) => self(person, 'read notifications'),
     markRead: (person) => self(person, 'read notifications'),
-    updateView: (vid, patch) => { need(tasks.view(vid).projectId, 'views'); if (patch?.config?.privateTo && patch.config.privateTo !== actor) throw new Forbidden('A view can only be made private to yourself'); },
+    updateView: (vid, patch) => { need(tasks.view(vid).projectId, 'views'); if (patch?.config && areaLocked(tasks.db, 'viewSettings') && settingsChanged(tasks.view(vid).config, patch.config) && !isAdmin()) throw new Forbidden('Only admins change view settings here'); if (patch?.config?.privateTo && patch.config.privateTo !== actor) throw new Forbidden('A view can only be made private to yourself'); },
     deleteView: (vid) => need(tasks.view(vid).projectId, 'views'),
     deleteProject: () => { if (!isAdmin()) throw new Forbidden('Only admins delete spaces'); },
     createRollup: () => { if (!isAdmin()) throw new Forbidden('Only admins add rollup spaces'); },
@@ -75,7 +75,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     updateSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
     deleteSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
     rolloverSprint: (sid) => need(tasks.sprint(sid).projectId, 'sprints'),
-    updateProject: (pid, patch) => { need(pid, 'settings'); if (patch?.settings?.access && !isAdmin()) throw new Forbidden('Only admins change space access'); },
+    updateProject: (pid, patch) => { need(pid, 'settings'); if (patch?.sort !== undefined && areaLocked(tasks.db, 'projectOrder') && !isAdmin()) throw new Forbidden('Only admins change the order of spaces here'); if (patch?.settings?.access && !isAdmin()) throw new Forbidden('Only admins change space access'); },
     createProject: () => { if (!isAdmin()) throw new Forbidden('Only admins create spaces'); },
     createProjectFromTemplate: () => { if (!isAdmin()) throw new Forbidden('Only admins create spaces'); },
     saveItemTemplate: (id) => need(projOfItem(id), 'templates'),

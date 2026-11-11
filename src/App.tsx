@@ -1,6 +1,6 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {CoverHeader} from './Cover.tsx';
-import {saveMode, viewsFor, type ShownView} from './customize.ts';
+import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
 import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
@@ -91,7 +91,10 @@ export function App() {
   const store = useStore(me);
   const storeRef = useRef(store);
   storeRef.current = store;
-  const [route, setRoute] = useState(readRoute);
+  const [rawRoute, setRoute] = useState(readRoute);
+  const off: Record<string, boolean> = {timesheet: !store.settings.features.timeTracking, ai: !store.settings.features.aiWork, approvals: !store.settings.features.approvals,
+    routines: !store.settings.features.routines, insights: !store.settings.features.insights};
+  const route: Route = off[rawRoute.page] ? {page: 'mywork'} : rawRoute;
   const [openId, setOpenId] = useState<string | null>(null);
   const [palette, setPalette] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -262,7 +265,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
   const person = store.people.find(p => p.id === me);
   const projectId = route.page === 'project' ? route.id : null;
   // Everything (all workspaces) only makes sense with more than one.
-  const [wsList] = useWorkspaces(store.tick);
+  const [wsList] = useWorkspaces();
   const wsCount = wsList.length;
   return (
     <nav className="sidebar">
@@ -295,10 +298,10 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
         <NewProjectMenu store={store} onCreated={id => go({page: 'project', id, view: ''})} />
       </div>
       <ProjectList store={store} activeId={projectId} render={(p, n, x) => {
-        const views = viewsFor(store, p.id);
         const active = projectId === p.id, expanded = openProjects.includes(p.id);
+        const views = expanded ? viewsFor(store, p.id) : [];
         return <>
-          <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: views[0]?.id ?? ''})}
+          <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: viewsFor(store, p.id)[0]?.id ?? ''})}
             expanded={expanded} onToggle={() => toggleProject(p.id)} />
           {expanded && views.map(v => {
             const Icon = viewIcon(v.kind);
@@ -392,7 +395,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
     if (!view || !team || (view.config.locked && !('locked' in patch))) return;
     const mode = 'locked' in patch || 'privateTo' in patch ? 'team' : saveMode(store, 'viewSettings');
     if (mode === 'mine') store.setPref(`view:${view.id}`, {...view.mine, ...patch});
-    else if (mode === 'team') store.updateView(view.id, {config: {...team.config, ...patch}});
+    else store.updateView(view.id, {config: {...team.config, ...patch}});
   };
   const currentSprint = useMemo(() => { const t = store.today; const list = store.sprints.filter(s => s.projectId === project.id); return (list.find(s => s.start <= t && t <= s.end) ?? null)?.id ?? null; }, [store.sprints, store.today, project.id]);
   const filtered = useMemo(() => applyFilters(items, config, {project, today: store.today, currentSprint}), [items, config, project, store.today, currentSprint]);
@@ -436,7 +439,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
             const list = views.filter(x => x.id !== dragView); list.splice(list.findIndex(x => x.id === v.id), 0, views.find(x => x.id === dragView)!);
             const order = saveMode(store, 'viewOrder');
             if (order === 'mine') store.setPref(`views:${project.id}`, list.map(x => x.id));
-            else if (order === 'team') store.reorderViews(project.id, list.map(x => x.id));
+            else store.reorderViews(project.id, list.map(x => x.id));
             setDragView(null); setOverView(null);
           }}><ViewTab store={store} view={v} active={!settings && view?.id === v.id} project={project} /></span>)}
         <AddView store={store} project={project} />
@@ -445,7 +448,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
       </div>
     </header>
     {!settings && view?.mine && <div className="locked-note mine-note">Your own changes to this view: only you see them.
-      {store.settings.admin || saveMode(store, 'viewSettings') !== 'none' ? <button className="btn ghost small" title="Make your changes the team setup for this view" onClick={() => { store.updateView(view.id, {config: {...(team?.config ?? {}), ...view.mine}}); store.setPref(`view:${view.id}`, null); }}>Save for everyone</button> : null}
+      {canShare(store, 'viewSettings') ? <button className="btn ghost small" title="Make your changes the team setup for this view" onClick={() => { store.updateView(view.id, {config: {...(team?.config ?? {}), ...view.mine}}); store.setPref(`view:${view.id}`, null); }}>Save for everyone</button> : null}
       <button className="btn ghost small" title="Go back to the team setup" onClick={() => store.setPref(`view:${view.id}`, null)}>Reset to team view</button></div>}
     {!settings && view && view.config.locked && <div className="locked-note"><Lock size={12} /> This view is locked, so its filters, sort and columns stay as they are. Unlock it from the view's ... menu.</div>}
     {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
@@ -469,6 +472,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
 }
 
 function ViewTab({store, view, active, project}: {store: Store; view: View; active: boolean; project: Project}) {
+  const teamConfig = () => store.views.find(v => v.id === view.id)?.config ?? view.config;
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(view.name);
@@ -484,8 +488,8 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
       </button>
       <Popover open={menu} onClose={() => setMenu(false)}>
         <button className="pop-row" onClick={() => { setMenu(false); setEditing(true); }}><Pencil size={14} /> Rename</button>
-        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...view.config, locked: !view.config.locked}}); }}>{view.config.locked ? <><Unlock size={14} /> Unlock view</> : <><Lock size={14} /> Lock view (keep filters, sort and columns)</>}</button>
-        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...view.config, privateTo: view.config.privateTo ? undefined : getMe() || undefined}}); }}>{view.config.privateTo ? <><Users size={14} /> Share with everyone</> : <><EyeOff size={14} /> Make private (only you see it)</>}</button>
+        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...teamConfig(), locked: !view.config.locked}}); }}>{view.config.locked ? <><Unlock size={14} /> Unlock view</> : <><Lock size={14} /> Lock view (keep filters, sort and columns)</>}</button>
+        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...teamConfig(), privateTo: view.config.privateTo ? undefined : getMe() || undefined}}); }}>{view.config.privateTo ? <><Users size={14} /> Share with everyone</> : <><EyeOff size={14} /> Make private (only you see it)</>}</button>
         <button className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(project.id, view.name + ' copy', view.kind, view.config); if (v) go({page: 'project', id: project.id, view: v.id}); }}><Copy size={14} /> Duplicate</button>
         <button className="pop-row" onClick={async () => {
           setMenu(false);

@@ -12,7 +12,7 @@ export type ViewProps = {
 };
 
 /** List row fields that can be dragged into a new order. Time and due date keep their place. */
-export const ROW_FIELDS = ['priority', 'assignees', 'status'] as const;
+const ROW_FIELDS = ['priority', 'assignees', 'status'] as const;
 export type RowField = typeof ROW_FIELDS[number];
 /** The saved order for a view: unknown ids dropped, missing ones added at the end. */
 export const rowFieldsOf = (c: ViewConfig): RowField[] => [...new Set([...(c.rowFields ?? []).filter((f): f is RowField => (ROW_FIELDS as readonly string[]).includes(f)), ...ROW_FIELDS])];
