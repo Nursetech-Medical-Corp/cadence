@@ -10,12 +10,13 @@ type Kind = 'p' | 'h1' | 'h2' | 'h3' | 'bullet' | 'number' | 'todo' | 'quote' | 
 type Block = {id: string; kind: Kind; text: string; checked?: boolean; indent: number};
 const uid = () => Math.random().toString(36).slice(2, 9);
 
-const MENU: {kind: Kind; label: string; hint: string; icon: typeof Text}[] = [
+// keys: extra words you can type after / to find the block.
+const MENU: {kind: Kind; label: string; hint: string; icon: typeof Text; keys?: string}[] = [
   {kind: 'p', label: 'Text', hint: 'Plain paragraph', icon: Text},
   {kind: 'h1', label: 'Heading 1', hint: '#', icon: Heading1}, {kind: 'h2', label: 'Heading 2', hint: '##', icon: Heading2}, {kind: 'h3', label: 'Heading 3', hint: '###', icon: Heading3},
-  {kind: 'bullet', label: 'Bulleted list', hint: '-', icon: List}, {kind: 'number', label: 'Numbered list', hint: '1.', icon: ListOrdered},
-  {kind: 'todo', label: 'To-do', hint: '[]', icon: CheckSquare}, {kind: 'quote', label: 'Quote', hint: '>', icon: Quote},
-  {kind: 'code', label: 'Code', hint: '```', icon: Code}, {kind: 'divider', label: 'Divider', hint: '---', icon: Minus},
+  {kind: 'bullet', label: 'Bulleted list', hint: '-', icon: List, keys: 'bullet list ul'}, {kind: 'number', label: 'Numbered list', hint: '1.', icon: ListOrdered, keys: 'number ordered ol'},
+  {kind: 'todo', label: 'Checkbox (to-do)', hint: '[]', icon: CheckSquare, keys: 'todo check checkbox checklist task tick'}, {kind: 'quote', label: 'Quote', hint: '>', icon: Quote},
+  {kind: 'code', label: 'Code', hint: '```', icon: Code}, {kind: 'divider', label: 'Divider', hint: '---', icon: Minus, keys: 'line separator hr'},
 ];
 
 export function parseMarkdown(md: string): Block[] {
@@ -136,7 +137,7 @@ export function BlockEditor({value, onSave, placeholder = 'Type / for blocks, or
   const update = (id: string, patch: Partial<Block>) => setBlocks(bs => bs.map(b => b.id === id ? {...b, ...patch} : b));
   const insertAfter = (id: string, b: Block) => setBlocks(bs => { const n = bs.findIndex(x => x.id === id); const c = [...bs]; c.splice(n + 1, 0, b); return c; });
   const idx = (id: string) => blocks.findIndex(b => b.id === id);
-  const options = useMemo(() => menu ? MENU.filter(m => m.label.toLowerCase().includes(menu.q.toLowerCase())) : [], [menu]);
+  const options = useMemo(() => menu ? MENU.filter(m => (m.label + ' ' + (m.keys ?? '')).toLowerCase().includes(menu.q.toLowerCase())) : [], [menu]);
   const choose = (id: string, kind: Kind) => {
     setMenu(null);
     if (kind === 'divider') { update(id, {kind: 'divider', text: ''}); const nb = {id: uid(), kind: 'p' as Kind, text: '', indent: 0}; insertAfter(id, nb); setFocus({id: nb.id}); return; }
@@ -203,7 +204,7 @@ export function BlockEditor({value, onSave, placeholder = 'Type / for blocks, or
       if (text === '---') { choose(b.id, 'divider'); return; }
     }
     update(b.id, {text});
-    if (text.startsWith('/') && !text.includes(' ')) setMenu({id: b.id, q: text.slice(1), sel: 0}); else if (menu?.id === b.id) setMenu(null);
+    if ((text.startsWith('/') || text.startsWith('\\')) && !text.includes(' ')) setMenu({id: b.id, q: text.slice(1), sel: 0}); else if (menu?.id === b.id) setMenu(null);
     // "[[" starts an item link: show matching items, Enter or click inserts [[KEY-12]].
     const m = /\[\[([^\]]*)$/.exec(text);
     setLinking(m ? {id: b.id, q: m[1], sel: 0} : null);

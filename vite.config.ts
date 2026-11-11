@@ -7,6 +7,9 @@ export default defineConfig(({mode}) => {
   return {
     // cors off: other sites and other localhost ports must not read or write the API.
     server: {host: '127.0.0.1', port: 5190, strictPort: true, cors: false},
+    // Scan every source file at startup, including pages that load on first use, so the dev server never
+    // discovers a dependency mid-session and serves a second copy of React ("reading 'useState' of null").
+    optimizeDeps: {entries: ['index.html', 'src/**/*.tsx']},
     plugins: [{
       name: 'tasks-api',
       configureServer(server) {
