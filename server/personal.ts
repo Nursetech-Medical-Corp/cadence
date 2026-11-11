@@ -2,8 +2,8 @@
 // Export holds only what that person can see (spaces, items, comments, sprints), their own time, their private
 // views and their layout preferences, so it is safe to hand to that person or take to another server.
 // Import merges: preferences are mapped onto spaces and views here by name, and the person's personal spaces are
-// recreated (or topped up) as personal spaces. Shared spaces are never changed by a personal import; the
-// workspace backup is the source of truth for those.
+// recreated (or topped up, only when nobody else has access) as personal spaces. A personal import never changes
+// shared spaces, other people's views or anyone else's preferences; the workspace backup covers those.
 import type {Item, Project, View} from '../src/types.ts';
 import {PRIORITIES} from '../src/types.ts';
 import {personalAccess} from './auth.ts';
@@ -48,9 +48,14 @@ export function importMine(tasks: Tasks, actor: string, dump: MyExport, what: 'p
 
   // Personal spaces: recreate missing ones, add items that are not there yet (matched by title and parent title).
   if (what === 'all') for (const s of dump.spaces.filter(x => x.personal && x.project.settings.access?.members?.[dump.person.id])) {
-    let p = here.find(x => x.name === s.project.name && x.settings.access?.private && x.settings.access.members[actor]);
+    // Only top up a space that is yours alone (private, you are the only member, nobody else invited). Anything
+    // others can see is left untouched, and the restore goes into a new personal space instead.
+    const solelyMine = (x: Project) => !!x.settings.access?.private && x.settings.access.default === 'none'
+      && Object.keys(x.settings.access.members).length === 1 && x.settings.access.members[actor] === 'admin';
+    let p = here.find(x => x.name === s.project.name && solelyMine(x));
     if (!p) {
-      p = tasks.createProject({name: s.project.name, statuses: s.project.statuses, types: s.project.types, fields: s.project.fields,
+      const taken = here.some(x => x.name === s.project.name);
+      p = tasks.createProject({name: taken ? `${s.project.name} (restored)` : s.project.name, statuses: s.project.statuses, types: s.project.types, fields: s.project.fields,
         settings: {...s.project.settings, access: personalAccess(actor), rollup: undefined}, noViews: true});
       report.spacesCreated++;
     }
@@ -82,6 +87,7 @@ export function importMine(tasks: Tasks, actor: string, dump: MyExport, what: 'p
       viewMap.set(v.id, nv.id); report.viewsAdded++;
     }
   }
+  // From here on only this person's own preferences change: nothing in shared spaces, views or items.
 
   // Shared spaces: match by name only, to carry layout preferences over.
   for (const s of dump.spaces) {

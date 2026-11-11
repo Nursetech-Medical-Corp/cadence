@@ -6,20 +6,24 @@
 // 3. JSON import: replaces the workspace after taking a snapshot first, so a restore can be undone.
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
-import type {Db} from './db.ts';
+import {tmpdir} from 'node:os';
+import {openDb, type Db} from './db.ts';
 import {getWorkspace, saveWorkspace, type Workspace} from './auth.ts';
 
 // Exports include history, AI work logs, approvals, templates, file records, personal layouts and workspace settings.
 // Secrets (passwords, sessions, tokens, Google keys) never leave.
 const TABLES = ['people', 'projects', 'sprints', 'views', 'items', 'comments', 'time_entries', 'notifications', 'activity', 'work_log', 'approvals', 'templates', 'files', 'prefs'] as const;
 const DIR = () => process.env.TASKS_BACKUPS ?? 'data/backups';
+export const backupDir = (dir?: string) => dir ?? DIR();
 const SETTINGS_FILE = (dir: string) => join(dir, 'settings.json');
 
 export type BackupSettings = {
   enabled: boolean; intervalHours: number;
   keepRecent: number; keepDaily: number; keepWeekly: number; keepMonthly: number;
+  /** Where snapshots go. 'local+cloud' (default) also sends each one, encrypted, to the cloud bucket when one is set up. */
+  target: 'local' | 'local+cloud';
 };
-export const DEFAULT_SETTINGS: BackupSettings = {enabled: true, intervalHours: 6, keepRecent: 8, keepDaily: 14, keepWeekly: 8, keepMonthly: 12};
+export const DEFAULT_SETTINGS: BackupSettings = {enabled: true, intervalHours: 6, keepRecent: 8, keepDaily: 14, keepWeekly: 8, keepMonthly: 12, target: 'local+cloud'};
 
 export function getSettings(dir = DIR()): BackupSettings {
   try { return {...DEFAULT_SETTINGS, ...JSON.parse(readFileSync(SETTINGS_FILE(dir), 'utf8'))}; } catch { return DEFAULT_SETTINGS; }
@@ -30,6 +34,7 @@ export function saveSettings(patch: Partial<BackupSettings>, dir = DIR()) {
     if (!(Number.isFinite(s[k]) && s[k] >= 0)) throw new Error(`${k} must be a number of 0 or more`);
   }
   if (s.intervalHours < 0.25) throw new Error('Interval must be at least 15 minutes');
+  if (s.target !== 'local' && s.target !== 'local+cloud') throw new Error('Target must be local or local+cloud');
   mkdirSync(dirname(SETTINGS_FILE(dir)), {recursive: true});
   writeFileSync(SETTINGS_FILE(dir), JSON.stringify(s, null, 2));
   return s;
@@ -53,6 +58,30 @@ export function listSnapshots(dir = DIR()): Snap[] {
     const st = statSync(join(dir, name));
     return {name, bytes: st.size, created: st.mtime.toISOString(), reason: /-(auto|manual|before-restore)\.db$/.exec(name)?.[1] ?? 'auto'};
   }).sort((a, b) => b.created.localeCompare(a.created));
+}
+
+/** A snapshot described from its file name alone (cloud copies have no local file time). */
+export function snapFromName(name: string, bytes = 0): Snap | null {
+  const m = /tasks-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:-\d+)?-(auto|manual|before-restore)\.db/.exec(name);
+  return m ? {name, bytes, created: `${m[1]}T${m[2]}:${m[3]}:${m[4]}.000Z`, reason: m[5]} : null;
+}
+
+/**
+ * Restores a snapshot database file into the live workspace through the same path as a JSON restore: a
+ * before-restore snapshot is taken first, so the restore itself can be undone. The file is copied before it is
+ * opened, so the snapshot is never changed. Accounts and passwords live elsewhere and are not touched.
+ */
+export function restoreSnapshotFile(db: Db, file: string, dir = DIR()) {
+  const tmp = join(tmpdir(), `cadence-restore-${process.pid}-${Date.now()}.db`);
+  copyFileSync(file, tmp);
+  let src: Db | null = null;
+  try {
+    src = openDb(tmp);
+    return importAll(db, exportAll(src) as Parameters<typeof importAll>[1], dir);
+  } finally {
+    try { (src as unknown as {close?: () => void})?.close?.(); } catch { /* already closed */ }
+    for (const f of [tmp, `${tmp}-wal`, `${tmp}-shm`]) rmSync(f, {force: true});
+  }
 }
 
 /** Which auto snapshots the policy keeps, and why. Exported for tests and the settings preview. */

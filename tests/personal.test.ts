@@ -101,3 +101,31 @@ test('people without the views permission can still keep private views of their 
     assert.equal((await call(`/views/${v.json.id}`, {method: 'DELETE', cookie: m})).status, 200);
   } finally { server.close(); }
 });
+
+test('rollbacks are for signed-in admins only; personal imports never touch what others can see', async () => {
+  const {tasks, server, call, member, a, m} = await harness();
+  try {
+    const snaps = (await call('/backups', {method: 'POST', cookie: a})).json;
+    const name = snaps.file.split('/').pop();
+    assert.equal((await call('/backups/restore', {method: 'POST', body: {name}, cookie: m})).status, 403);
+    assert.equal((await call('/backups/restore', {method: 'POST', body: {name: '../../etc/passwd'}, cookie: a})).status, 400);
+    assert.equal((await call('/import', {method: 'POST', body: {}, cookie: m})).status, 403);
+    const shared = tasks.listProjects().find(x => !x.settings.rollup)!;
+    tasks.createItem({projectId: shared.id, title: 'Added later'});
+    const r = await call('/backups/restore', {method: 'POST', body: {name}, cookie: a});
+    assert.equal(r.status, 200);
+    assert.ok(!tasks.listItems({projectId: shared.id}).some(i => i.title === 'Added later'), 'rolled back');
+
+    // A personal space shared with someone else is not topped up by an import; a new one is made instead.
+    const mine = (await call('/projects', {method: 'POST', body: {name: 'Shared notes', personal: true}, cookie: m})).json;
+    await call('/items', {method: 'POST', body: {projectId: mine.id, title: 'One'}, cookie: m});
+    const dump = (await call('/me/export', {cookie: m})).json;
+    const admin = tasks.listPeople().find(p => p.id !== member.id)!;
+    await call(`/projects/${mine.id}`, {method: 'PATCH', body: {settings: {...mine.settings, access: {...mine.settings.access, members: {...mine.settings.access.members, [admin.id]: 'editor'}}}}, cookie: m});
+    const before = {shared: tasks.listItems({projectId: shared.id}).length, mine: tasks.listItems({projectId: mine.id}).length, views: tasks.listViews(shared.id).length};
+    const rep = (await call('/me/import', {method: 'POST', body: {data: dump}, cookie: m})).json;
+    assert.equal(rep.spacesCreated, 1);
+    assert.ok(tasks.listProjects().some(x => x.name === 'Shared notes (restored)'));
+    assert.deepEqual({shared: tasks.listItems({projectId: shared.id}).length, mine: tasks.listItems({projectId: mine.id}).length, views: tasks.listViews(shared.id).length}, before);
+  } finally { server.close(); }
+});

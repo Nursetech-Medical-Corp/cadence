@@ -7,14 +7,14 @@ import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:f
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
-import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, retention, saveSettings, snapshot} from './backup.ts';
+import {backupDir, exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, restoreSnapshotFile, retention, saveSettings, snapFromName, snapshot} from './backup.ts';
 import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {exportMine, importMine} from './personal.ts';
-import {cloudStatus, uploadSnapshot} from './cloudbackup.ts';
+import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudbackup.ts';
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
@@ -106,7 +106,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
-  const auto = () => { try { const f = maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); if (f) void uploadSnapshot(info.id, f); } catch (e) { console.error('Snapshot failed', e); } };
+  const auto = () => { try { const f = maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); if (f) void uploadSnapshot(info.id, f, getSettings(bdir)); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
   setInterval(auto, 10 * 60 * 1000).unref();
   // Due-date automations and sprint rollover, checked on start and hourly.
@@ -596,16 +596,32 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         res.setHeader('content-disposition', `attachment; filename="tasks-export-${new Date().toISOString().slice(0, 10)}.json"`);
         return send(res, 200, exportAll(tasks.db));
       }
-      if (a === 'import' && m === 'POST') { needAdmin(); const r = importAll(tasks.db, body, bdir); migrate(tasks.db); tasks.emit({kind: 'refresh'}); return send(res, 200, r); }
+      if (a === 'import' && m === 'POST') { if (bearer) throw new Denied('Restores are done by an admin in the app, not with a token'); needAdmin(); const r = importAll(tasks.db, body, bdir); migrate(tasks.db); tasks.emit({kind: 'refresh'}); void uploadSnapshot(info.id, r.snapshotBefore, getSettings(bdir)); return send(res, 200, r); }
       if (a === 'backup-settings') {
         if (m === 'GET') return send(res, 200, getSettings(bdir));
         if (m === 'PUT') { needAdmin(); try { return send(res, 200, saveSettings(body, bdir)); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); } }
       }
       if (a === 'backups') {
-        if (m === 'GET') return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
-        if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); const file = snapshot(tasks.db, 'manual', bdir); const cloud = await uploadSnapshot(info.id, file); return send(res, 201, {file, cloud, cloudStatus: cloudStatus(info.id)}); }
+        if (m === 'GET' && !b) return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
+        if (m === 'POST' && !b) { needAdmin(); mirrorUploads(tasks.dataDir, bdir); const file = snapshot(tasks.db, 'manual', bdir); const cloud = await uploadSnapshot(info.id, file, getSettings(bdir)); return send(res, 201, {file, cloud, cloudStatus: cloudStatus(info.id)}); }
       }
-      if (a === 'cloud-backup' && m === 'GET') { needAdmin(); return send(res, 200, cloudStatus(info.id));
+      if (a === 'cloud-backup' && m === 'GET') { needAdmin(); return send(res, 200, cloudStatus(info.id)); }
+      // Rolling back the whole workspace: signed-in admins only, never API tokens or AI agents.
+      // A before-restore snapshot is taken first (and sent to the cloud), so every restore can be undone.
+      const restoreGuard = () => { if (bearer) throw new Denied('Restores are done by an admin in the app, not with a token'); needAdmin(); };
+      const afterRestore = (r: {snapshotBefore: string}) => { migrate(tasks.db); tasks.emit({kind: 'refresh'}); void uploadSnapshot(info.id, r.snapshotBefore, getSettings(bdir)); return r; };
+      if (a === 'cloud-backups' && !b && m === 'GET') { needAdmin(); return send(res, 200, await listCloud(info.id, getSettings(bdir))); }
+      if (a === 'cloud-backups' && b === 'restore' && m === 'POST') {
+        restoreGuard();
+        return send(res, 200, afterRestore(await restoreFromCloud(tasks.db, info.id, String(body.key ?? ''), bdir)));
+      }
+      if (a === 'backups' && b === 'restore' && m === 'POST') {
+        restoreGuard();
+        const name = String(body.name ?? '');
+        if (!snapFromName(name) || /[\\/]/.test(name)) throw new Invalid('Pick a snapshot from the list');
+        const file = join(backupDir(bdir), name);
+        if (!existsSync(file)) throw new NotFound('Snapshot not found');
+        return send(res, 200, afterRestore(restoreSnapshotFile(tasks.db, file, bdir)));
       }
 
       // My data: everything this person can see plus their layouts, and a merging restore of it.

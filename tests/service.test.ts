@@ -429,7 +429,7 @@ test('backup retention keeps recent, then one per day, week and month', async ()
   const {retention} = await import('../server/backup.ts');
   const snaps = Array.from({length: 120}, (_, n) => ({name: `s${n}`, bytes: 1, reason: 'auto', created: new Date(Date.UTC(2026, 10, 10, 12) - n * 12 * 3600_000).toISOString()}));
   snaps.push({name: 'manual', bytes: 1, reason: 'manual', created: '2025-01-01T00:00:00.000Z'});
-  const kept = retention(snaps, {enabled: true, intervalHours: 12, keepRecent: 4, keepDaily: 7, keepWeekly: 4, keepMonthly: 3}).filter(s => s.keptAs);
+  const kept = retention(snaps, {enabled: true, intervalHours: 12, keepRecent: 4, keepDaily: 7, keepWeekly: 4, keepMonthly: 3, target: 'local'}).filter(s => s.keptAs);
   assert.ok(kept.some(s => s.name === 'manual'), 'manual never pruned');
   assert.equal(kept.filter(s => s.keptAs === 'recent').length, 4);
   assert.ok(kept.length < 25, `kept ${kept.length}`);
