@@ -5,10 +5,8 @@ Paste this whole file into a new Cowork chat as the first message. Work one step
 ## Connect first
 
 - Cadence MCP is the connector. It talks to the same server and data as the REST API, with the same permission checks. MCP is the better fit for Claude: it has planning tools (estimate_missing, replan, forecast, sprints, templates) built in.
-- In Cadence: Team and permissions, AI agents and tokens, create a token for an admin person (or an "AI agent" person with admin role). Copy it (shown once, starts `tt_`).
-- In Claude: Settings, Connectors, Add custom connector, URL:
-  `https://<cadence host>/mcp?ws=<workspace id>&key=tt_...`
-  (The Team page shows the exact URL after the token is made. Needs the server updated to the version with `?key=` support.)
+- In Claude: Settings, Connectors, Add custom connector, paste `https://<cadence host>/mcp`, then sign in to Cadence and click Allow (OAuth). Claude acts as you, with your permissions.
+- Fallback for clients without OAuth: a `tt_` token from Team and permissions, as `https://<cadence host>/mcp?ws=<workspace id>&key=tt_...`.
 - First calls: `get_guide`, then `get_workspace`.
 - Also connect Google Drive (SOPs, recurring task lists, financial model).
 
