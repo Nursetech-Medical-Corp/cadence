@@ -21,6 +21,7 @@ import {MyWork} from './MyWork.tsx';
 import {NotifySettings} from './NotifySettings.tsx';
 import {setBadge} from './device.ts';
 import {AcceptInvite, EmailLinkSignIn, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
+import {resumeConnect} from './ConnectedApps.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
 import {ContextMenus} from './ContextMenu.tsx';
@@ -91,7 +92,11 @@ export function App() {
   const [me, setMeState] = useState(getMe);
   // Sign-in state. When sign-in is required the server decides who you are.
   const [auth, setAuth] = useState<Me | null>(null);
-  useEffect(() => { api<Me>('/auth/me').then(a => { setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); } }).catch(() => {}); }, []);
+  useEffect(() => { api<Me>('/auth/me').then(a => {
+    // Signed in on the way to connecting an AI app (server/oauth.ts): go back to its consent page, whichever way they signed in.
+    if (a.account && resumeConnect()) return;
+    setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); }
+  }).catch(() => {}); }, []);
   const store = useStore(me);
   const storeRef = useRef(store);
   storeRef.current = store;

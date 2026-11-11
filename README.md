@@ -44,7 +44,7 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 ### Passwordless sign-in
 People sign in with "Continue with Google" or "Email me a sign-in link"; a password stays available behind "Use a password instead". Only existing accounts can sign in this way; new people join through an invite (a name is enough, a password is optional). Settings are environment variables (see `.env.example`); with none of them set, sign-in works with passwords as before.
 
-- `PUBLIC_URL`: the address people use, for example `https://cadence.example.com`. Every emailed link (sign-in links, invites) starts with it, never with the request's Host or Origin. Needed for both new sign-in methods.
+- `PUBLIC_URL`: the address people use, for example `https://cadence.example.com`. Every emailed link (sign-in links, invites) starts with it, never with the request's Host or Origin. Needed for both new sign-in methods, and for connecting Claude by signing in (docs/MCP.md).
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: a Google OAuth client of type Web application with the redirect URI `{PUBLIC_URL}/auth/google/callback`. Shows the Google button. This is separate from the Google client on the Team page, which connects the Gmail sender and calendars.
 - `STAFF_GOOGLE_DOMAIN`: accounts on this domain sign in only with Google (no email link, no password), so Google Workspace 2-Step Verification covers them. Applies only while Google is configured. API tokens (MCP) are not affected.
 - `SMTP_HOST`, `SMTP_PORT` (465 implicit TLS, 587 STARTTLS), `SMTP_FROM`, optional `SMTP_USER` and `SMTP_PASS`: system mail for sign-in links and invites. Without SMTP, mail goes through the main workspace's connected Gmail sender; without either, sign-in links are printed in the server log. The email-link button shows when mail can go out, or when `PUBLIC_URL` is a localhost address (links in the log, for development).
@@ -106,7 +106,7 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - A template gallery (vendor onboarding, compliance routines, new hire onboarding, AI agency work, a training checklist) and portable template packs you can export and import.
 
 ### AI agents
-- Built-in MCP server (53 tools) over stdio and HTTP, with per-person tokens. See [docs/MCP.md](docs/MCP.md).
+- Built-in MCP server (53 tools) over stdio and HTTP. Add Cadence to Claude by pasting one URL and signing in (OAuth), or use per-person tokens. See [docs/MCP.md](docs/MCP.md).
 - People are human or AI. Mark work Human, AI or Either.
 - AI work loop: an agent claims a task, a person accepts, the agent logs every step with links and screenshots, submits a report, and a person approves it or sends it back. AI agents can never approve their own work or mark it done.
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
