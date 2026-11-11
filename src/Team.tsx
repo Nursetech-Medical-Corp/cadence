@@ -348,7 +348,7 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
         <b>Copy this token now. It will not be shown again.</b>
         <pre className="code">{fresh}</pre>
         <button className="btn small" onClick={() => navigator.clipboard.writeText(fresh)}><Copy size={12} /> Copy</button>
-        <div className="small muted" style={{marginTop: 8}}>Connect an AI app with MCP over HTTP: URL <code>{mcpUrl}</code>, header <code>Authorization: Bearer {fresh.slice(0, 8)}...</code>. Or call the REST API with the same header. The agent should start with the get_guide tool.</div>
+        <div className="small muted" style={{marginTop: 8}}>Connect an AI app with MCP over HTTP: URL <code>{mcpUrl}</code>, header <code>Authorization: Bearer {fresh.slice(0, 8)}...</code>. For Claude or Cowork custom connectors (no headers), use <code>{mcpUrl}&amp;key={fresh}</code> and keep it private like a password. Or call the REST API with the same header. The agent should start with the get_guide tool.</div>
       </div>}
       {tokens.map(t => (
         <div key={t.id} className="set-item">
