@@ -301,13 +301,14 @@ test('my work buckets by due date', () => {
     {overdue: ['late'], today: ['now'], thisWeek: ['soon'], later: ['far'], noDate: ['none']});
 });
 
-test('timer: one running per person, stop records minutes', () => {
+test('timer: one running per person, stop records the time', () => {
   const {t, dave, p} = setup();
   const a = t.createItem({projectId: p.id, title: 'A'}), b = t.createItem({projectId: p.id, title: 'B'});
   t.startTimer(a.id, dave.id);
+  t.db.prepare('update time_entries set start = ? where end is null').run(new Date(Date.now() - 120_000).toISOString());
   t.startTimer(b.id, dave.id);
   assert.equal(t.runningTimer(dave.id)?.itemId, b.id);
-  assert.equal(t.listTime({itemId: a.id})[0].minutes, 1);
+  assert.ok(Math.abs(t.listTime({itemId: a.id})[0].minutes! - 2) < 0.05);
 });
 
 test('MCP: agent creates, updates by key and summarizes', async () => {
@@ -623,4 +624,35 @@ test('time: log by start and end, totals per item for the column, bad ranges ref
   assert.throws(() => t.logTime({itemId: i.id, person: dave.id, start: '2026-11-10T16:00:00Z', end: '2026-11-10T15:00:00Z'}), /end after the start/);
   assert.throws(() => t.logTime({itemId: i.id, person: dave.id, start: 'soon', end: 'later'}), /must be times/);
   assert.throws(() => t.logTime({itemId: i.id, person: dave.id, minutes: 0}), /positive/);
+});
+
+test('timing: AI work is timed from its first step to submit, reviews are timed, seconds are kept', async () => {
+  const {migrateAiWork} = await import('../server/aiwork.ts');
+  const {t, dave, p} = setup();
+  migrateAiWork(t);
+  const bot = t.createPerson({name: 'secretary-bot-1'});
+  t.db.prepare("update people set kind = 'ai' where id = ?").run(bot.id);
+  const task = t.createItem({projectId: p.id, title: 'Draft the summary', fields: {worker: 'ai'}}, dave.id);
+  const back = (secs: number) => t.db.prepare('update time_entries set start = ? where end is null').run(new Date(Date.now() - secs * 1000).toISOString());
+  t.claimTask(task.id, bot.id);
+  t.decideClaim(task.id, dave.id, true);
+  assert.equal(t.runningTimer(bot.id), null, 'accepting does not start the clock');
+  t.logWork(task.id, bot.id, 'step', 'Read the sources');
+  assert.equal(t.runningTimer(bot.id)?.itemId, task.id, 'first step starts it');
+  back(95);
+  t.submitWork(task.id, bot.id, 'Summary written, 2 pages');
+  const ai = t.listTime({itemId: task.id, person: bot.id})[0];
+  assert.ok(Math.abs(ai.minutes! - 95 / 60) < 0.05, 'kept to the second, not rounded up to whole minutes');
+  assert.match(ai.note!, /^Submitted: Summary written/);
+  // A person reviews: their review clock stops on the decision.
+  t.startTimer(task.id, dave.id, 'review');
+  back(40);
+  t.reviewWork(task.id, dave.id, true, 'Looks good');
+  const rv = t.listTime({itemId: task.id, person: dave.id})[0];
+  assert.equal(rv.kind, 'review');
+  assert.equal(rv.note, 'Review: approved');
+  // A stop under a second leaves nothing behind.
+  t.startTimer(task.id, dave.id);
+  assert.equal(t.stopTimer(dave.id), null);
+  assert.equal(t.listTime({itemId: task.id, person: dave.id}).length, 1);
 });

@@ -228,8 +228,8 @@ export function useStore(me: string) {
       setSprints(prev => prev.filter(s => s.id !== id));
       return api(`/sprints/${id}`, {method: 'DELETE'}).catch(fail);
     },
-    async startTimer(itemId: string) {
-      try { setRunning(await api<TimeEntry>('/time/start', {method: 'POST', body: {itemId}})); } catch (e) { fail(e); }
+    async startTimer(itemId: string, kind: 'work' | 'review' = 'work') {
+      try { setRunning(await api<TimeEntry>('/time/start', {method: 'POST', body: {itemId, kind}})); } catch (e) { fail(e); }
     },
     async stopTimer() {
       try { await api('/time/stop', {method: 'POST', body: {}}); setRunning(null); } catch (e) { fail(e); }

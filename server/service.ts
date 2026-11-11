@@ -553,28 +553,31 @@ export class Tasks {
     if (q.person) { where.push('person = ?'); args.push(q.person); }
     return this.db.prepare(`select * from time_entries ${where.length ? 'where ' + where.join(' and ') : ''} order by start desc`).all(...args).map(r => ({
       id: r.id as string, itemId: r.item_id as string, person: r.person as string, start: r.start as string,
-      end: (r.end as string) ?? null, minutes: (r.minutes as number) ?? null, note: (r.note as string) ?? null,
+      end: (r.end as string) ?? null, minutes: (r.minutes as number) ?? null, note: (r.note as string) ?? null, kind: r.kind === 'review' ? 'review' : 'work',
     }));
   }
   runningTimer(person: string) {
     return this.listTime({person}).find(e => e.end === null) ?? null;
   }
-  startTimer(itemId: string, person: string) {
+  startTimer(itemId: string, person: string, kind: 'work' | 'review' = 'work') {
     this.item(itemId); this.person(person);
     this.stopTimer(person);
-    const e: TimeEntry = {id: id(), itemId, person, start: now(), end: null, minutes: null, note: null};
-    this.db.prepare('insert into time_entries (id,item_id,person,start) values (?,?,?,?)').run(e.id, e.itemId, e.person, e.start);
+    const e: TimeEntry = {id: id(), itemId, person, start: now(), end: null, minutes: null, note: null, kind: kind === 'review' ? 'review' : 'work'};
+    this.db.prepare('insert into time_entries (id,item_id,person,start,kind) values (?,?,?,?,?)').run(e.id, e.itemId, e.person, e.start, e.kind);
     this.emit({kind: 'time', itemId});
     return e;
   }
-  stopTimer(person: string) {
+  /** Stops the running timer. Time is kept to the second; a run under a second is dropped. */
+  stopTimer(person: string, note?: string | null) {
     const run = this.runningTimer(person);
     if (!run) return null;
     const end = now();
-    const minutes = Math.max(1, Math.round((Date.parse(end) - Date.parse(run.start)) / 60000));
-    this.db.prepare('update time_entries set end = ?, minutes = ? where id = ?').run(end, minutes, run.id);
+    const seconds = Math.round((Date.parse(end) - Date.parse(run.start)) / 1000);
+    if (seconds < 1) { this.db.prepare('delete from time_entries where id = ?').run(run.id); this.emit({kind: 'time', itemId: run.itemId}); return null; }
+    const minutes = seconds / 60, n = note == null ? run.note : String(note).slice(0, 500);
+    this.db.prepare('update time_entries set end = ?, minutes = ?, note = ? where id = ?').run(end, minutes, n, run.id);
     this.emit({kind: 'time', itemId: run.itemId});
-    return {...run, end, minutes};
+    return {...run, end, minutes, note: n};
   }
   /** Logs time by minutes (on a date), or by a start and an end (then minutes is the span). */
   logTime(input: {itemId: string; person: string; minutes?: number; note?: string | null; date?: string; start?: string; end?: string}) {
@@ -587,7 +590,7 @@ export class Tasks {
     }
     if (!(minutes > 0)) throw new Invalid('Minutes must be positive');
     const note = input.note == null ? null : String(input.note).slice(0, 500);
-    const e: TimeEntry = {id: id(), itemId: input.itemId, person: input.person, start, end, minutes, note};
+    const e: TimeEntry = {id: id(), itemId: input.itemId, person: input.person, start, end, minutes, note, kind: 'work'};
     this.db.prepare('insert into time_entries (id,item_id,person,start,end,minutes,note) values (?,?,?,?,?,?,?)').run(e.id, e.itemId, e.person, e.start, e.end, e.minutes, e.note);
     this.emit({kind: 'time', itemId: input.itemId});
     return e;

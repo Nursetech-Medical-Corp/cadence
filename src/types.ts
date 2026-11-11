@@ -95,7 +95,8 @@ export type Item = {
 };
 
 export type Comment = {id: string; itemId: string; author: string; body: string; created: string; assignee?: string | null; resolved?: string | null};
-export type TimeEntry = {id: string; itemId: string; person: string; start: string; end: string | null; minutes: number | null; note: string | null};
+/** minutes can be fractional: timers record to the second. kind 'review' is time spent reviewing the task's work. */
+export type TimeEntry = {id: string; itemId: string; person: string; start: string; end: string | null; minutes: number | null; note: string | null; kind: 'work' | 'review'};
 export type Notification = {id: string; person: string; itemId: string | null; kind: string; text: string; actor: string | null; created: string; read: boolean};
 
 // 0 none, 1 urgent, 2 high, 3 medium, 4 low (sorted ascending with none last).

@@ -24,22 +24,26 @@ const toHHMM = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const label = (hhmm: string) => { const m = toMin(hhmm), h = Math.floor(m / 60); return `${h % 12 || 12}:${pad(m % 60)} ${h < 12 ? 'am' : 'pm'}`; };
 const QUARTERS = Array.from({length: 96}, (_, n) => toHHMM(n * 15));
 const nowHHMM = () => { const d = new Date(); return toHHMM(Math.floor((d.getHours() * 60 + d.getMinutes()) / 15) * 15); };
+/** Short spans show seconds (timers record them); totals elsewhere round down to minutes. */
+const shortSpan = (min: number) => min < 1 ? `${Math.round(min * 60)}s` : fmtMinutes(min);
+const clockOf = (iso: string, secs: boolean) => new Date(iso).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit', ...(secs ? {second: '2-digit'} : {})});
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
 
 /** Table and list cell: play or stop, then the total (or the running clock). Click the total for the full box. */
-export function TimeCell({item, store}: {item: Item; store: Store}) {
+/** compact: with no time yet, only a play button that shows on hover (board cards, list rows). */
+export function TimeCell({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
   const mine = store.running?.itemId === item.id ? store.running : null;
   const now = useNow(!!mine);
   const total = store.timeTotals.get(item.id) ?? 0;
   const [open, setOpen] = useState(false);
   return (
-    <span className="picker time-cell">
+    <span className={'picker time-cell' + (compact && !mine && !total ? ' idle' : '')} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}>
       <button className={'time-play' + (mine ? ' on' : '')} title={mine ? 'Stop timer' : 'Start timer'}
         onClick={e => { e.stopPropagation(); if (mine) store.stopTimer(); else store.startTimer(item.id); }}>
         {mine ? <Square size={8} fill="currentColor" /> : <Play size={9} fill="currentColor" />}
       </button>
       <button data-pop-trigger className={'time-total' + (mine ? ' on' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        {mine ? fmtClock(now - Date.parse(mine.start)) : total ? fmtMinutes(total) : <span className="time-add">Add time</span>}
+        {mine ? fmtClock(now - Date.parse(mine.start)) : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} className="time-pop"><TimeBox item={item} store={store} /></Popover>
     </span>
@@ -125,8 +129,8 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
             </button>
             {!shut && list.map(e => (
               <div key={e.id} className="time-entry">
-                <span className="grow">{when(e.start)}{e.end ? ` to ${new Date(e.end).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})}` : ''}{e.note && <span className="muted"> · {e.note}</span>}</span>
-                <b>{e.end ? fmtMinutes(e.minutes ?? 0) : <span className="time-live">running</span>}</b>
+                <span className="grow">{e.kind === 'review' && <span className="tag review-tag">review</span>} {when(e.start)}{(e.minutes ?? 0) < 10 ? `:${new Date(e.start).getSeconds().toString().padStart(2, '0')}` : ''}{e.end ? ` to ${clockOf(e.end, (e.minutes ?? 0) < 10)}` : ''}{e.note && <span className="muted"> · {e.note}</span>}</span>
+                <b>{e.end ? shortSpan(e.minutes ?? 0) : <span className="time-live">running</span>}</b>
                 {e.end && <button className="icon" title="Delete this entry" onClick={() => remove(e.id)}><Trash2 size={13} /></button>}
               </div>
             ))}

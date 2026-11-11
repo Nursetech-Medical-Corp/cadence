@@ -565,8 +565,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (!b && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.logTime({...body, person: ws.requireLogin ? actor : body.person ?? person})); }
         if (b === 'totals' && m === 'GET') { const iid = q('itemId') ?? ''; need(tasks.item(iid).projectId, 'view'); return send(res, 200, tasks.timeTotals(iid)); }
         if (b === 'running' && m === 'GET') return send(res, 200, person ? tasks.runningTimer(person) : null);
-        if (b === 'start' && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.startTimer(body.itemId, ws.requireLogin ? actor! : body.person ?? person)); }
-        if (b === 'stop' && m === 'POST') return send(res, 200, tasks.stopTimer(ws.requireLogin ? actor! : body.person ?? person));
+        if (b === 'start' && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.startTimer(body.itemId, ws.requireLogin ? actor! : body.person ?? person, body.kind === 'review' ? 'review' : 'work')); }
+        if (b === 'stop' && m === 'POST') return send(res, 200, tasks.stopTimer(ws.requireLogin ? actor! : body.person ?? person, body.note));
         if (b && m === 'DELETE') {
           const e = tasks.db.prepare('select person, item_id from time_entries where id = ?').get(b) as {person: string; item_id: string} | undefined;
           if (!e) throw new NotFound('Time entry not found');

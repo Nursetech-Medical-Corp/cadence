@@ -73,6 +73,8 @@ export function openDb(path = process.env.TASKS_DB ?? 'data/tasks.db') {
   const ccols = db.prepare('pragma table_info(comments)').all().map(r => r.name);
   if (!ccols.includes('assignee')) db.exec('alter table comments add column assignee text; alter table comments add column resolved text');
   db.exec('create index if not exists comments_assignee on comments(assignee) where resolved is null');
+  // Time entries: work, or reviewing someone's (often an AI's) work.
+  if (!db.prepare('pragma table_info(time_entries)').all().some(r => r.name === 'kind')) db.exec("alter table time_entries add column kind text not null default 'work'");
   return db;
 }
 

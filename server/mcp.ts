@@ -83,6 +83,12 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     if (!actor) throw new Error('Start the MCP server with --as <person> to comment');
     return tasks.addComment(tasks.findItem(i.item).id, actor, i.body, i.assignee ? personId(i.assignee) : null);
   });
+  const me = () => actor ?? (() => { throw new Error('Start the MCP server with --as <person>, or use a token'); })();
+  tool('start_timer', 'Start your timer on an item (stops any other timer you have running). Timers record to the second. Work you log on a task starts it for you.',
+    {item: z.string(), kind: z.enum(['work', 'review']).optional().describe('review: time spent reviewing the work on this item')}, false,
+    i => tasks.startTimer(tasks.findItem(i.item).id, me(), i.kind ?? 'work'));
+  tool('stop_timer', 'Stop your running timer, with an optional note such as the outcome. Submitting work stops it for you.', {note: z.string().optional()}, false,
+    i => tasks.stopTimer(me(), i.note) ?? {stopped: false, reason: 'No timer was running'});
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
     i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : (actor ?? (() => { throw new Error('Pass person, or start the MCP server with --as <person>'); })()), minutes: i.minutes, note: i.note, date: i.date}));
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));

@@ -48,6 +48,11 @@ export function log(tasks: Tasks, itemId: string, actor: string | null, kind: Lo
   const e: LogEntry = {id: id(), itemId, actor, at: now(), kind, text: text.slice(0, 20000), url};
   tasks.db.prepare('insert into work_log (id, item_id, actor, at, kind, text, url) values (?,?,?,?,?,?,?)').run(e.id, e.itemId, e.actor, e.at, e.kind, e.text, e.url);
   tasks.emit({kind: 'comment', itemId});
+  // Only once the agent is cleared to work: its claim accepted or sent back, or it was simply assigned.
+  if (actor && kind !== 'review' && kind !== 'result' && personKind(tasks, actor) === 'ai' && tasks.runningTimer(actor)?.itemId !== itemId) {
+    const i = tasks.item(itemId), st = review(i)?.state;
+    if (st === 'accepted' || st === 'changes' || (!st && i.assignees.includes(actor))) tasks.startTimer(itemId, actor);
+  }
   return e;
 }
 export function listLog(tasks: Tasks, itemId: string): LogEntry[] {
@@ -87,6 +92,7 @@ export function submit(tasks: Tasks, itemId: string, agent: string, report: stri
   if (r && !['accepted', 'changes'].includes(r.state) && !(r.state === 'claimed' && i.assignees.includes(agent))) throw new Invalid('Wait until a person accepts your claim');
   if (!r && !i.assignees.includes(agent)) throw new Invalid('Claim the task first, or be assigned to it');
   log(tasks, itemId, agent, 'result', report);
+  if (tasks.runningTimer(agent)?.itemId === itemId) tasks.stopTimer(agent, `Submitted: ${report.trim().slice(0, 300)}`);
   for (const p of humansToTell(tasks, i)) tasks.notifyPublic(p, agent, itemId, 'ai', `submitted "${i.title}" for your review`);
   if (missed.trim()) log(tasks, itemId, agent, 'missed', missed);
   return setReview(tasks, i, {state: 'submitted', by: agent, agent, at: now()}, {status: statusOf(tasks, i, 'review')}, agent);
@@ -97,6 +103,7 @@ export function reviewWork(tasks: Tasks, itemId: string, reviewer: string | null
   const i = tasks.item(itemId), r = review(i);
   if (!r || r.state !== 'submitted') throw new Invalid('Nothing is waiting for review on this task');
   log(tasks, itemId, reviewer, 'review', approve ? `Approved${comment ? ': ' + comment : ''}` : `Sent back: ${comment || 'needs changes'}`);
+  if (reviewer && tasks.runningTimer(reviewer)?.itemId === itemId) tasks.stopTimer(reviewer, approve ? 'Review: approved' : 'Review: sent back');
   if (comment.trim() && reviewer) tasks.addComment(itemId, reviewer, (approve ? 'Approved. ' : 'Changes requested. ') + comment);
   return setReview(tasks, i, {...r, state: approve ? 'approved' : 'changes', by: reviewer, at: now(), note: comment},
     {status: approve ? statusOf(tasks, i, 'done') : statusOf(tasks, i, 'doing')}, reviewer);

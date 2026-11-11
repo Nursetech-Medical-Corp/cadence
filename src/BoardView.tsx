@@ -1,3 +1,4 @@
+import {TimeCell} from './TimeTracker.tsx';
 import {useState} from 'react';
 import {colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
@@ -124,6 +125,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                     {blocked && <span className="small overdue" title="Blocked by unfinished work"><Link2 size={12} /> blocked</span>}
                     {i.tags.map(t => <span key={t} className="tag">{t}</span>)}
                     <span className="spacer" />
+                    <TimeCell item={i} store={store} compact />
                     <Avatars ids={i.assignees} people={store.people} size={20} />
                   </div>
                 </div>

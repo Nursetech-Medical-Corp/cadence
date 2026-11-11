@@ -51,6 +51,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     resolveComment: (cid) => need(projOfItem(tasks.comment(cid).itemId), 'comment'),
     reorderViews: (pid) => need(pid, 'views'),
     logTime: (i) => need(projOfItem(i.itemId), 'edit'),
+    startTimer: (itemId) => need(projOfItem(itemId), 'edit'),
     setDayMinutes: (_p, itemId) => need(projOfItem(itemId), 'edit'),
     applyToChildren: (id) => need(projOfItem(id), 'edit'),
     createSprint: (i) => need(i.projectId, 'sprints'),

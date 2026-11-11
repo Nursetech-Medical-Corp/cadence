@@ -3,7 +3,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {Bot, Check as CheckIcon, FileText, Link2, Paperclip, RotateCcw, ThumbsDown, ThumbsUp, User, X, Eye} from 'lucide-react';
 import type {Item} from './types.ts';
-import {api, type Store} from './store.ts';
+import {api, useNow, fmtClock, type Store} from './store.ts';
 import {Avatar, Empty, itemKey} from './components.tsx';
 import {MarkdownView} from './BlockEditor.tsx';
 import {canQuickView, quickView} from './QuickView.tsx';
@@ -37,7 +37,9 @@ export function ReviewActions({item, store, compact}: {item: Item; store: Store;
         <button className="btn small" disabled={busy} onClick={() => go('/ai/decide', {accept: false})}><X size={12} /> Decline</button>
       </div>}
       {r.state === 'submitted' && <>
-        <textarea className="comment-box" style={{minHeight: compact ? 40 : 56}} placeholder="Comment for the agent (optional to approve, needed to send back)" value={comment} onChange={e => setComment(e.target.value)} />
+        <textarea className="comment-box" style={{minHeight: compact ? 40 : 56}} placeholder="Comment for the agent (optional to approve, needed to send back)" value={comment} onChange={e => setComment(e.target.value)}
+          onFocus={() => { if (!store.running) store.startTimer(item.id, 'review'); }} />
+        {store.running?.itemId === item.id && store.running.kind === 'review' && <ReviewClock start={store.running.start} />}
         <div className="review-actions">
           <button className="btn primary small" disabled={busy} onClick={() => go('/ai/review', {approve: true, comment})}><ThumbsUp size={12} /> Approve</button>
           <button className="btn small" disabled={busy || !comment.trim()} title={comment.trim() ? '' : 'Write what to change first'} onClick={() => go('/ai/review', {approve: false, comment})}><ThumbsDown size={12} /> Send back</button>
@@ -153,4 +155,10 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       {!items.some(i => i.fields.worker === 'ai' || r(i)) && <Empty title="No AI work yet">Open a task and set Who does it to AI, or use a template pack with AI steps.</Empty>}
     </div>
   );
+}
+
+/** Shows how long this review has taken so far; it stops when you approve or send back. */
+function ReviewClock({start}: {start: string}) {
+  const now = useNow(true);
+  return <div className="muted small">Reviewing for {fmtClock(now - Date.parse(start))}</div>;
 }
