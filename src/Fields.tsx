@@ -1,10 +1,10 @@
 // Column kinds beyond plain values: formula, relation, rollup, and automatic ones (created, edited, created by),
 // plus phone and email. Also the column picker, the property visibility panel and column totals.
 import {useMemo, useState} from 'react';
-import {AtSign, DollarSign, Paperclip, Star, Calculator, Calendar, CheckSquare, Clock, Eye, EyeOff, GripVertical, Hash, Link2, List, ListChecks, Phone, Plus, Search, Sigma, Text, User, UserPlus, Workflow, X, Timer} from 'lucide-react';
+import {AtSign, DollarSign, Paperclip, Star, Calculator, Calendar, CheckSquare, Clock, Eye, EyeOff, GripVertical, Hash, Link2, List, ListChecks, Phone, Plus, Search, Sigma, Text, User, UserPlus, Workflow, X, Timer, Percent, CalendarCheck, Hourglass} from 'lucide-react';
 import type {FieldDef, FieldKind, Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
-import {Popover, itemKey} from './components.tsx';
+import {Popover, itemKey, estimateOf, fmtHours} from './components.tsx';
 
 type Kind = {kind: FieldKind; label: string; icon: typeof Text; hint: string};
 export const FIELD_KINDS: {group: string; kinds: Kind[]}[] = [
@@ -33,9 +33,13 @@ export const FIELD_KINDS: {group: string; kinds: Kind[]}[] = [
     {kind: 'updated', label: 'Last edited time', icon: Clock, hint: 'When it last changed'},
     {kind: 'creator', label: 'Created by', icon: UserPlus, hint: 'Who made it'},
     {kind: 'time', label: 'Time tracked', icon: Timer, hint: 'Start and stop a timer, or log time'},
+    {kind: 'progress', label: 'Progress', icon: Percent, hint: 'Percent of subitems done'},
+    {kind: 'completed', label: 'Completed on', icon: CalendarCheck, hint: 'When it was marked done'},
+    {kind: 'waits', label: 'Waits on', icon: Link2, hint: 'Unfinished items this one depends on'},
+    {kind: 'remaining', label: 'Remaining', icon: Hourglass, hint: 'Estimate minus time logged; red when over'},
   ]},
 ];
-export const COMPUTED: FieldKind[] = ['formula', 'rollup', 'created', 'updated', 'creator', 'time'];
+export const COMPUTED: FieldKind[] = ['formula', 'rollup', 'created', 'updated', 'creator', 'time', 'progress', 'completed', 'waits', 'remaining'];
 export const kindIcon = (k: FieldKind) => FIELD_KINDS.flatMap(g => g.kinds).find(x => x.kind === k)?.icon ?? Text;
 
 import {evalFormula, type Val} from './formula.ts';
@@ -68,6 +72,22 @@ export function valueOf(f: FieldDef, item: Item, project: Project, store: Store,
     case 'updated': return item.updated;
     case 'creator': return store.people.find(p => p.id === item.createdBy)?.name ?? null;
     case 'time': return store.timeTotals.get(item.id) ?? 0; // minutes
+    case 'progress': {
+      const kids = [...store.items.values()].filter(i => i.parentId === item.id);
+      return kids.length ? Math.round(100 * kids.filter(i => i.completed).length / kids.length) : item.completed ? 100 : null;
+    }
+    case 'completed': return item.completed;
+    case 'waits': {
+      const open = item.deps.map(d => store.items.get(d)).filter((d): d is Item => !!d && !d.completed);
+      return open.length ? open.map(d => itemKey(d, store.projects)).join(', ') : null;
+    }
+    case 'remaining': {
+      const est = estimateOf(item, store.items);
+      if (est.hours == null) return null;
+      // Logged time counts the item and, for a parent, everything under it (hours).
+      const logged = (id: string): number => (store.timeTotals.get(id) ?? 0) / 60 + (est.rolled ? [...store.items.values()].filter(i => i.parentId === id).reduce((a, k) => a + logged(k.id), 0) : 0);
+      return Math.round((est.hours - logged(item.id)) * 100) / 100;
+    }
     case 'formula': return evalFormula(f.formula ?? '', reader(item, project, store, depth), store.today);
     case 'rollup': {
       const r = f.rollup;
@@ -87,6 +107,7 @@ export function valueOf(f: FieldDef, item: Item, project: Project, store: Store,
 export function showValue(v: Val, kind: FieldKind) {
   if (v === null || v === undefined || v === '') return '';
   if (kind === 'created' || kind === 'updated') return new Date(String(v)).toLocaleString(undefined, {month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'});
+  if (kind === 'completed') return new Date(String(v)).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
   if (typeof v === 'boolean') return v ? 'Yes' : 'No';
   if (typeof v === 'number') return String(+v.toFixed(4));
   return String(v);
@@ -96,7 +117,8 @@ export function showValue(v: Val, kind: FieldKind) {
 export function ComputedCell({field, item, project, store}: {field: FieldDef; item: Item; project: Project; store: Store}) {
   try {
     const v = valueOf(field, item, project, store);
-    if (field.kind === 'rollup' && field.rollup?.fn === 'percentDone' && typeof v === 'number') return <span className="progress-cell" title={`${v}% done`}><span className="progress-track"><span style={{width: `${v}%`}} /></span>{v}%</span>;
+    if (((field.kind === 'rollup' && field.rollup?.fn === 'percentDone') || field.kind === 'progress') && typeof v === 'number') return <span className="progress-cell" title={`${v}% done`}><span className="progress-track"><span style={{width: `${v}%`}} /></span>{v}%</span>;
+    if (field.kind === 'remaining' && typeof v === 'number') return <span className={'computed num' + (v < 0 ? ' over' : '')} title={v < 0 ? 'More time logged than estimated' : 'Estimate left'}>{v < 0 ? `${fmtHours(-v)} over` : fmtHours(v)}</span>;
     return <span className={'computed' + (typeof v === 'number' ? ' num' : '')} title={field.kind === 'formula' ? field.formula : undefined}>{showValue(v, field.kind) || <span className="muted">-</span>}</span>;
   } catch (e) {
     return <span className="computed err" title={String(e instanceof Error ? e.message : e)}>#error</span>;

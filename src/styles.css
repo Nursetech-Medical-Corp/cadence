@@ -1175,3 +1175,5 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .space-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--chip); flex: none; }
 
 .hidden-cols { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 8px; }
+
+.computed.over { color: var(--danger); font-weight: 600; }

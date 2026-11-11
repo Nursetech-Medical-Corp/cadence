@@ -2,7 +2,7 @@
 
 export type StatusCategory = 'todo' | 'doing' | 'done';
 export type Status = {id: string; name: string; category: StatusCategory; color: string; wip?: number | null};
-export type FieldKind = 'text' | 'number' | 'select' | 'multi' | 'date' | 'checkbox' | 'person' | 'url' | 'phone' | 'email' | 'relation' | 'rollup' | 'formula' | 'created' | 'updated' | 'creator' | 'files' | 'rating' | 'money' | 'time';
+export type FieldKind = 'text' | 'number' | 'select' | 'multi' | 'date' | 'checkbox' | 'person' | 'url' | 'phone' | 'email' | 'relation' | 'rollup' | 'formula' | 'created' | 'updated' | 'creator' | 'files' | 'rating' | 'money' | 'time' | 'progress' | 'completed' | 'waits' | 'remaining';
 export type FieldDef = {id: string; name: string; kind: FieldKind; options?: string[];
   /** Formula columns: an expression over other columns, like {Cost} * {Quantity}. */
   formula?: string;
