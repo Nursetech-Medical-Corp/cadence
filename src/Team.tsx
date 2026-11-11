@@ -177,7 +177,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {ws.requireLogin && <button className="btn" onClick={async () => { await api('/auth/logout', {method: 'POST'}); location.reload(); }}>Sign out</button>}
       </section>}
 
-      {ws && isAdmin && <section className="set-card">
+      {ws && isAdmin && <section className="set-card google-card">
         <div className="set-card-head"><h3><GoogleMark /> Google sign-in and Gmail</h3><span className="muted small">Lets people sign in with Google and sends notification emails through one connected Gmail account.</span></div>
         <ol className="small steps">
           <li>In Google Cloud console, create an OAuth client of type Web application.</li>

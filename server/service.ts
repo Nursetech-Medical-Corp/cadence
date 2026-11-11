@@ -4,7 +4,7 @@ import {exportAll} from './backup.ts';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
-import {addUnit, daysBetween, iso, monday, skipWeekend} from '../src/dates.ts';
+import {addUnit, daysBetween, iso, monday, offWeekend} from '../src/dates.ts';
 import {PRIORITY_WORDS, parseQuickAdd} from '../src/quickadd.ts';
 import {nextOccurrence} from '../src/recur.ts';
 import {Invalid, NotFound} from './errors.ts';
@@ -392,14 +392,11 @@ export class Tasks {
     const dueDelta = before.due && next.due ? daysBetween(before.due, next.due) : 0;
     if (!delta && !dueDelta) return;
     const rules = this.project(next.projectId).settings.dates ?? {};
-    // Saturday and Sunday roll to Monday when the project skips weekends.
-    const workday = (d: string) => rules.skipWeekends ? skipWeekend(d) : d;
     const move = (i: Item, d: number) => {
       if (!d || i.completed || !(i.start || i.due)) return;
-      const start = i.start ? workday(addUnit(i.start, d, 'day')) : null;
-      // Keep the length: the due date moves as far as the start did.
-      const extra = i.start && start ? daysBetween(addUnit(i.start, d, 'day'), start) : 0;
-      const due = i.due ? workday(addUnit(i.due, d + extra, 'day')) : null;
+      const s0 = i.start ? addUnit(i.start, d, 'day') : null, d0 = i.due ? addUnit(i.due, d, 'day') : null;
+      // Saturday and Sunday roll to Monday when the project skips weekends, keeping the length.
+      const [start, due] = rules.skipWeekends ? offWeekend(s0, d0, true) : [s0, d0];
       this.updateItem(i.id, {...(start ? {start} : {}), ...(due ? {due} : {})}, actor);
     };
     if (delta) for (const c of this.listItems({parentId: next.id})) if (c.fields.follow === 'parent') move(c, delta);

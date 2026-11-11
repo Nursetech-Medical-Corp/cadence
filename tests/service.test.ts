@@ -719,3 +719,10 @@ test('MCP: an agent runs the board (views, import, export, timesheet) but cannot
   await call('submit_work', {item: task.id, report: 'Done'});
   await assert.rejects(call('review_work', {item: task.id, approve: true}), /person/);
 });
+
+test('weekends: dates dropped on Saturday or Sunday move to Monday, moves keep their length', async () => {
+  const {offWeekend} = await import('../src/dates.ts');
+  assert.deepEqual(offWeekend('2026-11-14', '2026-11-16', true), ['2026-11-16', '2026-11-18'], 'Saturday start moves 2 days, due follows');
+  assert.deepEqual(offWeekend('2026-11-12', '2026-11-15', false), ['2026-11-12', '2026-11-16'], 'resize: only the Sunday end moves');
+  assert.deepEqual(offWeekend(null, '2026-11-14'), [null, '2026-11-16']);
+});

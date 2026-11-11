@@ -32,6 +32,12 @@ export function addUnit(s: string, every: number, unit: 'day' | 'week' | 'month'
 export function monday(s: string) { return addDays(s, -((parseDay(s).getDay() + 6) % 7)); }
 /** Saturday and Sunday roll forward to Monday; weekdays stay. */
 export function skipWeekend(s: string) { const w = parseDay(s).getDay(); return w === 6 ? addDays(s, 2) : w === 0 ? addDays(s, 1) : s; }
+/** Moves a start and due off Saturday and Sunday to Monday. keepLength: the due date moves as far as the start did. */
+export function offWeekend(start: string | null, due: string | null, keepLength = false): [string | null, string | null] {
+  const s = start ? skipWeekend(start) : null;
+  const extra = keepLength && start && s ? daysBetween(start, s) : 0;
+  return [s, due ? skipWeekend(extra ? addDays(due, extra) : due) : null];
+}
 export function daysBetween(a: string, b: string) {
   return Math.round((parseDay(b).getTime() - parseDay(a).getTime()) / 86400000);
 }

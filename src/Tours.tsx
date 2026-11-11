@@ -2,14 +2,23 @@
 // real control, and explains it; Next moves on. Works on the live app, so what you learn is what you use.
 import {useEffect, useLayoutEffect, useState} from 'react';
 import {GraduationCap, Play, X, Zap, CircleCheck, FolderKanban, Users, GanttChart, Timer, Repeat, LayoutTemplate, Bot, CalendarDays, Keyboard} from 'lucide-react';
-import type {Store} from './store.ts';
+import {realProjects, type Store} from './store.ts';
+import type {ViewKind} from './types.ts';
 
-type Step = {go?: string; sel?: string; title: string; text: string};
+const VIEW_LABELS: Record<string, string> = {gantt: 'Timeline', backlog: 'Backlog', sprint: 'Sprint', calendar: 'Calendar', workload: 'Workload'};
+
+/** need: a view kind the step shows; when no project has one, the tour offers to add it. */
+type Step = {go?: string; sel?: string; title: string; text: string; need?: string};
 type Tour = {id: string; title: string; minutes: number; summary: string; steps: (s: Store) => Step[]};
 
+// The first real project (not a rollup) that has a view of this kind, else the first real project.
+const projectFor = (s: Pick<Store, 'projects' | 'views'>, kind: string) => {
+  const real = realProjects(s.projects);
+  return real.find(p => s.views.some(v => v.projectId === p.id && v.kind === kind)) ?? real[0];
+};
 const firstView = (s: Store, kind: string) => {
-  const p = s.projects[0];
-  const v = s.views.filter(x => x.projectId === p?.id).find(x => x.kind === kind);
+  const p = projectFor(s, kind);
+  const v = s.views.find(x => x.projectId === p?.id && x.kind === kind);
   return p ? `/p/${p.id}/${v?.id ?? ''}` : '/mywork';
 };
 
@@ -18,12 +27,12 @@ export const TOURS: Tour[] = [
     {go: firstView(s, 'list'), sel: '.add-row', title: 'Add a task', text: 'Click here and type a title. Enter saves it and opens the next line, so you can keep typing a whole list.'},
     {sel: '.add-row', title: 'Fill details while typing', text: 'Add @name to assign, !high for priority, due:fri for a date, #tag, ~2h for an estimate, every:w to repeat. Example: Call vendor @sam !high due:fri'},
     {sel: '.list', title: 'Nest and reorder', text: 'Tab nests a line under the one above, Shift+Tab moves it back out. Drag rows to reorder.'},
-    {sel: '.side-wrap .nav-btn:nth-of-type(1)', title: 'Capture from anywhere', text: 'Press C (or Quick capture) to add tasks to any project, one per line, typed or dictated.'},
+    {title: 'Capture from anywhere', text: 'Press C on any page to open Quick capture: add tasks to any project, one per line, typed or dictated.'},
   ]},
   {id: 'done', title: 'Complete tasks and find them later', minutes: 1, summary: 'Checking off, where finished work goes, and how to undo.', steps: s => [
     {go: firstView(s, 'list'), sel: '.list .row .check', title: 'Check it off', text: 'Click the circle to mark a task done. It stays in place, struck through, so nothing vanishes.'},
     {sel: '.toolbar', title: 'Hide or show finished work', text: 'Use Showing done in the toolbar to hide finished items in this view. The setting is saved with the view.'},
-    {go: '/mywork', sel: '.dash-grid', title: 'Your day', text: 'My work shows what is due, overdue and finished today. Add widgets and drag them where you want.'},
+    {go: '/mywork', sel: '.free-grid', title: 'Your day', text: 'My work shows what is due, overdue and finished today. Add widgets and drag them where you want.'},
     {go: '/history', sel: '.history', title: 'Undo anything', text: 'Ctrl+Z undoes your last change. History keeps every change by everyone; press Revert on any line.'},
   ]},
   {id: 'projects', title: 'Projects, views and settings', minutes: 2, summary: 'Create a project, add views like Board or Timeline, and make the names your own.', steps: s => [
@@ -34,20 +43,20 @@ export const TOURS: Tour[] = [
   ]},
   {id: 'people', title: 'Assign work and keep track of people', minutes: 1, summary: 'Assignees, workload, and the manager view.', steps: s => [
     {go: firstView(s, 'table'), sel: '.grid', title: 'Assign', text: 'Click the Assignee cell (or the avatar in any view) to pick people. Several people can share a task.'},
-    {go: firstView(s, 'workload'), sel: '.content', title: 'Workload', text: 'Hours per person per day against capacity. Red means overloaded; drag a task to another person to rebalance. Add a Workload view with + View if this project has none.'},
+    {go: firstView(s, 'workload'), need: 'workload', sel: '.content', title: 'Workload', text: 'Hours per person per day against capacity. Red means overloaded; drag a task to another person to rebalance. Add a Workload view with + View if this project has none.'},
     {go: '/insights', sel: '.ins-table', title: 'Team insights', text: 'Finished work, on-time rate, time logged, estimate vs actual, and flagged work that is overdue, over budget or stalled.'},
   ]},
   {id: 'gantt', title: 'Timeline (Gantt)', minutes: 2, summary: 'Schedule by dragging, link dependencies, and read the chart.', steps: s => [
-    {go: firstView(s, 'gantt'), sel: '.g-right', title: 'Move and resize', text: 'Drag a bar to move it, drag its ends to change start or due. Drag empty space to scroll. Drag across an empty row to schedule an undated task.'},
+    {go: firstView(s, 'gantt'), need: 'gantt', sel: '.g-right', title: 'Move and resize', text: 'Drag a bar to move it, drag its ends to change start or due. Drag empty space to scroll. Drag across an empty row to schedule an undated task.'},
     {sel: '.g-legend', title: 'Read the shapes', text: 'Bars are scheduled work, bracketed bars are parents spanning their children (drag one to shift everything under it), diamonds have only a due date.'},
     {sel: '.g-right', title: 'Link dependencies', text: 'Hover a bar and drag the dot on its right end onto another bar: that one now waits for the first. Click an arrow to remove it.'},
     {sel: '.toolbar', title: 'Color and zoom', text: 'Color bars by type, person, status or priority. Zoom by day, week or month.'},
   ]},
   {id: 'sprints', title: 'Sprints', minutes: 2, summary: 'Plan two-week blocks, see burndown, roll over what is left.', steps: s => [
-    {go: firstView(s, 'backlog'), sel: '.split .right', title: 'Plan', text: 'Drag items from the backlog onto a sprint card. Children come along. Capacity bars show who is overloaded.'},
+    {go: firstView(s, 'backlog'), need: 'backlog', sel: '.split .right', title: 'Plan', text: 'Drag items from the backlog onto a sprint card. Children come along. Capacity bars show who is overloaded.'},
     {sel: '.split .left', title: 'Faster ways', text: 'Type sprint:now in quick add, set Sprint on any item, or select rows and press S (current) or Shift+S (next).'},
-    {go: firstView(s, 'sprint'), sel: '.sprint-charts', title: 'Track it', text: 'Burndown (or burnup) with a projection: it says if you are on pace or how late you will finish. Velocity shows past sprints.'},
-    {sel: '.sprint-head', title: 'When things slip', text: 'Roll over unfinished moves open work to the next sprint. Or turn on automatic rollover in Settings, Automations.'},
+    {go: firstView(s, 'sprint'), need: 'sprint', sel: '.sprint-tabs, .empty', title: 'Track it', text: 'Open Burndown and capacity: burndown (or burnup) with a projection says if you are on pace or how late you will finish. No sprint yet? Press New sprint first.'},
+    {sel: '.sprint-head, .empty', title: 'When things slip', text: 'Roll over unfinished moves open work to the next sprint. Or turn on automatic rollover in Settings, Automations.'},
   ]},
   {id: 'routines', title: 'Repeating work and routines', minutes: 1, summary: 'Taxes, filings, reviews, reorders: set them once.', steps: () => [
     {go: '/templates', sel: '.gallery', title: 'Start from the gallery', text: 'Add "Business and compliance routines" for FDA registration, payroll and sales tax filings, SOP reviews, HR audits, insurance, budget updates, reorders and follow-ups.'},
@@ -65,10 +74,10 @@ export const TOURS: Tour[] = [
     {go: '/ai', sel: '.board', title: 'Review', text: 'Read the report, open links and screenshots, then Approve or Send back with a comment. Everything the agent did is in the item\'s work log.'},
   ]},
   {id: 'calendar', title: 'Calendar, email and notifications', minutes: 2, summary: 'See tasks in Google Calendar and get reminders.', steps: s => [
-    {go: firstView(s, 'calendar'), sel: '.cal-grid', title: 'Calendar view', text: 'Tasks by due date (or spanning start to due). Drag to reschedule, press + on a day to add.'},
-    {go: s.projects[0] ? `/p/${s.projects[0].id}/settings` : '/mywork', sel: '.int-block', title: 'Put tasks in your calendar', text: 'Copy a calendar link (project, or one person\'s work). In Google Calendar: Other calendars, +, From URL, paste. Outlook and Apple: subscribe to calendar by URL.'},
+    {go: firstView(s, 'calendar'), need: 'calendar', sel: '.cal-grid', title: 'Calendar view', text: 'Tasks by due date (or spanning start to due). Drag to reschedule, press + on a day to add.'},
+    {go: realProjects(s.projects)[0] ? `/p/${realProjects(s.projects)[0].id}/settings` : '/mywork', sel: '.int-block', title: 'Put tasks in your calendar', text: 'Copy a calendar link (project, or one person\'s work). In Google Calendar: Other calendars, +, From URL, paste. Outlook and Apple: subscribe to calendar by URL.'},
     {sel: '.int-block', title: 'Reminders on your phone', text: 'After subscribing, open that calendar\'s settings in Google Calendar and add default notifications for all-day events (for example the day before at 9 am). Google needs the app on a public address to read the link; until then download the .ics file and import it.'},
-    {go: '/team', sel: '.set-card', title: 'Email notifications', text: 'An admin connects a Gmail sender on the Team page; then each person ticks Email to get assignments, mentions and reviews by email.'},
+    {go: '/team', sel: '.google-card, .team-row', title: 'Email notifications', text: 'An admin connects a Gmail sender on the Team page; then each person ticks Email to get assignments, mentions and reviews by email.'},
   ]},
   {id: 'keys', title: 'Keyboard shortcuts', minutes: 1, summary: 'Move through work without the mouse.', steps: () => [
     {go: '/mywork', sel: '.side-bottom', title: 'See and change them', text: 'Press ? for every shortcut; click one to rebind it. j and k move between rows, x selects, o opens, d marks done, i assigns to you, g then m goes to My work, 1 to 9 switch view tabs.'},
@@ -123,7 +132,8 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
     const find = () => {
       if (!alive) return;
       const el = step.sel ? document.querySelector(step.sel) : null;
-      if (el) { el.scrollIntoView({block: 'nearest', inline: 'nearest'}); setTimeout(() => alive && setRect(el.getBoundingClientRect()), 120); }
+      // Wait for content that loads a moment later (an empty box has no height yet).
+      if (el && el.getBoundingClientRect().height > 0) { el.scrollIntoView({block: 'nearest', inline: 'nearest'}); setTimeout(() => alive && setRect(el.getBoundingClientRect()), 120); }
       else if (tries++ < 20) setTimeout(find, 100);
     };
     find();
@@ -134,6 +144,12 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
     return () => { alive = false; removeEventListener('keydown', k); removeEventListener('resize', r); };
   }, [n]);
   const next = () => n < steps.length - 1 ? setN(n + 1) : close();
+  const missing = step.need && !store.views.some(v => v.kind === step.need && realProjects(store.projects).some(p => p.id === v.projectId)) ? projectFor(store, step.need) : undefined;
+  const addView = async () => {
+    const label = VIEW_LABELS[step.need!] ?? step.need!;
+    const v = missing && await store.createView(missing.id, label, step.need as ViewKind);
+    if (v) location.hash = `/p/${missing!.id}/${v.id}`;
+  };
   const pad = 6;
   // Spotlight only the visible part of the element, never more than ~60% of the screen height.
   const box = rect ? (() => {
@@ -151,6 +167,7 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
         <div className="tour-top"><span className="muted small">{tour.title}, {n + 1} of {steps.length}</span><span className="spacer" /><button className="icon" onClick={close} title="End tour (Esc)"><X size={14} /></button></div>
         <b>{step.title}</b>
         <p>{step.text}</p>
+        {missing && <p className="small">No project has a {VIEW_LABELS[step.need!] ?? step.need} view yet. <button className="btn small" onClick={addView}>Add one to {missing.name}</button></p>}
         <div className="tour-dots">{steps.map((_, k) => <span key={k} className={k === n ? 'on' : ''} />)}</div>
         <div className="tour-actions">
           {n > 0 && <button className="btn small" onClick={() => setN(n - 1)}>Back</button>}

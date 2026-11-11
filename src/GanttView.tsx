@@ -4,7 +4,7 @@ import {api} from './store.ts';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ChevronDown, ChevronRight, MoreHorizontal} from 'lucide-react';
 import type {Item} from './types.ts';
-import {addDays, daysBetween, iso, parseDay} from './dates.ts';
+import {addDays, daysBetween, iso, parseDay, offWeekend} from './dates.ts';
 import {criticalPath} from './critical.ts';
 import {InlineText, PeoplePicker, TypeBadge} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
@@ -136,6 +136,11 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
         }
         return;
       }
+      // Projects that skip weekends: a bar dropped on Saturday or Sunday starts Monday (moves keep their length).
+      const off = (id: string, st: string | null, du: string | null, keep: boolean) => {
+        const pr = store.projects.find(p => p.id === store.items.get(id)?.projectId);
+        return pr?.settings.dates?.skipWeekends ? offWeekend(st, du, keep) : [st, du];
+      };
       if (d.mode === 'group') {
         if (!d.delta) return;
         const moved = new Set(d.members);
@@ -143,17 +148,19 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
           const m = store.items.get(mid);
           // Steps that follow their parent or the step before them are moved by the server along with it.
           if (m && ((m.fields.follow === 'parent' && m.parentId && moved.has(m.parentId) && (store.items.get(m.parentId)?.start || store.items.get(m.parentId)?.due)) || (m.fields.follow === 'previous' && m.deps.some(x => moved.has(x))))) continue;
-          if (m && (m.start || m.due)) store.updateItem(mid, {...(m.start ? {start: addDays(m.start, d.delta)} : {}), ...(m.due ? {due: addDays(m.due, d.delta)} : {})});
+          if (m && (m.start || m.due)) { const [st, du] = off(mid, m.start ? addDays(m.start, d.delta) : null, m.due ? addDays(m.due, d.delta) : null, true); store.updateItem(mid, {...(st ? {start: st} : {}), ...(du ? {due: du} : {})}); }
         }
         return;
       }
       if (d.mode === 'create') {
         const [s, e] = d.d0 <= d.d1 ? [d.d0, d.d1] : [d.d1, d.d0];
-        store.updateItem(d.id, {start: s, due: e});
+        const [st, du] = off(d.id, s, e, false);
+        store.updateItem(d.id, {start: st, due: du});
         return;
       }
       if (!d.moved) { open(d.id); return; }
-      store.updateItem(d.id, {start: d.start, due: d.due});
+      const [st, du] = off(d.id, d.start, d.due, d.mode === 'move');
+      store.updateItem(d.id, {start: st, due: du});
     };
     addEventListener('pointermove', move); addEventListener('pointerup', up);
     return () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
