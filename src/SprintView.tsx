@@ -1,16 +1,20 @@
 // Sprint view: pick a sprint, see stats, burndown, capacity and a board of just that sprint's work.
+import {ListView} from './ListView.tsx';
+import {TableView} from './TableView.tsx';
 import {useMemo, useState} from 'react';
 import {ArrowRightToLine, Plus, Trash2} from 'lucide-react';
 import {api} from './store.ts';
 import {daysBetween} from './dates.ts';
-import {DateInput, Empty, InlineText, Popover, TypeBadge, itemKey, Check, Avatar} from './components.tsx';
+import {DateInput, Empty, InlineText, Popover, TypeBadge, itemKey} from './components.tsx';
 import {Board} from './BoardView.tsx';
 import {Burndown, Capacity, Velocity, sprintState} from './SprintParts.tsx';
 import type {ViewProps} from './viewProps.ts';
 
-export function SprintView({store, project, items, allItems, sprints, open, config, setConfig}: ViewProps) {
-  const [tab, setTabState] = useState<'board' | 'list' | 'charts'>(() => (localStorage.getItem('sprint-tab') as 'board') || 'board');
-  const setTab = (t: 'board' | 'list' | 'charts') => { setTabState(t); localStorage.setItem('sprint-tab', t); };
+export function SprintView(props: ViewProps) {
+  const {store, project, items, allItems, sprints, open, config, setConfig} = props;
+  type Tab = 'board' | 'list' | 'table' | 'charts';
+  const [tab, setTabState] = useState<Tab>(() => (localStorage.getItem('sprint-tab') as Tab) || 'board');
+  const setTab = (t: Tab) => { setTabState(t); localStorage.setItem('sprint-tab', t); };
   const current = useMemo(() => sprints.find(s => sprintState(s, store.today) === 'current') ?? sprints.find(s => sprintState(s, store.today) === 'upcoming') ?? sprints.at(-1), [sprints, store.today]);
   const sprint = sprints.find(s => s.id === config.sprint) ?? current;
   const [groupBy, setGroupBy] = useState<'status' | 'assignee'>('status');
@@ -34,11 +38,12 @@ export function SprintView({store, project, items, allItems, sprints, open, conf
           <DateInput value={sprint.start} onChange={start => start && store.updateSprint(sprint.id, {start})} /> to
           <DateInput value={sprint.end} onChange={end => end && store.updateSprint(sprint.id, {end})} />
         </span>
-        {all.some(i => !i.completed) && state !== 'upcoming' && <button className="btn" title="Move unfinished items to the next sprint" onClick={async () => {
-          const open = all.filter(i => !i.completed).length;
+        {(() => { const unfinished = all.filter(i => !i.completed).length; return <button className="btn" disabled={!unfinished}
+          title={unfinished ? `Move the ${unfinished} unfinished item${unfinished === 1 ? '' : 's'} to the next sprint (made for you if there is none). Settings, Automations can do this when a sprint ends.` : 'Nothing unfinished to move. When the sprint ends, unfinished items can move to the next one here.'} onClick={async () => {
+          const open = unfinished;
           if (!confirm(`Move ${open} unfinished item${open === 1 ? '' : 's'} from ${sprint.name} to the next sprint?`)) return;
           try { const r = await api<{moved: number; to: {id: string}}>(`/sprints/${sprint.id}/rollover`, {method: 'POST'}); setConfig({sprint: r.to.id}); } catch (e) { store.fail(e); }
-        }}><ArrowRightToLine size={14} /> Roll over unfinished</button>}
+        }}><ArrowRightToLine size={14} /> Roll over unfinished</button>; })()}
         <button className="icon" title="Delete sprint (items return to the backlog)" onClick={() => confirm(`Delete ${sprint.name}? Its items return to the backlog.`) && store.deleteSprint(sprint.id)}><Trash2 size={14} /></button>
       </div>
       <div className="sprint-head">
@@ -51,7 +56,7 @@ export function SprintView({store, project, items, allItems, sprints, open, conf
         <div className="stat"><b>{+hoursLeft.toFixed(1)}h</b><span>of {+hours.toFixed(1)}h remaining</span></div>
         <div className="stat"><b>{all.length ? Math.round((100 * done.length) / all.length) : 0}%</b><span>complete</span></div>
       </div>
-      <div className="seg sprint-tabs">{([['board', 'Board'], ['list', 'List'], ['charts', 'Burndown and capacity']] as const).map(([k, l]) =>
+      <div className="seg sprint-tabs">{([['board', 'Board'], ['list', 'List'], ['table', 'Table'], ['charts', 'Burndown and capacity']] as const).map(([k, l]) =>
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</div>
       {tab === 'charts' && <div className="sprint-charts">
         <Burndown sprint={sprint} tick={store.tick} />
@@ -60,14 +65,15 @@ export function SprintView({store, project, items, allItems, sprints, open, conf
       </div>}
       {tab !== 'charts' && <>
       <div className="toolbar" style={{borderBottom: 0, paddingTop: 14}}>
-        <b>{tab === 'list' ? 'Sprint list' : 'Sprint board'}</b><span className="muted small">{mine.length} items</span>
+        <b>{tab === 'list' ? 'Sprint list' : tab === 'table' ? 'Sprint table' : 'Sprint board'}</b><span className="muted small">{mine.length} items</span>
         <AddToSprint store={store} sprintId={sprint.id} items={allItems} />
         <span className="muted small">Or type in a column's + Add, drag from the Backlog view, or set Sprint on any item.</span>
         <span className="spacer" />
         {tab === 'board' && <div className="seg"><button className={groupBy === 'status' ? 'on' : ''} onClick={() => setGroupBy('status')}>By status</button><button className={groupBy === 'assignee' ? 'on' : ''} onClick={() => setGroupBy('assignee')}>By person</button></div>}
       </div>
       {tab === 'board' ? <Board store={store} project={project} items={mine} allItems={allItems} sprints={sprints} open={open} groupBy={groupBy} createExtra={{sprint: sprint.id}} />
-        : <SprintList store={store} project={project} items={mine} open={open} />}
+        : tab === 'list' ? <ListView {...props} items={mine} createExtra={{sprint: sprint.id}} />
+        : <TableView {...props} items={mine} createExtra={{sprint: sprint.id}} />}
       </>}
     </div>
   );
@@ -99,19 +105,4 @@ function AddToSprint({store, sprintId, items}: {store: ViewProps['store']; sprin
       </Popover>
     </span>
   );
-}
-
-/** Sprint items as a plain list: status, title, who, due, estimate. */
-function SprintList({store, project, items, open}: {store: ViewProps['store']; project: ViewProps['project']; items: ViewProps['allItems']; open: (id: string) => void}) {
-  const order = (i: ViewProps['allItems'][number]) => project.statuses.findIndex(s => s.id === i.status);
-  return <div className="list">{[...items].sort((a, b) => order(a) - order(b) || (a.due ?? '9').localeCompare(b.due ?? '9')).map(i => (
-    <div key={i.id} data-id={i.id} className={'row' + (i.completed ? ' done' : '')}>
-      <Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} />
-      <button className="link grow" style={{color: 'var(--text)', textAlign: 'left'}} onClick={() => open(i.id)}>{i.title}</button>
-      <span className="muted small">{project.statuses.find(s => s.id === i.status)?.name}</span>
-      {i.assignees.slice(0, 2).map(a => <Avatar key={a} person={store.people.find(p => p.id === a)} size={18} />)}
-      <span className="muted small" style={{width: 46, textAlign: 'right'}}>{i.estimate ? `${i.estimate}h` : ''}</span>
-      <span className={'small' + (i.due && i.due < store.today && !i.completed ? ' overdue' : ' muted')} style={{width: 46}}>{i.due?.slice(5) ?? ''}</span>
-    </div>))}
-    {!items.length && <div className="muted small" style={{padding: 8}}>Nothing in this sprint yet.</div>}</div>;
 }

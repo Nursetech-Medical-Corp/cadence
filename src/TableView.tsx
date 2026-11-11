@@ -19,7 +19,7 @@ export const tableColumns = (project: Project) => [
   ['start', 'Start'], ['due', 'Due'], ['estimate', 'Estimate'], ['tags', 'Tags'], ...project.fields.map(f => ['f:' + f.id, f.name]),
 ] as [string, string][];
 
-export function TableView({store, project, items, allItems, sprints, open, config, setConfig, selected, toggle, setSelected}: ViewProps) {
+export function TableView({store, project, items, allItems, sprints, open, config, setConfig, selected, toggle, setSelected, createExtra}: ViewProps) {
   // New rows: type a title in the draft row, Enter adds it and opens another draft, Tab adds it and moves to the next cell.
   // New rows stay pinned at the bottom (ignoring sort and filters) until you press Done or leave the view.
   const [drafting, setDrafting] = useState(false);
@@ -99,7 +99,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     const text = draft.trim();
     if (!text) { if (!moveRight) setDrafting(false); return; }
     setDraft('');
-    const item = await store.quickAdd(project.id, text, {sort: (allItems.reduce((m, i) => Math.max(m, i.sort), 0)) + 1});
+    const item = await store.quickAdd(project.id, text, {...createExtra, sort: (allItems.reduce((m, i) => Math.max(m, i.sort), 0)) + 1});
     if (!item) { setDraft(text); return; }
     setPinned(p => [...p, item.id]);
     if (moveRight) {
@@ -167,7 +167,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
               // Between this row and the one shown next to it.
               const sibs = rows, at = sibs.findIndex(x => x.id === i.id);
               const sort = insertAt.above ? between(sibs[at - 1]?.sort, i.sort) : between(i.sort, sibs[at + 1]?.sort);
-              const made = await store.quickAdd(project.id, text, {parentId: i.parentId, sort});
+              const made = await store.quickAdd(project.id, text, {...createExtra, parentId: i.parentId, sort});
               if (made) setInsertAt({id: made.id, above: false});
             }} />}
           </Fragment>)}

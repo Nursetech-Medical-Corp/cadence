@@ -169,7 +169,7 @@ export function useStore(me: string) {
       });
       return api<Item>(`/items/${id}`, {method: 'PATCH', body: patch}).catch(e => { fail(e); load(); });
     },
-    async quickAdd(projectId: string, text: string, extra: {parentId?: string | null; status?: string; sort?: number} = {}) {
+    async quickAdd(projectId: string, text: string, extra: {parentId?: string | null; status?: string; sort?: number; sprint?: string | null} = {}) {
       projectId = realProject(projectId, extra.parentId);
       try { const item = await api<Item>('/items/quick', {method: 'POST', body: {projectId, text, ...extra}}); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
       catch (e) { fail(e); return null; }

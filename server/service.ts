@@ -317,7 +317,7 @@ export class Tasks {
     return item;
   }
 
-  quickAdd(input: {projectId: string; text: string; parentId?: string | null; status?: string; sort?: number}, actor: string | null = null) {
+  quickAdd(input: {projectId: string; text: string; parentId?: string | null; status?: string; sort?: number; sprint?: string | null}, actor: string | null = null) {
     const p = this.project(input.projectId);
     const parsed = parseQuickAdd(input.text, this.listPeople(), this.today(), p.types);
     if (!parsed.title) throw new Invalid('Title is required');
@@ -325,7 +325,7 @@ export class Tasks {
       projectId: p.id, parentId: input.parentId ?? null, status: input.status, sort: input.sort,
       title: parsed.title, assignees: parsed.assignees, priority: parsed.priority, tags: parsed.tags,
       due: parsed.due, start: parsed.start, estimate: parsed.estimate, recur: parsed.recur, type: parsed.type,
-      sprint: this.resolveSprint(p.id, parsed.sprint),
+      sprint: parsed.sprint ? this.resolveSprint(p.id, parsed.sprint) : input.sprint ?? undefined,
     }, actor);
   }
 

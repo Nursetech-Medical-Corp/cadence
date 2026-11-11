@@ -7,6 +7,8 @@ export type ViewProps = {
   open: (id: string) => void; config: ViewConfig; setConfig: (patch: Partial<ViewConfig>) => void;
   /** Multi-select for bulk edit. `toggle` handles Ctrl (add/remove) and Shift (range over `order`). */
   selected: Set<string>; toggle: (id: string, e: {shiftKey: boolean; ctrlKey: boolean; metaKey: boolean}, order: string[]) => void; setSelected: (s: Set<string>) => void;
+  /** Set on items made in this view (a sprint's List and Table put new work in that sprint). */
+  createExtra?: {sprint?: string};
 };
 
 /** List row fields that can be dragged into a new order. Time and due date keep their place. */

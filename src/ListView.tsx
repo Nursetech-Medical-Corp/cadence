@@ -12,7 +12,7 @@ import {countRules} from './FilterBuilder.tsx';
 
 type Insert = {parentId: string | null; afterSort: number | undefined; beforeSort: number | undefined; depth: number; afterId: string | null; beforeId?: string};
 
-export function ListView({store, project, items: shown, allItems: items, open, selected, toggle, config, setConfig}: ViewProps) {
+export function ListView({store, project, items: shown, allItems: items, open, selected, toggle, config, setConfig, createExtra}: ViewProps) {
   const flat = !!(config.types?.length || countRules(config.filter) || config.text || config.assignee);
   const sorts = sortsOf(config);
   const shownIds = new Set(shown.map(i => i.id));
@@ -89,7 +89,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
       const isCollapsed = collapsed.has(i.id);
       return (
         <Fragment key={i.id}>
-          {insert?.beforeId === i.id && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} />}
+          {insert?.beforeId === i.id && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} createExtra={createExtra} />}
           <div onClickCapture={e => { if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); e.stopPropagation(); toggle(i.id, e, [...document.querySelectorAll<HTMLElement>('.list .row[data-id]')].map(r => r.dataset.id!)); } }} data-id={i.id}
             style={tint(colorOf(i, activeColors(config), {project, today: store.today}))}
             className={'row' + (selected.has(i.id) ? ' sel' : '') + (i.completed ? ' done' : '') + (dragId === i.id ? ' dragging' : '') + (overId === i.id && dragId !== i.id ? ' drop-before' : '')} draggable
@@ -124,7 +124,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             </span>
           </div>
           {!isCollapsed && rows(i.id, depth + 1)}
-          {insert?.afterId === i.id && !insert.beforeId && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} />}
+          {insert?.afterId === i.id && !insert.beforeId && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} createExtra={createExtra} />}
         </Fragment>
       );
     });
@@ -133,7 +133,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
   return (
     <div className="list">
       {rows(null, 0)}
-      {insert && insert.afterId === null && !insert.beforeId && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} />}
+      {insert && insert.afterId === null && !insert.beforeId && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} createExtra={createExtra} />}
       {!insert && (
         <button className="add-row" onClick={() => setInsert({parentId: null, afterSort: top.at(-1)?.sort, beforeSort: undefined, depth: 0, afterId: null})}>
           <span className="check ghost" /> Add item <span className="small">Enter adds the next one, Tab nests it. Try: Call vendor @sam !high due:fri #ops ~2h every:w</span>
@@ -163,13 +163,13 @@ function RowTitle({item, onSave, onEnter, onTab}: {item: Item; onSave: (v: strin
 
 // Inline creator: Enter adds and keeps a fresh row below, Tab indents under the row above, Esc closes.
 // Text lives in the parent so it survives the row moving below the item it just created.
-function QuickRow({store, project, insert, setInsert, items, text, setText}: {store: Store; project: Project; insert: Insert; setInsert: (i: Insert | null) => void; items: Item[]; text: string; setText: (t: string) => void}) {
+function QuickRow({store, project, insert, setInsert, items, text, setText, createExtra}: {store: Store; project: Project; insert: Insert; setInsert: (i: Insert | null) => void; items: Item[]; text: string; setText: (t: string) => void; createExtra?: {sprint?: string}}) {
   const qa = useQuickAssist(store, project.types, text, setText);
   const submit = async () => {
     if (!text.trim()) return;
     const value = text;
     setText('');
-    const item = await store.quickAdd(project.id, value, {parentId: insert.parentId, sort: between(insert.afterSort, insert.beforeSort)});
+    const item = await store.quickAdd(project.id, value, {...createExtra, parentId: insert.parentId, sort: between(insert.afterSort, insert.beforeSort)});
     if (item) setInsert({...insert, afterSort: item.sort, afterId: item.id});
     else setText(value);
   };
