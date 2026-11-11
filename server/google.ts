@@ -10,7 +10,15 @@ import {getWorkspace, saveWorkspace} from './auth.ts';
 import {SCOPES, saveLink} from './googlelinks.ts';
 
 const pending = new Map<string, {mode: 'login' | 'connect' | 'link'; actor: string | null; at: number; want?: string}>();
-const redirectUri = (req: IncomingMessage) => `http://${req.headers.host}/api/auth/google/callback`;
+/** The address people use to reach this server. Behind Coolify, Caddy or nginx the proxy terminates HTTPS, so trust
+ * X-Forwarded-Proto/Host. CADENCE_URL (for example https://tasks.example.com) overrides both. */
+export function publicOrigin(req: IncomingMessage) {
+  if (process.env.CADENCE_URL) return process.env.CADENCE_URL.replace(/\/+$/, '');
+  const first = (h: string | string[] | undefined) => String(Array.isArray(h) ? h[0] : h ?? '').split(',')[0].trim();
+  const proto = first(req.headers['x-forwarded-proto']) || ('encrypted' in req.socket ? 'https' : 'http');
+  return `${proto === 'https' ? 'https' : 'http'}://${first(req.headers['x-forwarded-host']) || req.headers.host}`;
+}
+const redirectUri = (req: IncomingMessage) => `${publicOrigin(req)}/api/auth/google/callback`;
 
 function go(res: ServerResponse, to: string) { res.statusCode = 302; res.setHeader('location', to); res.end(); }
 

@@ -300,27 +300,35 @@ function SetPassword({has, self, disabled, onSet}: {has: boolean; self: boolean;
 export function AccessCard({store, project}: {store: Store; project: Project}) {
   const [roles, setRoles] = useState<Role[]>([]);
   const [admin, setAdmin] = useState(false);
-  useEffect(() => { api<{roles: Role[]}>('/team').then(t => setRoles(t.roles)).catch(() => {}); api<Me>('/auth/me').then(m => setAdmin(m.admin)).catch(() => {}); }, []);
+  const [mine, setMine] = useState(false);
+  const [me, setMe] = useState<string | null>(null);
+  useEffect(() => { api<{roles: Role[]}>('/team').then(t => setRoles(t.roles)).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
   const access = project.settings.access ?? {default: 'inherit', members: {}};
+  const personal = !!access.private;
+  const canEdit = personal ? mine || (admin && !!me && !!access.members[me]) : admin;
   const save = (a: typeof access) => store.updateProject(project.id, {settings: {...project.settings, access: a}});
   const options = <>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}<option value="none">No access</option></>;
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3><Shield size={15} /> Access</h3><span className="muted small">Who can see and change this project. Enforced once sign-in is required (Team page). Only admins can change this.</span></div>
+      <div className="set-card-head"><h3><Shield size={15} /> {personal ? 'Sharing' : 'Access'}</h3><span className="muted small">{personal
+        ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
+        : 'Who can see and change this space. Enforced once sign-in is required (Team page). Only admins can change this.'}</span></div>
       <div className="set-item">
-        <span className="grow">Everyone else</span>
-        <select className="plain-select" value={access.default} disabled={!admin} onChange={e => save({...access, default: e.target.value})}>
-          <option value="inherit">Their default role</option>{options}
+        <span className="grow">Everyone else in the workspace</span>
+        <select className="plain-select" value={access.default} disabled={!canEdit} onChange={e => save({...access, default: e.target.value})}>
+          {!personal && <option value="inherit">Their default role</option>}{options}
         </select>
       </div>
       {store.people.map(p => (
         <div key={p.id} className="set-item">
           <Avatar person={p} size={22} /><span className="grow">{p.name}</span>
-          <select className="plain-select" value={access.members[p.id] ?? ''} disabled={!admin} onChange={e => { const m = {...access.members}; if (e.target.value) m[p.id] = e.target.value; else delete m[p.id]; save({...access, members: m}); }}>
+          <select className="plain-select" value={access.members[p.id] ?? ''} disabled={!canEdit || (personal && p.id === me && !admin)} onChange={e => { const m = {...access.members}; if (e.target.value) m[p.id] = e.target.value; else delete m[p.id]; save({...access, members: m}); }}>
             <option value="">Same as everyone else</option>{options}
           </select>
         </div>
       ))}
+      {personal && canEdit && <div className="set-item"><span className="grow muted small">Make it a regular workspace space (admins can then see and manage it).</span>
+        <button className="btn small" onClick={() => { if (confirm('Turn this into a regular workspace space? Admins will see it.')) save({default: access.default === 'none' ? 'inherit' : access.default, members: access.members}); }}>Make shared space</button></div>}
     </section>
   );
 }

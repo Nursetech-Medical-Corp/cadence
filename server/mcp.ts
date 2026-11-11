@@ -5,6 +5,7 @@ import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
 import {openDb} from './db.ts';
+import {personalAccess} from './auth.ts';
 import {Tasks} from './service.ts';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -138,7 +139,8 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
     i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : me(), minutes: i.minutes, note: i.note, date: i.date}));
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
-  tool('create_project', 'Create a project with default statuses.', {name: z.string(), key: z.string().optional()}, false, i => tasks.createProject(i));
+  tool('create_project', 'Create a space (project) with default statuses. personal: true makes it private to you until you share it (anyone can do this; shared spaces need an admin).', {name: z.string(), key: z.string().optional(), personal: z.boolean().optional()}, false,
+    i => tasks.createProject({name: i.name, key: i.key, ...(i.personal && actor ? {settings: {access: personalAccess(actor)}} : {})}));
   tool('update_project', 'Change project name, statuses, types or custom fields.', {
     project: z.string(), name: z.string().optional(),
     statuses: z.array(z.object({id: z.string(), name: z.string(), category: z.enum(['todo', 'doing', 'done']), color: z.string()})).optional(),

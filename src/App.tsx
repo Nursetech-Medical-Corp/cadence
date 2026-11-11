@@ -20,7 +20,7 @@ import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
 import {NotifySettings} from './NotifySettings.tsx';
 import {setBadge} from './device.ts';
-import {AcceptInvite, NoAccess, ResetPassword, SetupServer, SignIn, type Me} from './Team.tsx';
+import {AccessCard, AcceptInvite, NoAccess, ResetPassword, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
 import {ContextMenus} from './ContextMenu.tsx';
@@ -350,6 +350,18 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
 }
 /** Click opens the project, double-click renames it in place. */
 /** Click opens the project, double-click renames it in place. Grip, icon kit and star show on hover. */
+/** Space header: who can see this space, and (for personal spaces) inviting others in. */
+function ShareButton({store, project}: {store: Store; project: Project}) {
+  const [open, setOpen] = useState(false);
+  const personal = !!project.settings.access?.private;
+  return <span className="picker">
+    <button className="tab" title={personal ? 'Personal space: only you and people you share with' : 'Who can see this space'} onClick={() => setOpen(o => !o)}>
+      {personal ? <Lock size={14} /> : <Users size={14} />} Share
+    </button>
+    <Popover open={open} onClose={() => setOpen(false)} className="wide share-pop"><AccessCard store={store} project={project} /></Popover>
+  </span>;
+}
+
 function ProjectNavButton({store, project, active, extra, onOpen, expanded, onToggle}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode; menu: React.ReactNode}; onOpen: () => void; expanded: boolean; onToggle: () => void}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
@@ -364,6 +376,7 @@ function ProjectNavButton({store, project, active, extra, onOpen, expanded, onTo
         ? <input autoFocus className="nav-edit" value={name} onChange={e => setName(e.target.value)} onBlur={done} onClick={e => e.stopPropagation()}
             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') { setName(project.name); setEditing(false); } }} />
         : <span className="grow proj-label">{project.name}</span>}
+      {project.settings.access?.private && <Lock size={11} className="muted" aria-label="Personal space" />}
       {extra.menu}{extra.star}
     </div>
   );
@@ -457,6 +470,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
           }}><ViewTab store={store} view={v} active={!settings && view?.id === v.id} project={project} /></span>)}
         <AddView store={store} project={project} />
         <span className="spacer" />
+        {!isRollup(own) && <ShareButton store={store} project={own} />}
         <button className={'tab' + (settings ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: 'settings'})}><Settings size={14} /> Settings</button>
       </div>
     </header>

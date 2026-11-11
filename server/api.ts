@@ -8,12 +8,12 @@ import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
 import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, retention, saveSettings, snapshot} from './backup.ts';
-import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
+import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
-import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
+import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
@@ -269,8 +269,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           loginTries.set(key, [...tries, Date.now()]);
           const email = String(body.email ?? '').trim().toLowerCase();
           if (accounts.has(email)) {
-            const origin = typeof req.headers.origin === 'string' && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : `${secure ? 'https' : 'http'}://${req.headers.host}`;
-            const link = `${origin}/#/reset/${accounts.startReset(email)}`;
+            const link = `${publicOrigin(req)}/#/reset/${accounts.startReset(email)}`;
             const sent = await systemMail(email, 'Reset your Cadence password', `Someone asked to reset the password for ${email} on Cadence.\n\nChoose a new password here (the link works once, for one hour):\n${link}\n\nIf it was not you, ignore this email; your password stays the same.`).catch(() => false);
             if (!sent) console.log(`[cadence] No email sender is set up. Password reset link for ${email}: ${link}`);
           }
@@ -378,8 +377,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (!b && m === 'GET') return send(res, 200, listInvites(tasks.db));
         if (!b && m === 'POST') {
           const {invite, secret} = createInvite(tasks.db, body, actor, ws.roles.map(r => r.id));
-          const origin = typeof req.headers.origin === 'string' && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : `http://${req.headers.host}`;
-          const link = `${origin}/?ws=${info.id}#/invite/${secret}`;
+          const link = `${publicOrigin(req)}/?ws=${info.id}#/invite/${secret}`;
           const who = actor ? tasks.listPeople().find(p => p.id === actor)?.name ?? 'Someone' : 'Someone';
           const wname = listWorkspaces().find(x => x.id === info.id)?.name ?? 'Cadence';
           let emailed = false;
@@ -534,7 +532,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (q('project')) need(q('project')!, 'view');
         res.statusCode = 200;
         res.setHeader('content-type', 'text/calendar; charset=utf-8');
-        const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: `http://${req.headers.host}`, canSee});
+        const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: publicOrigin(req), canSee});
         res.end(feed);
         return;
       }
@@ -567,7 +565,12 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const t = tasks.listTemplates().find(x => x.id === b);
           if (!t) throw new NotFound('Template not found');
           if (t.projectId && tasks.listProjects().some(p => p.id === t.projectId)) need(t.projectId, 'view');
-          if (t.kind === 'project') { needAdmin(); return send(res, 201, tasks.createProjectFromTemplate(b, body.name ?? t.name, actor)); }
+          if (t.kind === 'project') {
+            if (!body.personal) { needAdmin(); return send(res, 201, tasks.createProjectFromTemplate(b, body.name ?? t.name, actor)); }
+            if (!actor) throw new Denied('Sign in first');
+            const p = tasks.createProjectFromTemplate(b, body.name ?? t.name, actor);
+            return send(res, 201, tasks.updateProject(p.id, {settings: {...p.settings, access: personalAccess(actor)}}));
+          }
           if (t.kind === 'view') { need(body.projectId, 'views'); return send(res, 201, tasks.useViewTemplate(b, body.projectId)); }
           need(body.projectId, 'create');
           return send(res, 201, tasks.useItemTemplate(b, body.projectId, body.parentId ?? null, actor, {title: body.title, due: body.due || undefined, start: body.start || undefined}));
@@ -614,13 +617,22 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       if (a === 'projects') {
         if (!b && m === 'GET') return send(res, 200, tasks.listProjects().filter(p => canSee(p.id)));
         if (b === 'rollup' && m === 'POST') { needAdmin(); return send(res, 201, tasks.createRollup(String(body.name ?? '').trim() || undefined)); }
-        if (!b && m === 'POST') { needAdmin(); return send(res, 201, tasks.createProject(body)); }
+        if (!b && m === 'POST') {
+          // Anyone signed in can make a personal space (only they see it until they share it); shared spaces are for admins.
+          if (body.personal) { if (!actor) throw new Denied('Sign in first'); return send(res, 201, tasks.createProject({...body, settings: {...body.settings, access: personalAccess(actor)}})); }
+          needAdmin(); return send(res, 201, tasks.createProject(body));
+        }
         if (b && c === 'files' && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.projectFiles(b)); }
         if (b && c === 'file-tasks' && m === 'POST') { need(b, 'create'); return send(res, 201, tasks.fileTask(b, actor, {name: String(body.name ?? 'file'), mime: String(body.mime ?? ''), data: String(body.data ?? ''), parentId: body.parentId ?? null, status: body.status})); }
         if (b && !c && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.project(b)); }
         if (b && m === 'PATCH') {
           // Access rules decide who can do anything, so only admins may change them.
-          if (body.settings && JSON.stringify((body.settings as {access?: Access}).access ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) needAdmin();
+          const nextAccess = (body.settings as {access?: Access} | undefined)?.access;
+          if (body.settings && JSON.stringify(nextAccess ?? null) !== JSON.stringify(access(tasks.project(b)) ?? null)) {
+            const why = (ws.requireLogin || bearer) ? mayChangeAccess(tasks.db, actor, access(tasks.project(b)), nextAccess) : null;
+            if (why) throw new Denied(why);
+            if (bearer && !isAdmin(actor)) throw new Denied('Tokens cannot change access rules');
+          }
           need(b, 'settings');
           if (body.sort !== undefined && areaLocked(tasks.db, 'projectOrder')) needAdmin();
           return send(res, 200, tasks.updateProject(b, body));
@@ -632,7 +644,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           return send(res, 200, out);
         }
         if (b && c === 'import' && m === 'POST') { need(b, 'create'); return send(res, 200, tasks.importItems(b, body.rows, actor)); }
-        if (b && m === 'DELETE') { needAdmin(); tasks.deleteProject(b); return send(res, 200, {ok: true}); }
+        if (b && m === 'DELETE') { if (access(tasks.project(b))?.private) need(b, 'settings'); else needAdmin(); tasks.deleteProject(b); return send(res, 200, {ok: true}); }
       }
 
       if (a === 'items') {

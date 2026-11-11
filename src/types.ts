@@ -44,7 +44,7 @@ export type ProjectSettings = {
   webhooks: {id: string; url: string; events: string[]}[];
   autoRollover: boolean;           // move unfinished work when a sprint ends
   /** Who can do what here: a default role for everyone (or 'inherit' their workspace role, or 'none'), plus per-person roles. */
-  access?: {default: string; members: Record<string, string>};
+  access?: {default: string; members: Record<string, string>; private?: boolean};
   /** When false (default), AI agents cannot move work to a Done status themselves; a person approves it. */
   aiMayComplete?: boolean;
   /** Rules per item type: allowed status moves, fields required before Done, approval required, humans only. */
