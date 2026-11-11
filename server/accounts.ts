@@ -9,6 +9,7 @@ import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
 import {checkPassword, hashPassword} from './auth.ts';
 import {DatabaseSync} from 'node:sqlite';
+import {mkdirSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {listWorkspaces} from './workspaces.ts';
 
@@ -63,5 +64,7 @@ export const accountCookie = (token: string, secure: boolean) =>
 
 /** The server's account store, beside the main workspace database (data/accounts.db). */
 export function openAccounts() {
-  return new Accounts(new DatabaseSync(join(dirname(listWorkspaces().find(w => w.id === 'main')!.db), 'accounts.db')));
+  const dir = dirname(listWorkspaces().find(w => w.id === 'main')!.db);
+  mkdirSync(dir, {recursive: true}); // a fresh install has no data folder yet
+  return new Accounts(new DatabaseSync(join(dir, 'accounts.db')));
 }

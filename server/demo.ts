@@ -1,8 +1,21 @@
-// Sample data for trying the app and for screenshots: a "work" workspace (the built-in demo projects) and a
-// "personal" one with home, health and travel projects. Runs only in demo mode (pnpm demo), on an empty data folder.
+// Sample data for trying the app and for screenshots: a "work" workspace (the built-in demo spaces) and a
+// "personal" one with home, health and travel spaces, with logos and headers. Runs only in demo mode (pnpm demo), on an empty data folder.
 import type {Tasks} from './service.ts';
+import type {Project} from '../src/types.ts';
+import {copyFileSync, mkdirSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {createWorkspace, listWorkspaces, updateWorkspace, type WorkspaceInfo} from './workspaces.ts';
 import {addUnit} from '../src/dates.ts';
+
+// Logos and header pictures for the sample workspaces (made for the demo, in server/demo-assets).
+const ASSETS = join(import.meta.dirname, 'demo-assets');
+const logo = (file: string) => 'data:image/png;base64,' + readFileSync(join(ASSETS, file)).toString('base64');
+function header(t: Tasks, p: Project | undefined, file: string) {
+  if (!p) return;
+  mkdirSync(join(t.dataDir, 'covers'), {recursive: true});
+  copyFileSync(join(ASSETS, file), join(t.dataDir, 'covers', `space-${p.id}.jpg`));
+  t.updateProject(p.id, {settings: {...p.settings, cover: {image: `space-${p.id}`, v: 1}}});
+}
 
 /** An AI agent to connect over MCP, as in docs/MCP.md. */
 function addBot(t: Tasks) {
@@ -13,10 +26,16 @@ function addBot(t: Tasks) {
 export function seedSampleWorkspaces(open: (w: WorkspaceInfo) => Tasks) {
   if (listWorkspaces().length > 1) return;
   const main = listWorkspaces()[0];
-  updateWorkspace(main.id, {name: 'Acme Studio', color: '#0ea5e9', icon: 'A'});
+  updateWorkspace(main.id, {name: 'Acme Studio', color: '#0ea5e9', icon: 'A', logo: logo('logo-acme.png')});
   const work = open(main); // seeds the work projects
   addBot(work);
-  const w = createWorkspace({name: 'Personal', color: '#10b981', icon: 'P'});
+  const space = (start: string) => work.listProjects().find(p => p.name.startsWith(start));
+  header(work, space('Getting started'), 'header-waves.jpg');
+  header(work, space('Website'), 'header-hills.jpg');
+  header(work, space('DevOps'), 'header-shapes.jpg');
+  const alex = work.listPeople().find(p => p.kind !== 'ai');
+  if (alex) work.setPref(alex.id, 'cover:mywork', {gradient: 7});
+  const w = updateWorkspace(createWorkspace({name: 'Personal', color: '#10b981', icon: 'P'}).id, {logo: logo('logo-personal.png')});
   const t = open(w);
   const me = t.createPerson({name: 'David', email: 'david@example.com'});
   t.db.prepare('update people set admin = 1 where id = ?').run(me.id);
@@ -42,6 +61,8 @@ export function seedSampleWorkspaces(open: (w: WorkspaceInfo) => Tasks) {
 
   const trip = t.createProject({name: 'Lisbon trip', key: 'TRIP', types: ['Trip', 'Task', 'Subtask'], settings: {icon: 'lucide:Plane', color: '#f59e0b'}});
   const root = t.createItem({projectId: trip.id, title: 'Lisbon, spring', type: 'Trip', start: d(5), due: d(40), ...mine}, by);
+  header(t, trip, 'header-hills.jpg');
+  t.updateProject(home.id, {settings: {...home.settings, cover: {gradient: 2}}});
   let prev = null as null | {id: string; due: string | null};
   for (const [title, len] of [['Book flights', 1], ['Book the apartment', 2], ['Plan day trips to Sintra and Cascais', 4], ['Pack and arrange pet sitter', 2]] as const) {
     const start = prev?.due ? addUnit(prev.due, 1, 'day') : d(5);
