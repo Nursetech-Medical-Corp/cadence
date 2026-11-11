@@ -45,7 +45,6 @@ export function SprintCard({store, sprint, items, over, onDragOver, onDrop, curr
 }) {
   const [tab, setTab] = useState<'items' | 'people'>(() => (localStorage.getItem('sprint-card-tab') as 'people') || 'items');
   const pick = (t: 'items' | 'people') => { setTab(t); localStorage.setItem('sprint-card-tab', t); };
-  const [all, setAll] = useState(false);
   const mine = items.filter(i => i.sprint === sprint.id).sort((a, b) => Number(!!a.completed) - Number(!!b.completed) || a.sort - b.sort);
   const done = mine.filter(i => i.completed).length;
   const hours = mine.reduce((a, i) => a + (i.estimate ?? 0), 0);
@@ -65,8 +64,7 @@ export function SprintCard({store, sprint, items, over, onDragOver, onDrop, curr
       <div className="small muted" style={{padding: '4px 6px'}}>{mine.length} items, {done} done{hours ? `, ${hours}h estimated` : ''}. Drop items here.</div>
       <div className="seg sc-tabs"><button className={tab === 'items' ? 'on' : ''} onClick={() => pick('items')}>Items</button><button className={tab === 'people' ? 'on' : ''} onClick={() => pick('people')}>People</button></div>
       {tab === 'people' ? <Capacity store={store} sprint={sprint} items={items} /> : <div className="sc-items">
-        {(all ? mine : mine.slice(0, 8)).map(i => <SprintRow key={i.id} store={store} item={i} items={items} open={open} onDragItem={onDragItem} />)}
-        {mine.length > 8 && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show fewer' : `Show all ${mine.length}`}</button>}
+        {mine.map(i => <SprintRow key={i.id} store={store} item={i} items={items} open={open} onDragItem={onDragItem} />)}
         {!mine.length && <div className="muted small" style={{padding: '2px 6px'}}>Nothing planned yet.</div>}
       </div>}
     </div>

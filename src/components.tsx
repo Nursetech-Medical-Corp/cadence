@@ -170,7 +170,7 @@ export function TypeSelect({project, value, onChange}: {project: Project; value:
 }
 
 export function TypeBadge({type}: {type: string}) {
-  return <span className={'type type-' + type.toLowerCase().replace(/[^a-z]/g, '')}>{type}</span>;
+  return <span className={'type type-' + type.toLowerCase().replace(/[^a-z]/g, '')} title={type}>{type}</span>;
 }
 
 export function SprintSelect({sprints, value, onChange, projectId}: {sprints: Sprint[]; value: string | null; onChange: (v: string | null) => void; projectId?: string}) {
