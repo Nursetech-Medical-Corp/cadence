@@ -1136,3 +1136,16 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .cover-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px 6px 8px; }
 .cover-swatch { height: 34px; border-radius: 6px; border: 1px solid var(--line); cursor: pointer; }
 .cover-swatch:hover { outline: 2px solid var(--accent); }
+
+/* Sprint planning panel */
+.sc-tabs { margin: 6px 0 4px; }
+.sc-tabs button { padding: 2px 10px; font-size: 12px; }
+.sc-items { display: flex; flex-direction: column; gap: 2px; }
+.sc-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; cursor: grab; }
+.sc-item:hover { background: var(--hover); }
+.sc-item.done .grow { text-decoration: line-through; color: var(--muted); }
+.sc-item .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-folded { flex: none; width: 30px; border: 0; border-left: 1px solid var(--line); background: var(--bg2); color: var(--muted); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 12px; font: inherit; font-size: 12px; }
+.plan-folded:hover { color: var(--text); background: var(--hover); }
+.plan-folded span { writing-mode: vertical-rl; }

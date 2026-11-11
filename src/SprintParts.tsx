@@ -37,11 +37,16 @@ function CapRow({store, sprint, person, hours}: {store: Store; sprint: Sprint; p
   </>;
 }
 
-export function SprintCard({store, sprint, items, over, onDragOver, onDrop, current}: {
+export function SprintCard({store, sprint, items, over, onDragOver, onDrop, current, open, onDragItem}: {
   store: Store; sprint: Sprint; items: Item[]; over: boolean; current: boolean;
   onDragOver: (e: React.DragEvent) => void; onDrop: () => void;
+  /** Open an item; start dragging one of this sprint's items (to another sprint or back to the backlog). */
+  open: (id: string) => void; onDragItem: (id: string | null) => void;
 }) {
-  const mine = items.filter(i => i.sprint === sprint.id);
+  const [tab, setTab] = useState<'items' | 'people'>(() => (localStorage.getItem('sprint-card-tab') as 'people') || 'items');
+  const pick = (t: 'items' | 'people') => { setTab(t); localStorage.setItem('sprint-card-tab', t); };
+  const [all, setAll] = useState(false);
+  const mine = items.filter(i => i.sprint === sprint.id).sort((a, b) => Number(!!a.completed) - Number(!!b.completed) || a.sort - b.sort);
   const done = mine.filter(i => i.completed).length;
   const hours = mine.reduce((a, i) => a + (i.estimate ?? 0), 0);
   const state = sprintState(sprint, store.today);
@@ -58,7 +63,18 @@ export function SprintCard({store, sprint, items, over, onDragOver, onDrop, curr
       </div>
       <InlineText value={sprint.goal} placeholder="Sprint goal" onSave={goal => store.updateSprint(sprint.id, {goal})} className="small" />
       <div className="small muted" style={{padding: '4px 6px'}}>{mine.length} items, {done} done{hours ? `, ${hours}h estimated` : ''}. Drop items here.</div>
-      <Capacity store={store} sprint={sprint} items={items} />
+      <div className="seg sc-tabs"><button className={tab === 'items' ? 'on' : ''} onClick={() => pick('items')}>Items</button><button className={tab === 'people' ? 'on' : ''} onClick={() => pick('people')}>People</button></div>
+      {tab === 'people' ? <Capacity store={store} sprint={sprint} items={items} /> : <div className="sc-items">
+        {(all ? mine : mine.slice(0, 8)).map(i => (
+          <div key={i.id} className={'sc-item' + (i.completed ? ' done' : '')} draggable onDragStart={() => onDragItem(i.id)} onDragEnd={() => onDragItem(null)} onClick={() => open(i.id)} title="Click to open. Drag to another sprint or back to the backlog.">
+            <span className="grow">{i.title}</span>
+            {i.estimate ? <span className="muted">{i.estimate}h</span> : null}
+            {i.assignees[0] && <Avatar person={store.people.find(p => p.id === i.assignees[0])} size={16} />}
+          </div>
+        ))}
+        {mine.length > 8 && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show fewer' : `Show all ${mine.length}`}</button>}
+        {!mine.length && <div className="muted small" style={{padding: '2px 6px'}}>Nothing planned yet.</div>}
+      </div>}
     </div>
   );
 }

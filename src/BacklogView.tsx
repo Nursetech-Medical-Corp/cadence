@@ -2,7 +2,7 @@
 // rank by dragging, and plan by dragging items onto sprint cards on the right.
 import {useQuickAssist} from './QuickAssist.tsx';
 import {Fragment, useMemo, useState} from 'react';
-import {ChevronDown, ChevronRight, MoreHorizontal, Plus} from 'lucide-react';
+import {ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, MoreHorizontal, Plus} from 'lucide-react';
 import type {Item} from './types.ts';
 import {between} from './store.ts';
 import {Check, PeoplePicker, PriorityIcon, SprintSelect, StatusSelect, TypeBadge} from './components.tsx';
@@ -84,6 +84,17 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
 
   const levels = project.types.filter(t => t !== 'Bug');
   const current = sprints.find(s => sprintState(s, store.today) === 'current');
+  // Which sprints the planning panel lists: current and upcoming (soonest first), past (latest first), or all.
+  const [show, setShowState] = useState<'next' | 'past' | 'all'>(() => (localStorage.getItem('plan-show') as 'next') || 'next');
+  const setShow = (v: 'next' | 'past' | 'all') => { setShowState(v); localStorage.setItem('plan-show', v); };
+  const [folded, setFoldedState] = useState(() => localStorage.getItem('plan-folded') === '1');
+  const setFolded = (v: boolean) => { setFoldedState(v); localStorage.setItem('plan-folded', v ? '1' : '0'); };
+  const listed = useMemo(() => {
+    const closed = (s: typeof sprints[number]) => sprintState(s, store.today) === 'closed';
+    const next = sprints.filter(s => !closed(s)).sort((a, b) => a.start.localeCompare(b.start));
+    const past = sprints.filter(closed).sort((a, b) => b.start.localeCompare(a.start));
+    return show === 'next' ? next : show === 'past' ? past : [...next, ...past];
+  }, [sprints, show, store.today]);
   return (
     <div className="split">
       <div className="left">
@@ -114,22 +125,30 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
           </>}
         </div>
       </div>
+      {folded ? <button className="plan-folded" title="Show sprint planning" onClick={() => setFolded(false)}><ChevronsLeft size={14} /><span>Planning</span></button> :
       <div className="right">
-        <div style={{display: 'flex', alignItems: 'center', marginBottom: 10}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8}}>
           <b>Planning</b><span className="spacer" />
-          <button className="btn primary" onClick={() => store.createSprint(project.id)}><Plus size={14} /> New sprint</button>
+          <button className="btn primary small" onClick={() => store.createSprint(project.id)}><Plus size={13} /> New sprint</button>
+          <button className="icon" title="Hide planning (fold to the right)" onClick={() => setFolded(true)}><ChevronsRight size={15} /></button>
+        </div>
+        <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10}}>
+          <select className="plain-select" value={show} onChange={e => setShow(e.target.value as 'next')}>
+            <option value="next">Current and upcoming</option><option value="past">Past sprints</option><option value="all">All sprints</option>
+          </select>
+          {current && <button className="btn ghost small" title="Scroll to the current sprint" onClick={() => document.querySelector('.split .right .sprint-card.current')?.scrollIntoView({behavior: 'smooth', block: 'start'})}>Go to current</button>}
         </div>
         <div className={'sprint-card' + (overSprint === 'backlog' ? ' over' : '')} onDragOver={e => { e.preventDefault(); setOverSprint('backlog'); }} onDrop={() => dropOnSprint(null)}>
           <div className="sc-head">Backlog</div>
           <div className="small muted">{allItems.filter(i => !i.sprint && !i.completed).length} open items not in a sprint. Drop here to unplan.</div>
         </div>
-        {sprints.filter(s => sprintState(s, store.today) !== 'closed').map(s => (
-          <SprintCard key={s.id} store={store} sprint={s} items={allItems} current={s.id === current?.id} over={overSprint === s.id}
+        {listed.map(s => (
+          <SprintCard key={s.id} store={store} sprint={s} items={allItems} current={s.id === current?.id} over={overSprint === s.id} open={open} onDragItem={setDrag}
             onDragOver={e => { e.preventDefault(); setOverSprint(s.id); }} onDrop={() => dropOnSprint(s.id)} />
         ))}
-        {sprints.some(s => sprintState(s, store.today) === 'closed') && <div className="muted small">{sprints.filter(s => sprintState(s, store.today) === 'closed').length} closed sprints hidden. See them in the Sprint view.</div>}
-        {!sprints.length && <div className="muted small">No sprints yet. Create one, then drag items onto it.</div>}
-      </div>
+        {show === 'next' && sprints.some(s => sprintState(s, store.today) === 'closed') && <button className="link small" onClick={() => setShow('past')}>{sprints.filter(s => sprintState(s, store.today) === 'closed').length} past sprints. Show them</button>}
+        {!sprints.length ? <div className="muted small">No sprints yet. Create one, then drag items onto it.</div> : !listed.length && <div className="muted small">No sprints here.</div>}
+      </div>}
     </div>
   );
 }
