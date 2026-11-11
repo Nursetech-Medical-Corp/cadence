@@ -11,7 +11,8 @@ export function DataPage({store}: {store: Store}) {
   const [snaps, setSnaps] = useState<Snap[]>([]);
   const [msg, setMsg] = useState('');
   const file = useRef<HTMLInputElement>(null);
-  const load = () => api<Snap[]>('/backups').then(setSnaps).catch(() => {});
+  const [cloud, setCloud] = useState<{configured: boolean; bucket?: string; lastOk?: string; lastFile?: string; lastError?: string} | null>(null);
+  const load = () => { api<Snap[]>('/backups').then(setSnaps).catch(() => {}); api<typeof cloud>('/cloud-backup').then(setCloud).catch(() => {}); };
   useEffect(() => { load(); }, []);
 
   const restore = async (f: File) => {
@@ -47,7 +48,10 @@ export function DataPage({store}: {store: Store}) {
       <h3>Automatic backups</h3>
       <BackupSchedule onSaved={load} />
       <p className="muted small">Snapshots are full copies of the database in <code>{wsId() === 'main' ? 'data/backups' : `data/workspaces/${wsId()}/backups`}</code>. Manual and before-restore copies are never removed automatically. To roll back to one, stop the app and copy it over that database file.</p>
-      <button className="btn" onClick={async () => { await api('/backups', {method: 'POST'}); load(); setMsg('Snapshot saved.'); }}><HardDriveDownload size={14} /> Back up now</button>
+      <p className="small">{cloud?.configured
+        ? <>Encrypted cloud copies: on, to <code>{cloud.bucket}</code>. {cloud.lastOk ? `Last upload ${new Date(cloud.lastOk).toLocaleString()}.` : 'No upload yet since the server started.'} {cloud.lastError && <span style={{color: 'var(--danger)'}}>Last error: {cloud.lastError}</span>}</>
+        : <span className="muted">Encrypted cloud copies: off. Set the CADENCE_BACKUP_S3_* variables and CADENCE_BACKUP_PASSPHRASE on the server (see server/cloudbackup.ts) to send every snapshot, encrypted, to an S3-compatible bucket.</span>}</p>
+      <button className="btn" onClick={async () => { const r = await api<{cloud: boolean}>('/backups', {method: 'POST'}); load(); setMsg(r.cloud ? 'Snapshot saved and uploaded, encrypted.' : 'Snapshot saved.'); }}><HardDriveDownload size={14} /> Back up now</button>
       <div style={{marginTop: 10}}>
         {snaps.map(s => <div key={s.name} className="row"><span className="grow">{new Date(s.created).toLocaleString()}</span><span className={'tag'}>{s.keptAs ?? 'will be pruned'}</span><span className="muted small">{(s.bytes / 1024).toFixed(0)} KB</span></div>)}
         {!snaps.length && <p className="muted small">No snapshots yet.</p>}

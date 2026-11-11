@@ -41,6 +41,15 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - Locked out: `pnpm reset-password you@example.com` on the server prints a new password.
 - People can create their own account only if the owner opens sign-up (Team page, Server); otherwise by invite. Forgot password emails a one-time link through the connected Gmail sender, or prints it in the server log when none is set up.
 
+### Behind Coolify or another HTTPS proxy
+Links in emails (invites, password resets) and the Google sign-in redirect use the address people reach the server on, taken from `X-Forwarded-Proto`/`X-Forwarded-Host`. Set `CADENCE_URL=https://tasks.example.com` to pin it.
+
+### Encrypted cloud backups
+Set `CADENCE_BACKUP_S3_ENDPOINT`, `CADENCE_BACKUP_S3_REGION`, `CADENCE_BACKUP_S3_BUCKET`, `CADENCE_BACKUP_S3_KEY_ID`, `CADENCE_BACKUP_S3_SECRET` (any S3-compatible bucket: Backblaze B2, Cloudflare R2, AWS) and `CADENCE_BACKUP_PASSPHRASE`. Every snapshot is then gzipped, encrypted (AES-256-GCM) and uploaded. `pnpm decrypt-backup <file.enc>` turns a download back into a database file. Keep the passphrase in a password manager: without it the backups cannot be opened.
+
+### Personal spaces and My data
+Anyone can create a personal space (New space, Personal). Only they see it, admins included, until they use Share on the space header. My account, My data downloads everything a person can see plus their layouts, and restores personal spaces and layouts by merging.
+
 ### On phones
 Cadence installs as an app. On iPhone or iPad, open your server's address in Safari, tap Share, then Add to Home Screen. On Android or desktop Chrome and Edge, use Install app in the address bar or menu. Phones get a tab bar (My work, Inbox, new task, Search, Spaces), and a tap on a task opens it full screen.
 

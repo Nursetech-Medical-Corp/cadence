@@ -14,6 +14,7 @@ import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {exportMine, importMine} from './personal.ts';
+import {cloudStatus, uploadSnapshot} from './cloudbackup.ts';
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
@@ -105,7 +106,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
-  const auto = () => { try { maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); } catch (e) { console.error('Snapshot failed', e); } };
+  const auto = () => { try { const f = maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); if (f) void uploadSnapshot(info.id, f); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
   setInterval(auto, 10 * 60 * 1000).unref();
   // Due-date automations and sprint rollover, checked on start and hourly.
@@ -600,7 +601,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
       if (a === 'backups') {
         if (m === 'GET') return send(res, 200, retention(listSnapshots(bdir), getSettings(bdir)));
-        if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); return send(res, 201, {file: snapshot(tasks.db, 'manual', bdir)}); }
+        if (m === 'POST') { needAdmin(); mirrorUploads(tasks.dataDir, bdir); const file = snapshot(tasks.db, 'manual', bdir); const cloud = await uploadSnapshot(info.id, file); return send(res, 201, {file, cloud, cloudStatus: cloudStatus(info.id)}); }
+      }
+      if (a === 'cloud-backup' && m === 'GET') { needAdmin(); return send(res, 200, cloudStatus(info.id));
       }
 
       // My data: everything this person can see plus their layouts, and a merging restore of it.
