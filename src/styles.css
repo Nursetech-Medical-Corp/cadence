@@ -1181,3 +1181,22 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .hidden-cols { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 4px 8px; }
 
 .computed.over { color: var(--danger); font-weight: 600; }
+
+/* Sign-in page */
+.auth-tabs { width: 100%; }
+.auth-tabs button { flex: 1; }
+.signin-card .link { align-self: center; }
+
+/* Sign-in, create account, reset, invite and setup screens: a centered card on a soft background. */
+.signin { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(1200px 600px at 10% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent),
+              radial-gradient(900px 500px at 110% 110%, color-mix(in srgb, #0ea5e9 14%, transparent), transparent), var(--bg); }
+.signin-card { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 10px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 16px; padding: 26px 24px; box-shadow: 0 20px 50px rgba(15, 23, 42, .10); }
+.signin-card h1 { font-size: 1.35em; }
+.signin-card input.search { height: 40px; font-size: 15px; }
+.signin-card > .btn.primary { height: 40px; font-size: 15px; }
+.signin-card .google-btn { width: 100%; justify-content: center; height: 40px; }
+.signin-card .or { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.signin-card .or::before, .signin-card .or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+@media (max-width: 480px) { .signin { place-items: start center; padding-top: 48px; } .signin-card { padding: 22px 18px; box-shadow: none; } }

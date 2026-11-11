@@ -9,7 +9,7 @@ import {Avatar} from './components.tsx';
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
 type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'};
-export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; setup?: boolean; memberOf?: {id: string; name: string}[];
+export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
   person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; caps: Record<string, string[]>};
 
 /** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
@@ -57,23 +57,60 @@ export function NoAccess({me}: {me: Me}) {
   );
 }
 
-export function SignIn({googleReady}: {googleReady: boolean}) {
+export function SignIn({googleReady, signup}: {googleReady: boolean; signup?: 'open' | 'invite'}) {
+  const [mode, setMode] = useState<'in' | 'new' | 'forgot'>('in');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('error') ?? '');
+  const [note, setNote] = useState('');
+  const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
   const submit = async () => {
-    try { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Sign in failed'); }
+    setError(''); setNote('');
+    try {
+      if (mode === 'in') { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); }
+      else if (mode === 'new') { const r = await api<{workspace: string}>('/auth/signup', {method: 'POST', body: {name, email, password}}); switchWorkspace(r.workspace); }
+      else { const r = await api<{message: string}>('/auth/forgot', {method: 'POST', body: {email}}); setNote(r.message); }
+    } catch (e) { fail(e); }
+  };
+  const go = (m: typeof mode) => { setMode(m); setError(''); setNote(''); };
+  return (
+    <AuthCard>
+      <h1 style={{margin: '8px 0 4px'}}>{mode === 'in' ? 'Sign in' : mode === 'new' ? 'Create your account' : 'Reset your password'}</h1>
+      {mode !== 'forgot' && <div className="seg auth-tabs"><button className={mode === 'in' ? 'on' : ''} onClick={() => go('in')}>Sign in</button><button className={mode === 'new' ? 'on' : ''} onClick={() => go('new')}>Create account</button></div>}
+      {mode === 'new' && signup !== 'open' ? <div className="muted small">Accounts here are by invitation. Ask a workspace admin to invite your email; the invite link lets you set your password.</div> : <>
+        {googleReady && mode === 'in' && <><a className="btn google-btn" href="/api/auth/google/start"><GoogleMark /> Continue with Google</a><div className="or"><span>or</span></div></>}
+        {mode === 'new' && <input className="search" placeholder="Your name" autoComplete="name" value={name} onChange={e => setName(e.target.value)} />}
+        <input className="search" placeholder="Email" type="email" autoComplete="username" autoFocus value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => mode === 'forgot' && e.key === 'Enter' && submit()} />
+        {mode !== 'forgot' && <input className="search" type="password" placeholder={mode === 'new' ? 'Password (8 or more characters)' : 'Password'} autoComplete={mode === 'new' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}
+        {error && <div className="small" style={{color: 'var(--danger)'}}>{error}</div>}
+        {note && <div className="small" style={{color: 'var(--ok)'}}>{note}</div>}
+        <button className="btn primary" style={{padding: 8}} disabled={!email.trim() || (mode !== 'forgot' && !password)} onClick={submit}><LogIn size={14} /> {mode === 'in' ? 'Sign in' : mode === 'new' ? 'Create account' : 'Send reset link'}</button>
+        {mode === 'in' && <button className="link small" onClick={() => go('forgot')}>Forgot password?</button>}
+        {mode === 'forgot' && <button className="link small" onClick={() => go('in')}>Back to sign in</button>}
+        {mode === 'new' && <div className="muted small">You get your own workspace to start in. Others can invite you into theirs.</div>}
+      </>}
+    </AuthCard>
+  );
+}
+
+/** The page a password reset link opens. */
+export function ResetPassword({token}: {token: string}) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [err, setErr] = useState('');
+  const go = async () => {
+    if (pw !== pw2) return setErr('The two passwords do not match');
+    try { await api('/auth/reset', {method: 'POST', body: {token, password: pw}}); location.hash = '/mywork'; location.reload(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
   return (
     <AuthCard>
-        <h1 style={{margin: '8px 0 4px'}}>Sign in</h1>
-        {googleReady && <><a className="btn google-btn" href="/api/auth/google/start"><GoogleMark /> Continue with Google</a><div className="or"><span>or</span></div></>}
-        <input className="search" placeholder="Email" autoFocus value={email} onChange={e => setEmail(e.target.value)} />
-        <input className="search" type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
-        {error && <div className="small" style={{color: 'var(--danger)'}}>{error}</div>}
-        <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} onClick={submit}><LogIn size={14} /> Sign in</button>
-        <div className="muted small">No account? Ask a workspace admin to add your email on the Team page.</div>
+      <h1 style={{margin: '8px 0 4px'}}>Choose a new password</h1>
+      <input className="search" type="password" placeholder="New password (8 or more characters)" autoComplete="new-password" autoFocus value={pw} onChange={e => setPw(e.target.value)} />
+      <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+      {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
+      <button className="btn primary" style={{padding: 8}} disabled={pw.length < 8} onClick={go}><LogIn size={14} /> Save and sign in</button>
     </AuthCard>
   );
 }
@@ -107,6 +144,15 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       {msg && <p className="small" style={{color: /connected/.test(msg) ? 'var(--ok)' : 'var(--danger)'}}>{msg}</p>}
 
       {me.account && <AccountCard me={me} />}
+      {me.owner && <section className="set-card">
+        <div className="set-card-head"><h3>Server</h3><span className="muted small">You set this server up, so you decide who can create an account.</span></div>
+        <div className="set-item"><span className="grow">Who can create an account</span>
+          <select className="plain-select" defaultValue={me.signup ?? 'invite'} onChange={async e => { try { await api('/auth/server', {method: 'PUT', body: {signup: e.target.value}}); setMsg('Saved.'); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }}>
+            <option value="invite">Only people invited to a workspace</option>
+            <option value="open">Anyone (they get their own workspace)</option>
+          </select></div>
+        <div className="muted small">Password reset emails go out through the Gmail sender connected below. Without one, the reset link is printed in the server log for you to pass on.</div>
+      </section>}
 
       {ws && <section className="set-card">
         <div className="set-card-head"><h3>Customization</h3><span className="muted small">The team setup is what everyone starts from. Choose who changes each part, and which features are on.</span></div>

@@ -18,7 +18,7 @@ import {QuickCapture, ShortcutsDialog, moveFocus, targetIds, useHotkeys, type Ac
 import {ItemPanel} from './ItemPanel.tsx';
 import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
-import {AcceptInvite, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
+import {AcceptInvite, NoAccess, ResetPassword, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
 import {ContextMenus} from './ContextMenu.tsx';
@@ -47,7 +47,7 @@ const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.
 const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'reset'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -61,6 +61,7 @@ function readRoute(): Route {
   if (page === 'templates' && id) return {page: 'template', id};
   if (page === 'timesheet') return {page: 'timesheet'};
   if (page === 'invite' && id) return {page: 'invite', id};
+  if (page === 'reset' && id) return {page: 'reset', id};
   if (page === 'today') return {page: 'today'};
   if (page === 'templates' || page === 'routines' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
   if (page === 'signin') return {page: 'signin'};
@@ -204,7 +205,8 @@ export function App() {
   const view = route.page === 'project' ? projectViews.find(v => v.id === route.view) ?? (route.view === 'settings' ? undefined : projectViews[0]) : undefined;
 
   if (route.page === 'invite') return <AcceptInvite secret={route.id} />;
-  if (auth?.required && !auth.person) return auth.setup ? <SetupServer /> : auth.account ? <NoAccess me={auth} /> : <SignIn googleReady={auth.googleReady} />;
+  if (route.page === 'reset') return <ResetPassword token={route.id} />;
+  if (auth?.required && !auth.person) return auth.setup ? <SetupServer /> : auth.account ? <NoAccess me={auth} /> : <SignIn googleReady={auth.googleReady} signup={auth.signup} />;
   if (!store.ready) return <div className="loading">{store.error ?? 'Loading...'}</div>;
 
   return (

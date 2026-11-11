@@ -22,7 +22,32 @@ export class Accounts {
   constructor(readonly db: Db) {
     db.exec(`create table if not exists accounts (email text primary key, password text, created text not null);
       create table if not exists account_sessions (hash text primary key, email text not null, created text not null, expires text not null);
-      create table if not exists account_links (a text not null, b text not null, created text not null, primary key (a, b));`);
+      create table if not exists account_links (a text not null, b text not null, created text not null, primary key (a, b));
+      create table if not exists account_resets (hash text primary key, email text not null, expires text not null);
+      create table if not exists server_settings (key text primary key, value text not null);`);
+  }
+
+  /** Server-wide settings kept by the owner (the account that set the server up). */
+  setting(key: string): string | null { return (this.db.prepare('select value from server_settings where key = ?').get(key) as {value: string} | undefined)?.value ?? null; }
+  setSetting(key: string, value: string) { this.db.prepare('insert into server_settings (key, value) values (?, ?) on conflict(key) do update set value = excluded.value').run(key, value); }
+  /** The server owner: the account that set the server up, or on servers set up before this was kept, the oldest account. */
+  owner(): string | null { return this.setting('owner') ?? (this.db.prepare('select email from accounts order by created limit 1').get() as {email: string} | undefined)?.email ?? null; }
+  /** Who may create an account on their own: 'invite' (only through an invite link, the default) or 'open'. */
+  signup(): 'open' | 'invite' { return this.setting('signup') === 'open' ? 'open' : 'invite'; }
+
+  /** A one-time password reset link, valid for an hour. Only its hash is stored. */
+  startReset(email: string) {
+    const token = randomBytes(32).toString('base64url');
+    this.db.prepare('delete from account_resets where email = ? or expires < ?').run(email, new Date().toISOString());
+    this.db.prepare('insert into account_resets (hash, email, expires) values (?, ?, ?)').run(sha(token), email, new Date(Date.now() + 3600_000).toISOString());
+    return token;
+  }
+  /** The account a reset link belongs to, used up on the way. */
+  useReset(token: string): string | null {
+    const r = this.db.prepare('select email, expires from account_resets where hash = ?').get(sha(String(token))) as {email: string; expires: string} | undefined;
+    if (!r) return null;
+    this.db.prepare('delete from account_resets where hash = ?').run(sha(String(token)));
+    return r.expires > new Date().toISOString() ? r.email : null;
   }
   count() { return (this.db.prepare('select count(*) as n from accounts').get() as {n: number}).n; }
   has(email: string) { return !!this.db.prepare('select 1 from accounts where email = ?').get(email); }

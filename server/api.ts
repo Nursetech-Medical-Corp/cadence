@@ -137,6 +137,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const isAdmin = (pid: string | null) => !!pid && !!(tasks.db.prepare('select admin from people where id = ?').get(pid) as {admin: number} | undefined)?.admin;
   const access = (p: Project) => (p.settings as {access?: Access}).access;
   const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict);
+  const systemMail = (to: string, subject: string, text: string) => { const main = all().find(w => w.id === 'main') ?? all()[0]; return main ? sendEmail(main.tasks.db, to, subject, text) : Promise.resolve(false); };
   const memberId = (t: Tasks, email: string) => (t.db.prepare('select id from people where lower(email) = ? and active = 1').get(email) as {id: string} | undefined)?.id ?? null;
   /** Workspaces where this account is an active member. */
   /** Who a set of linked accounts is in a workspace: the first of them (the signed-in one first) that is a member. */
@@ -190,6 +191,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (b === 'me' && m === 'GET') {
           const me = actor ? tasks.listPeople().find(p => p.id === actor) ?? null : null;
           return send(res, 200, {required: ws.requireLogin, forced: loginForced(), account, setup: ws.requireLogin && !accounts.count(),
+            signup: accounts.signup(), owner: !!account && accounts.owner() === account,
             linked: emails.slice(1), memberOf: account && !me ? memberships(emails) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
             caps: Object.fromEntries(tasks.listProjects().map(p => [p.id, [...caps(actor, p.id)]]))});
         }
@@ -210,9 +212,58 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
             t.emit({kind: 'people'});
           }
           accounts.setHash(email, hash);
+          accounts.setSetting('owner', email);
           syncHash(email, hash);
           res.setHeader('set-cookie', signIn(email));
           return send(res, 200, {ok: true});
+        }
+        // Create an account on your own (only when the owner allows it): you get your own workspace to start in.
+        if (b === 'signup' && m === 'POST') {
+          if (!ws.requireLogin || accounts.signup() !== 'open') throw new Denied('Accounts on this server are by invitation. Ask a workspace admin to invite your email.');
+          const key = `signup|${req.socket.remoteAddress}`, tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 3600_000);
+          if (tries.length >= 5) return send(res, 429, {error: 'Too many new accounts from here. Try again later.'});
+          const email = String(body.email ?? '').trim().toLowerCase(), name = String(body.name ?? '').trim().slice(0, 80) || email.split('@')[0];
+          if (!/^[^\s@<>",;:]+@[^\s@<>",;:]+\.[a-z]{2,}$/i.test(email)) throw new Invalid('Enter a valid email address');
+          if (accounts.has(email)) throw new Invalid('That email already has an account. Sign in, or use Forgot password.');
+          const hash = hashPassword(String(body.password ?? ''));
+          loginTries.set(key, [...tries, Date.now()]);
+          const w = createWorkspace({name: `${name.split(' ')[0]}'s workspace`});
+          const t = openTasks(w);
+          const p = t.createPerson({name, email});
+          t.db.prepare('update people set admin = 1, password = ? where id = ?').run(hash, p.id);
+          t.createProject({name: 'General'});
+          accounts.setHash(email, hash);
+          res.setHeader('set-cookie', signIn(email));
+          return send(res, 201, {ok: true, workspace: w.id});
+        }
+        // Forgot password: a one-time link by email. The answer is the same whether or not the email has an account.
+        if (b === 'forgot' && m === 'POST') {
+          const key = `forgot|${req.socket.remoteAddress}`, tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
+          if (tries.length >= 5) return send(res, 429, {error: 'Too many requests. Wait 15 minutes and try again.'});
+          loginTries.set(key, [...tries, Date.now()]);
+          const email = String(body.email ?? '').trim().toLowerCase();
+          if (accounts.has(email)) {
+            const origin = typeof req.headers.origin === 'string' && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : `${secure ? 'https' : 'http'}://${req.headers.host}`;
+            const link = `${origin}/#/reset/${accounts.startReset(email)}`;
+            const sent = await systemMail(email, 'Reset your Cadence password', `Someone asked to reset the password for ${email} on Cadence.\n\nChoose a new password here (the link works once, for one hour):\n${link}\n\nIf it was not you, ignore this email; your password stays the same.`).catch(() => false);
+            if (!sent) console.log(`[cadence] No email sender is set up. Password reset link for ${email}: ${link}`);
+          }
+          return send(res, 200, {ok: true, message: 'If that email has an account, a reset link is on its way. It works once, for one hour.'});
+        }
+        if (b === 'reset' && m === 'POST') {
+          const hash = hashPassword(String(body.password ?? ''));
+          const email = accounts.useReset(String(body.token ?? ''));
+          if (!email) throw new Invalid('This link has expired or was already used. Ask for a new one.');
+          accounts.setHash(email, hash);
+          syncHash(email, hash);
+          res.setHeader('set-cookie', signIn(email));
+          return send(res, 200, {ok: true});
+        }
+        // The server owner decides who can create accounts.
+        if (b === 'server' && m === 'PUT') {
+          if (!account || accounts.owner() !== account) throw new Denied('Only the server owner changes this');
+          if (body.signup === 'open' || body.signup === 'invite') accounts.setSetting('signup', body.signup);
+          return send(res, 200, {signup: accounts.signup()});
         }
         if (b === 'login' && m === 'POST') {
           const email = String(body.email ?? '').trim().toLowerCase();

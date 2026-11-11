@@ -264,3 +264,60 @@ test('linked accounts: a work and a personal account share one sign-in, only wit
     assert.equal((await call('/bootstrap', {cookie: w})).status, 403, 'unlinked again');
   } finally { server.close(); delete process.env.CADENCE_REQUIRE_LOGIN; }
 });
+
+test('sign-up is invite-only until the owner opens it; forgot password sends a one-time link', async () => {
+  const {resetWorkspaceCache} = await import('../server/workspaces.ts');
+  const prevDb = process.env.TASKS_DB;
+  process.env.TASKS_DB = join(mkdtempSync(join(tmpdir(), 'tasks-signup-')), 'tasks.db');
+  resetWorkspaceCache();
+  process.env.CADENCE_REQUIRE_LOGIN = '1';
+  const tasks = new Tasks(openDb(':memory:'), () => '2026-11-10');
+  const mw = apiMiddleware(tasks);
+  const server = createServer((req, res) => mw(req, res, () => { res.statusCode = 404; res.end(); }));
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', () => r()));
+  const base = `http://127.0.0.1:${(server.address() as {port: number}).port}/api`;
+  const call = async (path: string, init: {method?: string; body?: unknown; cookie?: string} = {}) => {
+    const r = await fetch(base + path, {method: init.method ?? 'GET', headers: {'content-type': 'application/json', ...(init.cookie ? {cookie: init.cookie} : {})}, body: init.body === undefined ? undefined : JSON.stringify(init.body)});
+    return {status: r.status, json: await r.json().catch(() => null), cookie: r.headers.get('set-cookie')?.split(';')[0]};
+  };
+  const logged: string[] = [], log = console.log;
+  console.log = (...a: unknown[]) => { logged.push(a.join(' ')); };
+  try {
+    const o = (await call('/auth/setup', {method: 'POST', body: {name: 'Owner', email: 'owner@x.test', password: 'owner password'}})).cookie!;
+    assert.equal((await call('/auth/me', {cookie: o})).json.owner, true);
+    assert.equal((await call('/auth/signup', {method: 'POST', body: {name: 'Pat', email: 'pat@x.test', password: 'pat password'}})).status, 403, 'invite-only by default');
+    assert.equal((await call('/auth/server', {method: 'PUT', body: {signup: 'open'}})).status, 403, 'signed out cannot change it');
+    assert.equal((await call('/auth/server', {method: 'PUT', body: {signup: 'open'}, cookie: o})).status, 200);
+    const pat = await call('/auth/signup', {method: 'POST', body: {name: 'Pat', email: 'pat@x.test', password: 'pat password'}});
+    assert.equal(pat.status, 201);
+    assert.ok(pat.json.workspace, 'a new account gets its own workspace');
+    assert.equal((await call('/auth/signup', {method: 'POST', body: {name: 'Pat', email: 'pat@x.test', password: 'another one'}})).status, 400, 'one account per email');
+    // Forgot password: same answer for unknown emails; the link works once.
+    const unknown = await call('/auth/forgot', {method: 'POST', body: {email: 'nobody@x.test'}});
+    const known = await call('/auth/forgot', {method: 'POST', body: {email: 'owner@x.test'}});
+    assert.equal(unknown.json.message, known.json.message);
+    const link = logged.find(l => l.includes('owner@x.test') && l.includes('#/reset/'))!;
+    const token = link.split('#/reset/')[1].trim();
+    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'short'}})).status, 400);
+    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'brand new pass'}})).status, 200);
+    assert.equal((await call('/auth/reset', {method: 'POST', body: {token, password: 'again again'}})).status, 400, 'link works once');
+    assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'owner@x.test', password: 'owner password'}})).status, 401, 'old password gone');
+    assert.equal((await call('/auth/login', {method: 'POST', body: {email: 'owner@x.test', password: 'brand new pass'}})).status, 200);
+  } finally {
+    console.log = log; server.close(); delete process.env.CADENCE_REQUIRE_LOGIN;
+    if (prevDb === undefined) delete process.env.TASKS_DB; else process.env.TASKS_DB = prevDb;
+    resetWorkspaceCache();
+  }
+});
+
+test('server owner: the setup account, or on older servers the oldest account', async () => {
+  const {Accounts} = await import('../server/accounts.ts');
+  const a = new Accounts(openDb(':memory:'));
+  assert.equal(a.owner(), null);
+  a.setHash('first@example.test', null);
+  await new Promise(r => setTimeout(r, 5));
+  a.setHash('second@example.test', null);
+  assert.equal(a.owner(), 'first@example.test');
+  a.setSetting('owner', 'second@example.test');
+  assert.equal(a.owner(), 'second@example.test');
+});
