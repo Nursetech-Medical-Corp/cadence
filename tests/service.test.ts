@@ -599,3 +599,15 @@ test('timesheet: minutes per task per day; setting a day replaces its entries; z
   assert.equal(t.timesheet(dave.id, '2026-11-09').rows.length, 0);
   assert.throws(() => t.setDayMinutes(dave.id, a.id, '2026-11-10', 2000), /0 to 24 hours/);
 });
+
+test('views: private views hidden from others, reorder in one call, templates drop owner and lock', () => {
+  const {t, dave, sam, p} = setup();
+  const before = t.listViews(p.id).length;
+  const mine = t.createView({projectId: p.id, name: 'Mine', kind: 'list', config: {privateTo: dave.id, locked: true, hideDone: true}});
+  assert.equal(t.listViews(p.id, sam.id).length, before);
+  assert.equal(t.listViews(p.id, dave.id).length, before + 1);
+  const ids = t.listViews(p.id).map(v => v.id).reverse();
+  assert.deepEqual(t.reorderViews(p.id, ids).map(v => v.id), ids);
+  const tpl = t.saveViewTemplate(mine.id, '', p.id);
+  assert.deepEqual((tpl.data as {config: object}).config, {hideDone: true});
+});

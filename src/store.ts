@@ -202,6 +202,10 @@ export function useStore(me: string) {
       setViews(prev => prev.map(v => v.id === id ? {...v, ...patch} : v));
       return api<View>(`/views/${id}`, {method: 'PATCH', body: patch}).catch(e => { fail(e); load(); });
     },
+    reorderViews(projectId: string, ids: string[]) {
+      setViews(prev => prev.map(v => ids.includes(v.id) ? {...v, sort: ids.indexOf(v.id)} : v));
+      return api('/views/order', {method: 'PUT', body: {projectId, ids}}).catch(e => { fail(e); load(); });
+    },
     deleteView(id: string) {
       setViews(prev => prev.filter(v => v.id !== id));
       return api(`/views/${id}`, {method: 'DELETE'}).catch(fail);

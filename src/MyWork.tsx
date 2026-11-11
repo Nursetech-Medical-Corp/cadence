@@ -255,7 +255,9 @@ function FlowWidget({store}: {store: Store}) {
 type AssignedComment = {id: string; itemId: string; author: string; body: string; created: string; item: Item};
 function AssignedComments({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [list, setList] = useState<AssignedComment[]>([]);
-  useEffect(() => { if (me) api<AssignedComment[]>(`/assigned-comments?person=${me}`).then(setList).catch(() => {}); }, [me, store.tick]);
+  const load = () => { if (me) api<AssignedComment[]>(`/assigned-comments?person=${me}`).then(setList).catch(() => {}); };
+  useEffect(load, [me]);
+  useEffect(() => { if (store.lastEvent.current?.kind === 'comment') load(); }, [store.tick]);
   if (!list.length) return <div className="muted small" style={{padding: 8}}>No comments waiting on you.</div>;
   return <div>{list.slice(0, 20).map(c => (
     <div key={c.id} className="row" style={{alignItems: 'flex-start', cursor: 'pointer'}} onClick={() => open(c.itemId)}>

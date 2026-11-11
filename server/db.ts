@@ -34,6 +34,7 @@ create table if not exists notifications (
   text text not null, actor text, created text not null, read integer not null default 0
 );
 create index if not exists notifications_person on notifications(person, read);
+create index if not exists time_person_start on time_entries(person, start);
 create table if not exists sprints (
   id text primary key, project_id text not null references projects(id) on delete cascade,
   name text not null, start text not null, end text not null, goal text not null default '',
@@ -70,6 +71,7 @@ export function openDb(path = process.env.TASKS_DB ?? 'data/tasks.db') {
   // Assigned comments: a comment can be a to-do for one person until resolved.
   const ccols = db.prepare('pragma table_info(comments)').all().map(r => r.name);
   if (!ccols.includes('assignee')) db.exec('alter table comments add column assignee text; alter table comments add column resolved text');
+  db.exec('create index if not exists comments_assignee on comments(assignee) where resolved is null');
   return db;
 }
 

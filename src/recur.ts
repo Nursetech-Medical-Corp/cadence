@@ -1,5 +1,5 @@
 // Recurrence rules shared by the server (spawning the next item) and the UI (preview and summary).
-import {addDays, addUnit, daysBetween, parseDay} from './dates.ts';
+import {addDays, addUnit, daysBetween, parseDay, monday, skipWeekend} from './dates.ts';
 import type {Recur} from './types.ts';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -48,15 +48,9 @@ export function nextOccurrence(r: Recur, base: string, anchor = base): string {
     target.setDate(Math.min(a.getDate(), last));
     next = iso(target);
   } else next = addUnit(base, 12 * r.every, 'month');
-  if (r.skipWeekends) {
-    const wd = parseDay(next).getDay();
-    if (wd === 6) next = addDays(next, 2);
-    if (wd === 0) next = addDays(next, 1);
-  }
-  return next;
+  return r.skipWeekends ? skipWeekend(next) : next;
 }
 
-function monday(s: string) { const d = parseDay(s); return addDays(s, -((d.getDay() + 6) % 7)); }
 
 /** Upcoming dates for a preview, honoring end conditions. */
 export function upcoming(r: Recur, from: string, n = 8): string[] {

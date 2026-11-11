@@ -294,7 +294,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const projects = tasks.listProjects().filter(p => canSee(p.id)), ids = new Set(projects.map(p => p.id));
         return send(res, 200, {
           people: tasks.listPeople(), projects, items: tasks.listItems().filter(i => ids.has(i.projectId)), today: tasks.today(),
-          sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id)).filter(v => !v.config.privateTo || v.config.privateTo === actor),
+          sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
         });
       }
 
@@ -361,12 +361,14 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
 
       if (a === 'views') {
-        if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '').filter(v => !v.config.privateTo || v.config.privateTo === actor)); }
+        if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '', actor)); }
         if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
+        if (b === 'order' && m === 'PUT') { need(String(body.projectId ?? ''), 'views'); return send(res, 200, tasks.reorderViews(String(body.projectId), (body.ids ?? []).map(String))); }
         const vr = b ? tasks.db.prepare('select project_id from views where id = ?').get(b) as {project_id: string} | undefined : undefined;
         if (b && !vr) throw new NotFound('View not found');
         if (vr) need(vr.project_id, 'views');
-        if (b && m === 'PATCH') return send(res, 200, tasks.updateView(b, body));
+        // Only the owner can make a view private to themselves; nobody can make it private to someone else.
+        if (b && m === 'PATCH') { if (body.config?.privateTo && body.config.privateTo !== actor) throw new Invalid('A view can only be made private to yourself'); return send(res, 200, tasks.updateView(b, body)); }
         if (b && m === 'DELETE') { tasks.deleteView(b); return send(res, 200, {ok: true}); }
       }
 
@@ -631,15 +633,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
 
       if (a === 'comments' && b && m === 'PATCH') {
-        const r = tasks.db.prepare('select item_id from comments where id = ?').get(b) as {item_id: string} | undefined;
-        if (!r) throw new NotFound('Comment not found');
-        need(tasks.item(r.item_id).projectId, 'comment');
+        need(tasks.item(tasks.comment(b).itemId).projectId, 'comment');
         return send(res, 200, tasks.resolveComment(b, actor, !!body.resolved));
       }
       if (a === 'assigned-comments' && m === 'GET') {
         const person = ws.requireLogin ? actor : q('person') ?? actor;
         if (!person) throw new Invalid('person is required');
-        return send(res, 200, tasks.assignedComments(person).filter(c => canSee(c.item!.projectId)));
+        return send(res, 200, tasks.assignedComments(person).filter(c => canSee(c.item.projectId)));
       }
       if (a === 'my-work' && m === 'GET') {
         const person = ws.requireLogin ? actor : q('person') ?? actor;

@@ -3,7 +3,7 @@
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
-import {addUnit, daysBetween, iso} from '../src/dates.ts';
+import {addUnit, daysBetween, iso, monday, skipWeekend} from '../src/dates.ts';
 import {parseQuickAdd} from '../src/quickadd.ts';
 import {nextOccurrence} from '../src/recur.ts';
 import {Invalid, NotFound} from './errors.ts';
@@ -121,6 +121,12 @@ function stripPeople(n: PackNode & {assignees?: string[]}): PackNode {
 
 /** Per-item state that must not be copied: AI review progress, external record ids, item links. */
 const cleanFields = (f: Record<string, unknown>) => Object.fromEntries(Object.entries(f).filter(([k]) => !['review', 'ext', 'links', 'follow'].includes(k)));
+
+/** The part of a view's settings that makes sense in another project: no sprint, baselines, lock or owner. */
+export function portableViewConfig(c: ViewConfig): ViewConfig {
+  const {sprint: _s, baselines: _b, baseline: _bl, privateTo: _p, locked: _l, ...rest} = c;
+  return rest;
+}
 
 function toComment(r: Row): Comment {
   return {id: r.id as string, itemId: r.item_id as string, author: r.author as string, body: r.body as string, created: r.created as string, assignee: (r.assignee as string) ?? null, resolved: (r.resolved as string) ?? null};
@@ -373,7 +379,7 @@ export class Tasks {
     if (!delta && !dueDelta) return;
     const rules = this.project(next.projectId).settings.dates ?? {};
     // Saturday and Sunday roll to Monday when the project skips weekends.
-    const workday = (d: string) => { if (!rules.skipWeekends) return d; const w = new Date(d + 'T00:00:00').getDay(); return w === 6 ? addUnit(d, 2, 'day') : w === 0 ? addUnit(d, 1, 'day') : d; };
+    const workday = (d: string) => rules.skipWeekends ? skipWeekend(d) : d;
     const move = (i: Item, d: number) => {
       if (!d || i.completed || !(i.start || i.due)) return;
       const start = i.start ? workday(addUnit(i.start, d, 'day')) : null;
@@ -498,16 +504,23 @@ export class Tasks {
       .map(toComment);
   }
   /** Open comments assigned to a person, newest first, with their item. */
-  assignedComments(person: string) {
-    return this.db.prepare('select * from comments where assignee = ? and resolved is null order by created desc').all(person).map(toComment)
-      .map(c => ({...c, item: this.db.prepare('select * from items where id = ?').get(c.itemId) ? this.item(c.itemId) : null})).filter(c => c.item);
-  }
-  resolveComment(cid: string, actor: string | null, resolved: boolean) {
+  comment(cid: string): Comment {
     const r = this.db.prepare('select * from comments where id = ?').get(cid);
     if (!r) throw new NotFound('Comment not found');
+    return toComment(r);
+  }
+  /** Open comments assigned to a person, newest first, each with its item. */
+  assignedComments(person: string) {
+    const item = this.db.prepare('select * from items where id = ?');
+    return this.db.prepare(`select c.* from comments c join items i on i.id = c.item_id
+      where c.assignee = ? and c.resolved is null order by c.created desc`).all(person)
+      .map(r => ({...toComment(r), item: toItem(item.get(r.item_id as string)!)}));
+  }
+  resolveComment(cid: string, _actor: string | null, resolved: boolean) {
+    const c = this.comment(cid);
     this.db.prepare('update comments set resolved = ? where id = ?').run(resolved ? now() : null, cid);
-    this.emit({kind: 'comment', itemId: r.item_id as string});
-    return toComment(this.db.prepare('select * from comments where id = ?').get(cid)!);
+    this.emit({kind: 'comment', itemId: c.itemId});
+    return this.comment(cid);
   }
   addComment(itemId: string, author: string, body: string, assignee: string | null = null): Comment {
     const item = this.item(itemId);
@@ -571,8 +584,11 @@ export class Tasks {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Invalid('week must be a date like 2026-11-09');
     const days = Array.from({length: 7}, (_, n) => addUnit(weekStart, n, 'day'));
     const rows = new Map<string, number[]>();
-    for (const e of this.listTime({person})) {
-      if (!e.minutes) continue;
+    // Entries are bucketed by local day, so read a day either side of the week in UTC.
+    const from = new Date(addUnit(weekStart, -1, 'day') + 'T00:00:00').toISOString(), to = new Date(addUnit(weekStart, 8, 'day') + 'T00:00:00').toISOString();
+    const entries = this.db.prepare('select item_id, start, minutes from time_entries where person = ? and minutes > 0 and start >= ? and start < ?').all(person, from, to)
+      .map(r => ({itemId: r.item_id as string, start: r.start as string, minutes: r.minutes as number}));
+    for (const e of entries) {
       const n = days.indexOf(iso(new Date(e.start)));
       if (n < 0) continue;
       const m = rows.get(e.itemId) ?? [0, 0, 0, 0, 0, 0, 0];
@@ -585,11 +601,15 @@ export class Tasks {
     this.item(itemId); this.person(person);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Invalid('date must look like 2026-11-30');
     if (!(Number.isFinite(minutes) && minutes >= 0 && minutes <= 1440)) throw new Invalid('A day has 0 to 24 hours');
-    const old = this.listTime({person, itemId}).filter(e => e.end && iso(new Date(e.start)) === date).map(e => e.id);
-    for (const x of old) this.db.prepare('delete from time_entries where id = ?').run(x);
-    if (minutes > 0) this.logTime({itemId, person, minutes: Math.round(minutes), date});
-    else this.emit({kind: 'time', itemId});
-    return this.timesheet(person, addUnit(date, -((new Date(date + 'T00:00:00').getDay() + 6) % 7), 'day'));
+    const from = new Date(date + 'T00:00:00').toISOString(), to = new Date(addUnit(date, 1, 'day') + 'T00:00:00').toISOString();
+    this.db.exec('begin');
+    try {
+      this.db.prepare('delete from time_entries where person = ? and item_id = ? and end is not null and start >= ? and start < ?').run(person, itemId, from, to);
+      if (minutes > 0) this.logTime({itemId, person, minutes: Math.round(minutes), date});
+      this.db.exec('commit');
+    } catch (e) { this.db.exec('rollback'); throw e; }
+    if (!minutes) this.emit({kind: 'time', itemId});
+    return this.timesheet(person, monday(date));
   }
   deleteTime(entryId: string) {
     const r = this.db.prepare('select item_id from time_entries where id = ?').get(entryId) as Row | undefined;
@@ -709,10 +729,10 @@ export class Tasks {
   // Templates. Item templates keep a tree of items (no ids); project templates keep the setup and optionally the items.
   /** Saves a view's layout and settings as a template (dated or project-specific bits like sprint and baselines are left out). */
   saveViewTemplate(viewId: string, name: string, projectId: string | null): Template {
-    const v = this.db.prepare('select * from views where id = ?').get(viewId) as Row | undefined;
-    if (!v) throw new NotFound('View not found');
-    const {sprint: _s, baselines: _b, baseline: _bl, ...config} = j<ViewConfig>(v.config, {});
-    return this.createTemplate({kind: 'view', name: name.trim() || (v.name as string), projectId, data: {name: v.name, kind: v.kind, config}});
+    const r = this.db.prepare('select * from views where id = ?').get(viewId);
+    if (!r) throw new NotFound('View not found');
+    const v = toView(r);
+    return this.createTemplate({kind: 'view', name: name.trim() || v.name, projectId, data: {name: v.name, kind: v.kind, config: portableViewConfig(v.config)}});
   }
   /** Adds a view from a view template to a project. */
   useViewTemplate(templateId: string, projectId: string): View {
@@ -720,7 +740,7 @@ export class Tasks {
     if (t.kind !== 'view') throw new Invalid('That is not a view template');
     this.project(projectId);
     const d = t.data as {name: string; kind: ViewKind; config?: ViewConfig};
-    return this.createView({projectId, name: d.name, kind: d.kind, config: d.config ?? {}, sort: this.listViews(projectId).length});
+    return this.createView({projectId, name: d.name, kind: d.kind, config: d.config ?? {}});
   }
   listTemplates(kind?: 'item' | 'project' | 'view'): Template[] {
     return (kind ? this.db.prepare('select * from templates where kind = ? order by name').all(kind) : this.db.prepare('select * from templates order by name').all())
@@ -787,7 +807,7 @@ export class Tasks {
     const p = this.project(projectId);
     const data = {
       statuses: p.statuses, types: p.types, fields: p.fields, settings: {...p.settings, webhooks: []},
-      views: this.listViews(projectId).map(v => ({name: v.name, kind: v.kind, config: {...v.config, sprint: undefined}})),
+      views: this.listViews(projectId).filter(v => !v.config.privateTo).map(v => ({name: v.name, kind: v.kind, config: portableViewConfig(v.config)})),
       items: includeItems ? this.listItems({projectId}).filter(i => !i.parentId).sort((a, b) => a.sort - b.sort).map(i => this.treeOf(i.id)) : [],
     };
     const t: Template = {id: id(), kind: 'project', name: name.trim() || p.name, projectId, data, created: now()};
@@ -1033,13 +1053,22 @@ export class Tasks {
   }
 
   // Saved views per project. Config holds filters, grouping, columns and zoom.
-  listViews(projectId: string): View[] {
-    const read = () => this.db.prepare('select * from views where project_id = ? order by sort').all(projectId).map(toView);
+  /** Views of a project. With a viewer, private views of other people are left out. */
+  listViews(projectId: string, viewer?: string | null): View[] {
+    const read = () => this.db.prepare('select * from views where project_id = ? order by sort').all(projectId).map(toView)
+      .filter(v => viewer === undefined || !v.config.privateTo || v.config.privateTo === viewer);
     const rows = read();
     if (rows.length) return rows;
     this.project(projectId);
     DEFAULT_VIEWS.forEach((v, n) => this.createView({projectId, name: v.name, kind: v.kind, config: v.config, sort: n}));
     return read();
+  }
+  /** Puts a project's views in the given order with one change event. */
+  reorderViews(projectId: string, ids: string[]) {
+    const set = this.db.prepare('update views set sort = ? where id = ? and project_id = ?');
+    ids.forEach((vid, n) => set.run(n, vid, projectId));
+    this.emit({kind: 'view', projectId});
+    return this.listViews(projectId);
   }
   createView(input: {projectId: string; name: string; kind: ViewKind; config?: ViewConfig; sort?: number}): View {
     const max = (this.db.prepare('select coalesce(max(sort),0) m from views where project_id = ?').get(input.projectId) as Row).m as number;

@@ -80,7 +80,8 @@ export function Menu<T extends string | number | null>({value, options, onChange
   /** When set, the menu ends with an inline "+ Add option" field. Return the new value to select it. */
   onAdd?: (label: string) => T | undefined | Promise<T | undefined>; addLabel?: string;
   /** When set, options can be dragged into a new order (grip shows on hover). */
-  onReorder?: (from: number, to: number) => void;
+  /** Called with the option values (None left out) in their new order. */
+  onReorder?: (values: NonNullable<T>[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
@@ -92,7 +93,10 @@ export function Menu<T extends string | number | null>({value, options, onChange
         {options.map((o, n) => (
           <button key={String(o.value)} className={'pop-row' + (o.value === value ? ' on' : '') + (onReorder ? ' reorderable' : '') + (drag === n ? ' dragging' : '')} onClick={() => { onChange(o.value); setOpen(false); }}
             draggable={!!onReorder && o.value !== null} onDragStart={() => setDrag(n)} onDragEnd={() => setDrag(null)}
-            onDragOver={e => { if (drag !== null) e.preventDefault(); }} onDrop={() => { if (drag !== null && drag !== n && onReorder) onReorder(drag, n); setDrag(null); }}>
+            onDragOver={e => { if (drag !== null) e.preventDefault(); }} onDrop={() => {
+              if (drag !== null && drag !== n && onReorder) { const l = options.map(x => x.value); const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder(l.filter((x): x is NonNullable<T> => x !== null)); }
+              setDrag(null);
+            }}>
             {onReorder && o.value !== null && <GripVertical size={12} className="opt-grip" />}{o.icon}<span className="grow">{o.label}</span>{o.value === value && <CheckIcon size={14} />}
           </button>
         ))}
@@ -127,7 +131,7 @@ export function StatusSelect({project, value, onChange, compact}: {project: Proj
     store.updateProject(project.id, {statuses: list});
     return id;
   } : undefined;
-  return <Menu value={value} title="Status" onChange={onChange} className="status-btn" onReorder={store ? (a: number, b: number) => { const l = [...project.statuses]; const [m] = l.splice(a, 1); l.splice(b, 0, m); store.updateProject(project.id, {statuses: l}); } : undefined} onAdd={onAdd} addLabel="Add status"
+  return <Menu value={value} title="Status" onChange={onChange} className="status-btn" onReorder={store ? (ids: string[]) => store.updateProject(project.id, {statuses: ids.map(id => project.statuses.find(s => s.id === id)!)}) : undefined} onAdd={onAdd} addLabel="Add status"
     options={project.statuses.map(s => ({value: s.id, label: s.name, icon: <StatusIcon status={s} />}))}
     render={<span className="status-pill" style={{'--c': s?.color ?? '#999'} as React.CSSProperties}><StatusIcon status={s} size={13} />{!compact && <span>{s?.name ?? value}</span>}</span>} />;
 }

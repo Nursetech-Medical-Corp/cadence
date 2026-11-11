@@ -28,6 +28,10 @@ export function addUnit(s: string, every: number, unit: 'day' | 'week' | 'month'
   return iso(d);
 }
 
+/** The Monday of the week a date falls in. */
+export function monday(s: string) { return addDays(s, -((parseDay(s).getDay() + 6) % 7)); }
+/** Saturday and Sunday roll forward to Monday; weekdays stay. */
+export function skipWeekend(s: string) { const w = parseDay(s).getDay(); return w === 6 ? addDays(s, 2) : w === 0 ? addDays(s, 1) : s; }
 export function daysBetween(a: string, b: string) {
   return Math.round((parseDay(b).getTime() - parseDay(a).getTime()) / 86400000);
 }

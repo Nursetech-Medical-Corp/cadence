@@ -4,11 +4,11 @@ import {Bot, Copy, Download, LayoutTemplate, Pencil, Plus, Repeat, Trash2, Uploa
 import type {Item, Template} from './types.ts';
 import {api, type Store, realProjects, validProject} from './store.ts';
 import {Avatar, Empty, Popover, itemKey} from './components.tsx';
-import {stepCount} from './TemplateEditor.tsx';
+import {VIEW_KINDS, stepCount} from './TemplateEditor.tsx';
 import {describeRecur} from './recur.ts';
 import {useTemplates} from './SettingsExtras.tsx';
 
-const VIEW_LABEL: Record<string, string> = {list: 'List', table: 'Table', board: 'Board', gantt: 'Timeline', calendar: 'Calendar', workload: 'Workload', backlog: 'Backlog', sprint: 'Sprint', files: 'Files'};
+const VIEW_LABEL: Record<string, string> = Object.fromEntries(VIEW_KINDS);
 type GalleryPack = {name: string; description: string; templates: {name: string; steps: number; repeats: boolean}[]; automations: number};
 
 export function TemplatesPage({store, open}: {store: Store; open: (id: string) => void}) {

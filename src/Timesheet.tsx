@@ -3,11 +3,10 @@
 import {useEffect, useMemo, useState} from 'react';
 import {ChevronLeft, ChevronRight, Clock, Plus} from 'lucide-react';
 import {api, getMe, type Store} from './store.ts';
-import {addDays, parseDay} from './dates.ts';
+import {addDays, monday, parseDay} from './dates.ts';
 import {itemKey} from './components.tsx';
 
 type Sheet = {weekStart: string; days: string[]; rows: {itemId: string; minutes: number[]}[]};
-const monday = (d: string) => { const w = (parseDay(d).getDay() + 6) % 7; return addDays(d, -w); };
 const hrs = (m: number) => m ? String(+(m / 60).toFixed(2)) : '';
 /** "1.5", "1:30", "90m" all mean 90 minutes. */
 const parseHours = (v: string) => {
@@ -26,7 +25,8 @@ export function TimesheetPage({store, open}: {store: Store; open: (id: string) =
   const [q, setQ] = useState('');
   const [err, setErr] = useState('');
   const load = () => person && api<Sheet>(`/timesheet?person=${person}&week=${week}`).then(setSheet).catch(e => setErr(String(e instanceof Error ? e.message : e)));
-  useEffect(() => { load(); }, [person, week, store.tick]);
+  useEffect(() => { load(); }, [person, week]);
+  useEffect(() => { if (store.lastEvent.current?.kind === 'time') load(); }, [store.tick]);
   const rows = useMemo(() => {
     const have = new Map((sheet?.rows ?? []).map(r => [r.itemId, r.minutes]));
     for (const id of extra) if (!have.has(id)) have.set(id, [0, 0, 0, 0, 0, 0, 0]);
@@ -36,7 +36,7 @@ export function TimesheetPage({store, open}: {store: Store; open: (id: string) =
     const minutes = parseHours(text);
     if (Number.isNaN(minutes) || minutes > 1440) { setErr('Use hours like 1.5, 1:30 or 90m'); return; }
     setErr('');
-    try { await api('/timesheet', {method: 'PUT', body: {person, itemId, date: day, minutes}}); load(); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
+    try { const next = await api<Sheet>('/timesheet', {method: 'PUT', body: {person, itemId, date: day, minutes}}); if (next.weekStart === week) setSheet(next); } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
   };
   const days = sheet?.days ?? Array.from({length: 7}, (_, n) => addDays(week, n));
   const dayTotal = (n: number) => rows.reduce((a, [, m]) => a + m[n], 0);

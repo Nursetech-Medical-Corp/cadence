@@ -1,6 +1,6 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock} from 'lucide-react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -206,7 +206,7 @@ export function App() {
     <StoreContext.Provider value={store}>
     <div className={'app' + (collapsed ? ' side-collapsed' : '') + (drawer ? ' drawer-open' : '')} style={{'--side-w': `${sideW}px`} as React.CSSProperties}>
       <div className="side-wrap">
-        <Sidebar store={store} me={me} setMe={setMe} route={route} unread={unread} openPalette={() => setPalette(true)} open={open} onToggle={toggleSide} onCapture={() => setCapture(true)} onShortcuts={() => setShortcuts(true)} signedIn={!!auth?.required} />
+        <Sidebar store={store} me={me} setMe={setMe} route={route} unread={unread} openPalette={() => setPalette(true)} open={open} onToggle={toggleSide} onShortcuts={() => setShortcuts(true)} signedIn={!!auth?.required} />
         <div className="side-resize" onPointerDown={startResize} onDoubleClick={() => { setSideW(248); localStorage.setItem('side-w', '248'); }} title="Drag to resize, double-click to reset" />
       </div>
       {drawer && <div className="drawer-scrim" onClick={() => setDrawer(false)} />}
@@ -250,7 +250,7 @@ export function App() {
   );
 }
 
-function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, onCapture, onShortcuts, signedIn}: {store: Store; me: string; setMe: (id: string) => void; route: Route; unread: number; openPalette: () => void; open: (id: string) => void; onToggle: () => void; onCapture: () => void; onShortcuts: () => void; signedIn: boolean}) {
+function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, onShortcuts, signedIn}: {store: Store; me: string; setMe: (id: string) => void; route: Route; unread: number; openPalette: () => void; open: (id: string) => void; onToggle: () => void; onShortcuts: () => void; signedIn: boolean}) {
   const [who, setWho] = useState(false);
   const [wsOpen, setWsOpen] = useState(() => localStorage.getItem('side-ws') !== '0');
   const [newName, setNewName] = useState('');
@@ -418,7 +418,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
           onDrop={() => {
             if (!dragView || dragView === v.id) return;
             const list = views.filter(x => x.id !== dragView); list.splice(list.findIndex(x => x.id === v.id), 0, views.find(x => x.id === dragView)!);
-            list.forEach((x, n) => { if (x.sort !== n) store.updateView(x.id, {sort: n}); });
+            store.reorderViews(project.id, list.map(x => x.id));
             setDragView(null); setOverView(null);
           }}><ViewTab store={store} view={v} active={!settings && view?.id === v.id} project={project} /></span>)}
         <AddView store={store} project={project} />

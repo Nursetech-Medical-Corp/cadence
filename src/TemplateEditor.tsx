@@ -30,7 +30,7 @@ const REPEATS: [string, string, Recur | null][] = [
 ];
 const repeatKey = (r?: Recur | null) => !r ? '' : REPEATS.find(([, , x]) => x && x.every === r.every && x.unit === r.unit)?.[0] ?? 'custom';
 const anchorOf = (s: Step) => s.anchor ?? (s.offset != null ? 'start' : 'none');
-const VIEW_KINDS = [['list', 'List'], ['table', 'Table'], ['board', 'Board'], ['gantt', 'Timeline'], ['calendar', 'Calendar'], ['backlog', 'Backlog'], ['sprint', 'Sprint'], ['workload', 'Workload'], ['files', 'Files']];
+export const VIEW_KINDS = [['list', 'List'], ['table', 'Table'], ['board', 'Board'], ['gantt', 'Timeline'], ['calendar', 'Calendar'], ['backlog', 'Backlog'], ['sprint', 'Sprint'], ['workload', 'Workload'], ['files', 'Files']];
 
 /** Day numbers for each step relative to the top step's start (day 0), the same way the server schedules them. */
 function schedule(root: Step) {
