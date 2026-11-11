@@ -168,9 +168,11 @@ export function SprintSelect({sprints, value, onChange, projectId}: {sprints: Sp
     render={<span className={s ? 'sprint-chip' : 'muted'}>{s?.name ?? 'Backlog'}</span>} />;
 }
 
-export function PeoplePicker({value, people, onChange, compact}: {value: string[]; people: Person[]; onChange: (v: string[]) => void; compact?: boolean}) {
+export function PeoplePicker({value, people, onChange, compact, onReorder}: {value: string[]; people: Person[]; onChange: (v: string[]) => void; compact?: boolean; onReorder?: (ids: string[]) => void}) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const [drag, setDrag] = useState<number | null>(null);
+  const movable = !!onReorder && !q;
   const list = people.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <span className="picker">
@@ -179,10 +181,12 @@ export function PeoplePicker({value, people, onChange, compact}: {value: string[
       </button>
       <Popover open={open} onClose={() => setOpen(false)}>
         <input autoFocus className="pop-search" placeholder="Search people" value={q} onChange={e => setQ(e.target.value)} />
-        {list.map(p => (
-          <button key={p.id} className={'pop-row' + (value.includes(p.id) ? ' on' : '')}
-            onClick={() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])}>
-            <Avatar person={p} /><span className="grow">{p.name}</span>{value.includes(p.id) && <CheckIcon size={14} />}
+        {list.map((p, n) => (
+          <button key={p.id} className={'pop-row' + (value.includes(p.id) ? ' on' : '') + (movable ? ' reorderable' : '') + (drag === n ? ' dragging' : '')}
+            onClick={() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])}
+            draggable={movable} onDragStart={() => setDrag(n)} onDragEnd={() => setDrag(null)} onDragOver={e => { if (drag !== null) e.preventDefault(); }}
+            onDrop={() => { if (drag !== null && drag !== n) { const l = list.map(x => x.id); const [m] = l.splice(drag, 1); l.splice(n, 0, m); onReorder!(l); } setDrag(null); }}>
+            {movable && <GripVertical size={12} className="opt-grip" />}<Avatar person={p} /><span className="grow">{p.name}</span>{value.includes(p.id) && <CheckIcon size={14} />}
           </button>
         ))}
       </Popover>

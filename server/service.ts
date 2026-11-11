@@ -156,7 +156,14 @@ export class Tasks {
 
   // People. No passwords yet: the UI picks who you are. Real auth is a later iteration.
   listPeople(): Person[] {
-    return this.db.prepare('select * from people order by name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai'}));
+    return this.db.prepare('select * from people order by coalesce(sort, 1e9), name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai'}));
+  }
+  /** Puts people in the given order (pickers and sorting by assignee follow it). */
+  reorderPeople(ids: string[]) {
+    const set = this.db.prepare('update people set sort = ? where id = ?');
+    ids.forEach((pid, n) => set.run(n, pid));
+    this.emit({kind: 'people'});
+    return this.listPeople();
   }
   person(pid: string) {
     const p = this.listPeople().find(p => p.id === pid);

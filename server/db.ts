@@ -68,6 +68,7 @@ export function openDb(path = process.env.TASKS_DB ?? 'data/tasks.db') {
   if (!pcols.includes('settings')) db.exec("alter table projects add column settings text not null default '{}'");
   const people = db.prepare('pragma table_info(people)').all().map(r => r.name);
   if (!people.includes('kind')) db.exec("alter table people add column kind text not null default 'human'");
+  if (!people.includes('sort')) db.exec('alter table people add column sort real');
   // Assigned comments: a comment can be a to-do for one person until resolved.
   const ccols = db.prepare('pragma table_info(comments)').all().map(r => r.name);
   if (!ccols.includes('assignee')) db.exec('alter table comments add column assignee text; alter table comments add column resolved text');

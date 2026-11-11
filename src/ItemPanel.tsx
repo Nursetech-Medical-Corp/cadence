@@ -180,7 +180,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         const rows: [string, string, React.ReactNode][] = [
           ['status', 'Status', <StatusSelect project={project} value={item.status} onChange={status => up({status})} />],
           ['type', 'Type', <TypeSelect project={project} value={item.type} onChange={type => up({type})} />],
-          ['assignees', 'Assignees', <PeoplePicker value={item.assignees} people={store.people} onChange={assignees => up({assignees})} />],
+          ['assignees', 'Assignees', <PeoplePicker value={item.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => up({assignees})} />],
           ['priority', 'Priority', <PrioritySelect value={item.priority} onChange={priority => up({priority})} showLabel />],
           ['sprint', 'Sprint', <SprintSelect projectId={project.id} sprints={sprints} value={item.sprint} onChange={sprint => up({sprint})} />],
           ['start', 'Start', <DateInput value={item.start} onChange={start => up({start})} placeholder="Set start" />],

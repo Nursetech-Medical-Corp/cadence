@@ -7,7 +7,7 @@ import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelec
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
-import {sortItems, sortsOf, type SortRule} from './Sorting.tsx';
+import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
 export const DEFAULT_HIDDEN = ['start', 'estimate', 'tags', 'parent'];
@@ -46,7 +46,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
       </select>)},
     {id: 'status', name: 'Status', width: 140, sortVal: i => project.statuses.findIndex(s => s.id === i.status), cell: i => <StatusSelect project={project} value={i.status} onChange={status => up(i)({status})} />},
     {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} />},
-    {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={store.people} onChange={assignees => up(i)({assignees})} />},
+    {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => up(i)({assignees})} />},
     {id: 'priority', name: 'Priority', width: 110, sortVal: i => i.priority || 9, cell: i => <PrioritySelect value={i.priority} onChange={priority => up(i)({priority})} showLabel />},
     {id: 'sprint', name: 'Sprint', width: 130, sortVal: i => sprints.find(s => s.id === i.sprint)?.start ?? '9', raw: i => i.sprint, cell: i => <SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => up(i)({sprint})} />},
     {id: 'start', name: 'Start', width: 130, sortVal: i => i.start ?? '9', raw: i => i.start, cell: i => <DateInput value={i.start} onChange={start => up(i)({start})} />},
@@ -218,7 +218,7 @@ export function FieldCell({field, item, project, value, onChange, store}: {field
     case 'number': return <input className="inline num" type="number" defaultValue={(value as number) ?? ''} key={String(value)} onBlur={e => onChange(e.target.value === '' ? null : Number(e.target.value))} />;
     case 'select': return <SelectField field={field} value={(value as string) ?? null} onChange={onChange} store={store} />;
     case 'multi': return <MultiField field={field} value={(value as string[]) ?? []} onChange={onChange} store={store} />;
-    case 'person': return <PeoplePicker value={(value as string[]) ?? []} people={store.people} onChange={onChange} />;
+    case 'person': return <PeoplePicker value={(value as string[]) ?? []} people={store.people} onReorder={store.reorderPeople} onChange={onChange} />;
     case 'url': return value ? <span className="title-cell"><a className="link" href={String(value)} target="_blank" rel="noreferrer">{String(value).replace(/^https?:\/\//, '').slice(0, 30)}</a><InlineText value={String(value)} placeholder="-" onSave={onChange} /></span> : <InlineText value="" placeholder="https://" onSave={onChange} />;
     default: return <InlineText value={(value as string) ?? ''} placeholder="-" onSave={onChange} />;
   }
@@ -229,7 +229,9 @@ function ColumnHeader({col, sorts, setSorts, hide, project, store}: {
 }) {
   const idx = sorts.findIndex(s => s.col === col.id), mine = sorts[idx];
   const setSort = (s: SortRule | null) => setSorts(s ? [s] : []);
-  const addLevel = (dir: 1 | -1) => setSorts([...sorts.filter(s => s.col !== col.id), {col: col.id, dir}]);
+  const addLevel = (dir: 1 | -1) => setSorts([...sorts.filter(s => s.col !== col.id), {col: col.id, dir, by: mine?.by}]);
+  const setBy = (by: 'order' | 'alpha') => setSorts(mine ? sorts.map(s => s.col === col.id ? {...s, by} : s) : [...sorts, {col: col.id, dir: 1, by}]);
+  const toLevel = (n: number) => { const l = sorts.filter(s => s.col !== col.id); l.splice(n, 0, mine!); setSorts(l); };
   const [open, setOpen] = useState(false);
   const field = col.id.startsWith('f:') ? project.fields.find(f => 'f:' + f.id === col.id) : undefined;
   const [name, setName] = useState(col.name);
@@ -242,8 +244,13 @@ function ColumnHeader({col, sorts, setSorts, hide, project, store}: {
       </span>
       <Popover open={open} onClose={() => { saveName(); setOpen(false); }}>
         {field && <input className="pop-search" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { saveName(); setOpen(false); } }} />}
-        <button className="pop-row" onClick={() => { setSort({col: col.id, dir: 1}); setOpen(false); }}><ArrowUp size={14} /> Sort ascending</button>
-        <button className="pop-row" onClick={() => { setSort({col: col.id, dir: -1}); setOpen(false); }}><ArrowDown size={14} /> Sort descending</button>
+        <button className="pop-row" onClick={() => { setSort({col: col.id, dir: 1, by: mine?.by}); setOpen(false); }}><ArrowUp size={14} /> Sort ascending</button>
+        <button className="pop-row" onClick={() => { setSort({col: col.id, dir: -1, by: mine?.by}); setOpen(false); }}><ArrowDown size={14} /> Sort descending</button>
+        {hasOrder(col.id, project) && <div className="pop-seg"><span>Order by</span><div className="seg">
+          <button className={mine?.by !== 'alpha' ? 'on' : ''} title={col.id === 'priority' ? 'Urgent first' : col.id === 'sprint' ? 'By sprint start date' : 'The order arranged in the dropdown (drag the dots there)'} onClick={() => setBy('order')}>Arranged</button>
+          <button className={mine?.by === 'alpha' ? 'on' : ''} onClick={() => setBy('alpha')}>A to Z</button></div></div>}
+        {mine && sorts.length > 1 && <div className="pop-seg"><span>Sort level</span><div className="seg">
+          {sorts.map((s, n) => <button key={s.col} className={n === idx ? 'on' : ''} title={n === 0 ? 'Sort by this first' : `Sort by this after level ${n}`} onClick={() => toLevel(n)}>{n + 1}</button>)}</div></div>}
         <button className="pop-row" onClick={() => { addLevel(1); setOpen(false); }}><Plus size={14} /> Add as next sort level</button>
         {mine && <button className="pop-row" onClick={() => { setSorts(sorts.filter(s => s.col !== col.id)); setOpen(false); }}>Remove this sort</button>}
         {sorts.length > 0 && <button className="pop-row" onClick={() => { setSort(null); setOpen(false); }}>Clear all sorting</button>}

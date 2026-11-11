@@ -442,6 +442,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
 
       if (a === 'people') {
+        if (b === 'order' && m === 'PUT') { needAdmin(); return send(res, 200, tasks.reorderPeople((body.ids ?? []).map(String))); }
         if (m === 'GET') return send(res, 200, tasks.listPeople());
         if (m === 'POST') { needAdmin(); return send(res, 201, tasks.createPerson(body)); }
       }

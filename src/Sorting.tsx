@@ -5,10 +5,11 @@ import type {Item, Project, ViewConfig} from './types.ts';
 import type {Store} from './store.ts';
 import {Popover} from './components.tsx';
 
-/** by: for status, type, priority and dropdown columns, 'order' follows the order you arranged; 'alpha' sorts A to Z by name. */
+/** by: for status, type, priority, assignee, sprint and dropdown columns, 'order' follows the arranged order
+ *  (priority by urgency, sprints by start date); 'alpha' sorts A to Z by name. */
 export type SortRule = {col: string; dir: 1 | -1; by?: 'order' | 'alpha'};
 /** Columns whose values have an arranged order. */
-export const hasOrder = (col: string, project: Project) => ['status', 'type', 'priority'].includes(col) || ['select', 'multi'].includes(project.fields.find(f => 'f:' + f.id === col)?.kind ?? '');
+export const hasOrder = (col: string, project: Project) => ['status', 'type', 'priority', 'assignees', 'sprint'].includes(col) || ['select', 'multi'].includes(project.fields.find(f => 'f:' + f.id === col)?.kind ?? '');
 
 export function sortFields(project: Project): {id: string; label: string}[] {
   return [
@@ -39,9 +40,10 @@ export function sortItems(items: Item[], rules: SortRule[], project: Project, st
       case 'status': return alpha ? (project.statuses.find(s => s.id === i.status)?.name ?? '').toLowerCase() : project.statuses.findIndex(s => s.id === i.status);
       case 'type': return alpha ? i.type.toLowerCase() : project.types.indexOf(i.type);
       case 'priority': return !i.priority ? null : alpha ? PRIO[i.priority] : i.priority;
-      case 'assignees': return i.assignees.length ? (store.people.find(p => p.id === i.assignees[0])?.name ?? '').toLowerCase() : null;
+      // People in the order arranged in the assignee picker; sprints by start date.
+      case 'assignees': return !i.assignees.length ? null : alpha ? (store.people.find(p => p.id === i.assignees[0])?.name ?? '').toLowerCase() : store.people.findIndex(p => p.id === i.assignees[0]);
       case 'due': return i.due; case 'start': return i.start; case 'estimate': return i.estimate;
-      case 'sprint': return i.sprint ? store.sprints.find(s => s.id === i.sprint)?.start ?? null : null;
+      case 'sprint': { const s = i.sprint ? store.sprints.find(x => x.id === i.sprint) : undefined; return !s ? null : alpha ? s.name.toLowerCase() : s.start; }
       case 'parent': return i.parentId ? store.items.get(i.parentId)?.title.toLowerCase() ?? null : null;
       case 'tags': return i.tags.length ? [...i.tags].sort()[0].toLowerCase() : null;
       case 'key': return i.number; case 'created': return i.created; case 'updated': return i.updated;

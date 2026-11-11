@@ -90,7 +90,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             <span className="row-meta">
               <PrioritySelect value={i.priority} onChange={priority => store.updateItem(i.id, {priority})} />
               <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => store.updateItem(i.id, {due})} placeholder="Due" />
-              <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
+              <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
               <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} />
               <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={16} /></button>
             </span>

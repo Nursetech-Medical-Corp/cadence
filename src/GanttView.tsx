@@ -241,7 +241,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
             </button>
             {i.type !== 'Task' && <TypeBadge type={i.type} />}
             <span className={'g-title' + (i.completed ? ' done' : '')} title={i.title}><InlineText value={i.title} onSave={title => store.updateItem(i.id, {title})} /></span>
-            <PeoplePicker value={i.assignees} people={store.people} onChange={assignees => store.updateItem(i.id, {assignees})} compact />
+            <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact />
             <button className="icon more" title="Open details" onClick={() => open(i.id)}><MoreHorizontal size={15} /></button>
           </div>
         ))}
