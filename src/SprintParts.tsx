@@ -1,9 +1,9 @@
 import {useEffect, useRef, useState} from 'react';
-import {Trash2} from 'lucide-react';
+import {Trash2, ArrowLeftFromLine, ChevronDown, ChevronRight} from 'lucide-react';
 import type {BurnPoint, Item, Person, Sprint} from './types.ts';
 import {api, type Store} from './store.ts';
 import {daysBetween} from './dates.ts';
-import {Avatar, DateInput, InlineText} from './components.tsx';
+import {Avatar, DateInput, InlineText, Check, PeoplePicker, TypeBadge} from './components.tsx';
 
 export function sprintState(s: Sprint, today: string) {
   return today < s.start ? 'upcoming' : today > s.end ? 'closed' : 'current';
@@ -65,13 +65,7 @@ export function SprintCard({store, sprint, items, over, onDragOver, onDrop, curr
       <div className="small muted" style={{padding: '4px 6px'}}>{mine.length} items, {done} done{hours ? `, ${hours}h estimated` : ''}. Drop items here.</div>
       <div className="seg sc-tabs"><button className={tab === 'items' ? 'on' : ''} onClick={() => pick('items')}>Items</button><button className={tab === 'people' ? 'on' : ''} onClick={() => pick('people')}>People</button></div>
       {tab === 'people' ? <Capacity store={store} sprint={sprint} items={items} /> : <div className="sc-items">
-        {(all ? mine : mine.slice(0, 8)).map(i => (
-          <div key={i.id} className={'sc-item' + (i.completed ? ' done' : '')} draggable onDragStart={() => onDragItem(i.id)} onDragEnd={() => onDragItem(null)} onClick={() => open(i.id)} title="Click to open. Drag to another sprint or back to the backlog.">
-            <span className="grow">{i.title}</span>
-            {i.estimate ? <span className="muted">{i.estimate}h</span> : null}
-            {i.assignees[0] && <Avatar person={store.people.find(p => p.id === i.assignees[0])} size={16} />}
-          </div>
-        ))}
+        {(all ? mine : mine.slice(0, 8)).map(i => <SprintRow key={i.id} store={store} item={i} items={items} open={open} onDragItem={onDragItem} />)}
         {mine.length > 8 && <button className="link small" onClick={() => setAll(a => !a)}>{all ? 'Show fewer' : `Show all ${mine.length}`}</button>}
         {!mine.length && <div className="muted small" style={{padding: '2px 6px'}}>Nothing planned yet.</div>}
       </div>}
@@ -169,4 +163,35 @@ export function Velocity({store, projectId}: {store: Store; projectId: string}) 
       </div>
     </div>
   );
+}
+
+/** One planned item on a sprint card: open its subitems, tick it done, reassign it or take it out of the
+ *  sprint, without leaving the planning panel. Click it for everything else. */
+function SprintRow({store, item: i, items, open, onDragItem}: {store: Store; item: Item; items: Item[]; open: (id: string) => void; onDragItem: (id: string | null) => void}) {
+  const [expanded, setExpanded] = useState(false);
+  const project = store.projects.find(p => p.id === i.projectId);
+  const kids = items.filter(c => c.parentId === i.id);
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  return <>
+    <div className={'sc-item' + (i.completed ? ' done' : '')} draggable onDragStart={() => onDragItem(i.id)} onDragEnd={() => onDragItem(null)} onClick={() => open(i.id)} title="Click to open. Drag to another sprint or back to the backlog.">
+      {kids.length ? <button className="icon sc-caret" title={expanded ? 'Hide subitems' : `Show ${kids.length} subitems`} onClick={e => { stop(e); setExpanded(x => !x); }}>{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button> : <span className="sc-caret" />}
+      {project && <span onClick={stop}><Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} /></span>}
+      <TypeBadge type={i.type} />
+      <span className="grow">{i.title}</span>
+      {i.estimate ? <span className="muted">{i.estimate}h</span> : null}
+      <span className="sc-actions" onClick={stop}>
+        <button className="icon" title="Take out of this sprint (back to the backlog)" onClick={() => store.updateItem(i.id, {sprint: null})}><ArrowLeftFromLine size={12} /></button>
+      </span>
+      <span onClick={stop}><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
+    </div>
+    {expanded && kids.map(c => (
+      <div key={c.id} className={'sc-item sc-sub' + (c.completed ? ' done' : '')} onClick={() => open(c.id)}>
+        {project && <span onClick={stop}><Check item={c} project={project} onToggle={status => store.updateItem(c.id, {status})} /></span>}
+        <TypeBadge type={c.type} />
+        <span className="grow">{c.title}</span>
+        {c.sprint !== i.sprint && <span className="muted small" title="This subitem is planned in another sprint, or not in one">{c.sprint ? 'other sprint' : 'backlog'}</span>}
+        <span onClick={stop}><PeoplePicker value={c.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(c.id, {assignees})} compact /></span>
+      </div>
+    ))}
+  </>;
 }
