@@ -39,7 +39,17 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - Put it behind HTTPS (Caddy, nginx or a tunnel) that sets `X-Forwarded-Proto`, so session cookies are marked Secure.
 - `CADENCE_REQUIRE_LOGIN=0` turns forced sign-in off; `pnpm dev` leaves it off for local use.
 - Locked out: `pnpm reset-password you@example.com` on the server prints a new password.
-- People can create their own account only if the owner opens sign-up (Team page, Server); otherwise by invite. Forgot password emails a one-time link through the connected Gmail sender, or prints it in the server log when none is set up.
+- People can create their own account only if the owner opens sign-up (Team page, Server); otherwise by invite.
+
+### Passwordless sign-in
+People sign in with "Continue with Google" or "Email me a sign-in link"; a password stays available behind "Use a password instead". Only existing accounts can sign in this way; new people join through an invite (a name is enough, a password is optional). Settings are environment variables (see `.env.example`); with none of them set, sign-in works with passwords as before.
+
+- `PUBLIC_URL`: the address people use, for example `https://cadence.example.com`. Every emailed link (sign-in links, invites) starts with it, never with the request's Host or Origin. Needed for both new sign-in methods.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`: a Google OAuth client of type Web application with the redirect URI `{PUBLIC_URL}/auth/google/callback`. Shows the Google button. This is separate from the Google client on the Team page, which connects the Gmail sender and calendars.
+- `STAFF_GOOGLE_DOMAIN`: accounts on this domain sign in only with Google (no email link, no password), so Google Workspace 2-Step Verification covers them. Applies only while Google is configured. API tokens (MCP) are not affected.
+- `SMTP_HOST`, `SMTP_PORT` (465 implicit TLS, 587 STARTTLS), `SMTP_FROM`, optional `SMTP_USER` and `SMTP_PASS`: system mail for sign-in links and invites. Without SMTP, mail goes through the main workspace's connected Gmail sender; without either, sign-in links are printed in the server log. The email-link button shows when mail can go out, or when `PUBLIC_URL` is a localhost address (links in the log, for development).
+- Sign-in links work once, for 15 minutes; a new one voids older ones. At most 5 per email and 10 per IP in 15 minutes. The link opens a page with a Sign in button, so mail scanners that open links do not use them up.
+- Every sign-in attempt (time, email, method, result, IP, user agent) is appended to `signin-log.jsonl` in the data folder. Tokens and passwords are never logged.
 
 ### On phones
 Cadence installs as an app. On iPhone or iPad, open your server's address in Safari, tap Share, then Add to Home Screen. On Android or desktop Chrome and Edge, use Install app in the address bar or menu. Phones get a tab bar (My work, Inbox, new task, Search, Spaces), and a tap on a task opens it full screen.
@@ -102,7 +112,7 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
 
 ### Teams, security and approvals
-- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, create account (when the owner allows it), forgot password links, linked work and personal accounts, email invites with one-time links, roles with fine-grained permissions and per-space access.
+- One account per person across every workspace on the server, first-run owner setup, passwordless sign-in with Google or emailed links (password as a fallback), create account (when the owner allows it), linked work and personal accounts, email invites with one-time links, roles with fine-grained permissions and per-space access.
 - Notifications in the Inbox, by email, and as push on phones and desktops: assignments, mentions, comments, approvals, AI requests, due today and tomorrow, overdue, and timers left running.
 - Approvals and e-signatures: request a review or approval, sign with a password re-check, and keep a fingerprint of what was signed. Workflow rules per item type (allowed moves, required fields, approval before done).
 - Protections: CSRF and origin checks, rate-limited sign-in, hashed tokens and passwords, safe webhooks, CSV formula injection guards.

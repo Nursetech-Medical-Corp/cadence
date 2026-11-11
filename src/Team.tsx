@@ -1,7 +1,7 @@
 // Sign-in page, Team page (people, roles and their permissions, sign-in and Google), and per-project access.
 import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
-import {Check as CheckIcon, CircleUser, Copy, KeyRound, LogIn, Plus, Shield, Trash2} from 'lucide-react';
+import {Check as CheckIcon, CircleUser, Copy, KeyRound, LogIn, Mail, Plus, Shield, Trash2} from 'lucide-react';
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
@@ -10,7 +10,7 @@ type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
 type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'};
 export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
-  person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; caps: Record<string, string[]>};
+  person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; signInGoogle?: boolean; signInLink?: boolean; caps: Record<string, string[]>};
 
 /** First run of a hosted server: create the owner account. It becomes admin of every workspace. */
 /** The card every sign-in screen sits in: the brand, then the form. */
@@ -57,8 +57,10 @@ export function NoAccess({me}: {me: Me}) {
   );
 }
 
-export function SignIn({googleReady, signup}: {googleReady: boolean; signup?: 'open' | 'invite'}) {
-  const [mode, setMode] = useState<'in' | 'new' | 'forgot'>('in');
+/** Sign in: Continue with Google and Email me a sign-in link when the server has them; a password as the fallback. */
+export function SignIn({google, emailLink, signup}: {google: boolean; emailLink: boolean; signup?: 'open' | 'invite'}) {
+  const [mode, setMode] = useState<'in' | 'new'>('in');
+  const [usePassword, setUsePassword] = useState(!google && !emailLink);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -68,49 +70,48 @@ export function SignIn({googleReady, signup}: {googleReady: boolean; signup?: 'o
   const submit = async () => {
     setError(''); setNote('');
     try {
-      if (mode === 'in') { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); }
-      else if (mode === 'new') { const r = await api<{workspace: string}>('/auth/signup', {method: 'POST', body: {name, email, password}}); switchWorkspace(r.workspace); }
-      else { const r = await api<{message: string}>('/auth/forgot', {method: 'POST', body: {email}}); setNote(r.message); }
+      if (mode === 'new') { const r = await api<{workspace: string}>('/auth/signup', {method: 'POST', body: {name, email, password}}); switchWorkspace(r.workspace); }
+      else if (usePassword) { await api('/auth/login', {method: 'POST', body: {email, password}}); location.hash = '/mywork'; location.reload(); }
+      else { const r = await api<{message: string}>('/auth/email-link', {method: 'POST', body: {email}}); setNote(r.message); }
     } catch (e) { fail(e); }
   };
   const go = (m: typeof mode) => { setMode(m); setError(''); setNote(''); };
+  const withPassword = mode === 'new' || usePassword;
   return (
     <AuthCard>
-      <h1 style={{margin: '8px 0 4px'}}>{mode === 'in' ? 'Sign in' : mode === 'new' ? 'Create your account' : 'Reset your password'}</h1>
-      {mode !== 'forgot' && <div className="seg auth-tabs"><button className={mode === 'in' ? 'on' : ''} onClick={() => go('in')}>Sign in</button><button className={mode === 'new' ? 'on' : ''} onClick={() => go('new')}>Create account</button></div>}
-      {mode === 'new' && signup !== 'open' ? <div className="muted small">Accounts here are by invitation. Ask a workspace admin to invite your email; the invite link lets you set your password.</div> : <>
-        {googleReady && mode === 'in' && <><a className="btn google-btn" href="/api/auth/google/start"><GoogleMark /> Continue with Google</a><div className="or"><span>or</span></div></>}
+      <h1 style={{margin: '8px 0 4px'}}>{mode === 'in' ? 'Sign in' : 'Create your account'}</h1>
+      <div className="seg auth-tabs"><button className={mode === 'in' ? 'on' : ''} onClick={() => go('in')}>Sign in</button><button className={mode === 'new' ? 'on' : ''} onClick={() => go('new')}>Create account</button></div>
+      {mode === 'new' && signup !== 'open' ? <div className="muted small">Accounts here are by invitation. Ask a workspace admin to invite your email.</div> : <>
+        {google && mode === 'in' && <><a className="btn google-btn" href="/auth/google/start"><GoogleMark /> Continue with Google</a>{(emailLink || usePassword) && <div className="or"><span>or</span></div>}</>}
         {mode === 'new' && <input className="search" placeholder="Your name" autoComplete="name" value={name} onChange={e => setName(e.target.value)} />}
-        <input className="search" placeholder="Email" type="email" autoComplete="username" autoFocus value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => mode === 'forgot' && e.key === 'Enter' && submit()} />
-        {mode !== 'forgot' && <input className="search" type="password" placeholder={mode === 'new' ? 'Password (8 or more characters)' : 'Password'} autoComplete={mode === 'new' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}
+        {(withPassword || emailLink) && <input className="search" placeholder="Email" type="email" autoComplete="username" autoFocus value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => !withPassword && e.key === 'Enter' && email.trim() && submit()} />}
+        {withPassword && <input className="search" type="password" placeholder={mode === 'new' ? 'Password (8 or more characters)' : 'Password'} autoComplete={mode === 'new' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />}
         {error && <div className="small" style={{color: 'var(--danger)'}}>{error}</div>}
         {note && <div className="small" style={{color: 'var(--ok)'}}>{note}</div>}
-        <button className="btn primary" style={{padding: 8}} disabled={!email.trim() || (mode !== 'forgot' && !password)} onClick={submit}><LogIn size={14} /> {mode === 'in' ? 'Sign in' : mode === 'new' ? 'Create account' : 'Send reset link'}</button>
-        {mode === 'in' && <button className="link small" onClick={() => go('forgot')}>Forgot password?</button>}
-        {mode === 'forgot' && <button className="link small" onClick={() => go('in')}>Back to sign in</button>}
+        {(withPassword || emailLink) && <button className="btn primary" style={{padding: 8}} disabled={!email.trim() || (withPassword && !password)} onClick={submit}>
+          {withPassword ? <><LogIn size={14} /> {mode === 'in' ? 'Sign in' : 'Create account'}</> : <><Mail size={14} /> Email me a sign-in link</>}</button>}
+        {mode === 'in' && !usePassword && <button className="link small" onClick={() => { setUsePassword(true); setError(''); setNote(''); }}>Use a password instead</button>}
+        {mode === 'in' && usePassword && (google || emailLink) && <button className="link small" onClick={() => { setUsePassword(false); setError(''); setNote(''); }}>{emailLink ? 'Email me a sign-in link instead' : 'Back'}</button>}
         {mode === 'new' && <div className="muted small">You get your own workspace to start in. Others can invite you into theirs.</div>}
       </>}
     </AuthCard>
   );
 }
 
-/** The page a password reset link opens. */
-export function ResetPassword({token}: {token: string}) {
-  const [pw, setPw] = useState('');
-  const [pw2, setPw2] = useState('');
+/** The page a sign-in link opens. Only the button uses the link, so mail scanners that open it do not. */
+export function EmailLinkSignIn({token}: {token: string}) {
   const [err, setErr] = useState('');
   const go = async () => {
-    if (pw !== pw2) return setErr('The two passwords do not match');
-    try { await api('/auth/reset', {method: 'POST', body: {token, password: pw}}); location.hash = '/mywork'; location.reload(); }
+    try { await api('/auth/email-link/use', {method: 'POST', body: {token}}); location.hash = '/mywork'; location.reload(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
   return (
     <AuthCard>
-      <h1 style={{margin: '8px 0 4px'}}>Choose a new password</h1>
-      <input className="search" type="password" placeholder="New password (8 or more characters)" autoComplete="new-password" autoFocus value={pw} onChange={e => setPw(e.target.value)} />
-      <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && go()} />
+      <h1 style={{margin: '8px 0 4px'}}>Sign in to Cadence</h1>
+      <div className="muted small">The link works once, for 15 minutes.</div>
       {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-      <button className="btn primary" style={{padding: 8}} disabled={pw.length < 8} onClick={go}><LogIn size={14} /> Save and sign in</button>
+      <button className="btn primary" style={{padding: 8}} autoFocus onClick={go}><LogIn size={14} /> Sign in</button>
+      {err && <a className="link small" href="#/signin">Back to sign in</a>}
     </AuthCard>
   );
 }
@@ -177,10 +178,10 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
             <option value="invite">Only people invited to a workspace</option>
             <option value="open">Anyone (they get their own workspace)</option>
           </select></div>
-        <div className="muted small">Password reset emails go out through the Gmail sender connected below. Without one, the reset link is printed in the server log for you to pass on.</div>
+        <div className="muted small">Sign-in links and invites are emailed over SMTP when the server has it (SMTP_HOST), else through the Gmail sender connected below. Without either, sign-in links are printed in the server log.</div>
       </section>}
 
-      {isAdmin && <InvitesCard roles={roles} signInOn={!!ws?.requireLogin} senderReady={!!ws?.google.connected} />}
+      {isAdmin && <InvitesCard roles={roles} signInOn={!!ws?.requireLogin} />}
       <section className="set-card">
         <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every space unless the space sets its own. Admins can do everything.</span></div>
         {people.map(p => (
@@ -253,7 +254,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       </section>}
 
       {ws && isAdmin && <section className="set-card google-card">
-        <div className="set-card-head"><h3><GoogleMark /> Google sign-in and Gmail</h3><span className="muted small">Lets people sign in with Google and sends notification emails through one connected Gmail account.</span></div>
+        <div className="set-card-head"><h3><GoogleMark /> Google and Gmail</h3><span className="muted small">Sends notification emails through one connected Gmail account and lets people connect their own calendars and Gmail. Signing in with Google is set up on the server (GOOGLE_CLIENT_ID).</span></div>
         <ol className="small steps">
           <li>In Google Cloud console, create an OAuth client of type Web application.</li>
           <li>Add this authorized redirect URI: <code>{redirect}</code> <button className="icon" onClick={() => navigator.clipboard.writeText(redirect)}><Copy size={12} /></button></li>
@@ -269,7 +270,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           <span className="grow small">{ws.google.connected ? <><CheckIcon size={13} /> Emails send from {ws.google.senderEmail}</> : 'No Gmail sender connected. Notifications show in the Inbox only.'}</span>
           <a className={'btn' + (ws.google.clientId && ws.google.hasSecret ? '' : ' disabled')} href="/api/auth/google/start?mode=connect">{ws.google.connected ? 'Reconnect' : 'Connect Gmail sender'}</a>
         </div>
-        <div className="muted small">People tick Email above to get notifications by email. Google sign-in works for anyone whose email matches a person here.</div>
+        <div className="muted small">People tick Email above to get notifications by email.</div>
       </section>}
     </div>
   );
@@ -362,7 +363,7 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
 
 type Invite = {id: string; email: string; role: string; created: string; expires: string; link?: string; emailed?: boolean};
 /** Invite people by email into this workspace. The link works once and for 7 days. */
-function InvitesCard({roles, signInOn, senderReady}: {roles: Role[]; signInOn: boolean; senderReady: boolean}) {
+function InvitesCard({roles, signInOn}: {roles: Role[]; signInOn: boolean}) {
   const [list, setList] = useState<Invite[]>([]);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('editor');
@@ -377,8 +378,7 @@ function InvitesCard({roles, signInOn, senderReady}: {roles: Role[]; signInOn: b
   };
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3>Invite people</h3><span className="muted small">They get a one-time link (7 days) to set their name and password, then land in this workspace with the role you pick.
-        {senderReady ? ' The link is emailed from your connected Gmail.' : ' Connect a Gmail sender below to email it; until then, copy the link and send it yourself.'}
+      <div className="set-card-head"><h3>Invite people</h3><span className="muted small">They get a one-time link (7 days) to join with their name, then land in this workspace with the role you pick. The link is emailed when the server can send mail; you can always copy it and send it yourself.
         {!signInOn && ' Sign-in is off right now, so passwords take effect once you turn it on.'}</span></div>
       <div className="time-row">
         <input className="inline" style={{flex: 1}} placeholder="name@company.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && email.trim() && send()} />
@@ -400,32 +400,43 @@ function InvitesCard({roles, signInOn, senderReady}: {roles: Role[]; signInOn: b
 
 /** The page an invite link opens: shows where you are joining, then name and password (or Google). */
 export function AcceptInvite({secret}: {secret: string}) {
-  const [info, setInfo] = useState<{email: string; name: string | null; role: string; workspace: string; invitedBy: string | null; hasAccount: boolean; googleReady: boolean} | null>(null);
+  const [info, setInfo] = useState<{email: string; name: string | null; role: string; workspace: string; invitedBy: string | null; hasAccount: boolean; hasPassword: boolean; signedIn: boolean; staff: boolean; passwordless: boolean} | null>(null);
   const [err, setErr] = useState('');
   const [name, setName] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
-  useEffect(() => { api<NonNullable<typeof info>>(`/invites/${secret}`).then(i => { setInfo(i); setName(i.name ?? ''); }).catch(e => setErr(e instanceof Error ? e.message : String(e))); }, [secret]);
+  const [addPw, setAddPw] = useState(false);
+  useEffect(() => { api<NonNullable<typeof info>>(`/invites/${secret}`).then(i => { setInfo(i); setName(i.name ?? ''); setAddPw(!i.passwordless); }).catch(e => setErr(e instanceof Error ? e.message : String(e))); }, [secret]);
   const join = async () => {
-    if (!info?.hasAccount && pw !== pw2) return setErr('The two passwords do not match');
-    try { await api(`/invites/${secret}/accept`, {method: 'POST', body: {name, password: pw}}); location.hash = '/mywork'; location.reload(); }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    if (!info?.hasAccount && addPw && pw !== pw2) return setErr('The two passwords do not match');
+    try {
+      const r = await api<{google?: boolean}>(`/invites/${secret}/accept`, {method: 'POST', body: {name, password: pw}});
+      if (r.google) { location.href = '/auth/google/start'; return; }
+      location.hash = '/mywork'; location.reload();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
+  // An existing account joins signed in as itself, or with its password; staff accounts sign in with Google first.
+  const needSignIn = !!info?.hasAccount && !info.signedIn && (!info.hasPassword || info.staff);
+  const needPw = !!info?.hasAccount && !info.signedIn && !needSignIn;
+  const ready = !!name.trim() && !needSignIn && (needPw ? pw.length >= 8 : !addPw || pw.length >= 8);
   return (
     <AuthCard>
         {info ? <>
           <h1 style={{margin: '8px 0 4px'}}>Join {info.workspace}</h1>
           <div className="muted small">{info.invitedBy ? `${info.invitedBy} invited ` : 'You were invited as '}<b>{info.email}</b> as {info.role}.</div>
-          <input className="search" placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} />
-          {info.hasAccount ? <>
-            <div className="muted small">You already have a Cadence account on this server. Enter its password to join.</div>
-            <input className="search" type="password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && join()} />
-          </> : <>
-            <input className="search" type="password" placeholder="Choose a password (8 or more characters)" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
-            <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && join()} />
+          <input className="search" placeholder="Your name" autoFocus value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
+          {needSignIn && <div className="muted small">You already have a Cadence account on this server. <a className="link" href="#/signin">Sign in</a> first, then open this link again.</div>}
+          {needPw && <>
+            <div className="muted small">You already have a Cadence account on this server. Enter its password to join, or sign in first and open this link again.</div>
+            <input className="search" type="password" placeholder="Your password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
           </>}
+          {!info.hasAccount && info.staff && <div className="muted small">Next you sign in with your Google account.</div>}
+          {!info.hasAccount && !info.staff && (addPw ? <>
+            <input className="search" type="password" placeholder={info.passwordless ? 'Password (optional, 8 or more characters)' : 'Choose a password (8 or more characters)'} autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
+            <input className="search" type="password" placeholder="Type it again" autoComplete="new-password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => e.key === 'Enter' && ready && join()} />
+          </> : <div className="muted small">No password needed: you sign in with an emailed link or Google. <button className="link small" onClick={() => setAddPw(true)}>Add a password (optional)</button></div>)}
           {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
-          <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!name.trim() || pw.length < 8} onClick={join}><LogIn size={14} /> Join workspace</button>
+          <button className="btn primary" style={{width: '100%', justifyContent: 'center', padding: 8}} disabled={!ready} onClick={join}><LogIn size={14} /> Join workspace</button>
         </> : <>
           <h1 style={{margin: '8px 0 4px'}}>Invite</h1>
           <div className="small" style={{color: err ? 'var(--danger)' : undefined}}>{err || 'Checking your invite...'}</div>
@@ -452,7 +463,7 @@ function GoogleCard({me, ready}: {me: string; ready: boolean}) {
   return (
     <section className="set-card">
       <div className="set-card-head"><h3>My Google accounts</h3><span className="muted small">Connect one or more Google accounts to see your calendars next to your tasks, add due dates to a calendar, and (if you allow it) let you and your AI agents search your Gmail. Only you see your own connections.</span></div>
-      {!ready && <p className="small">An admin needs to add the Google OAuth client first (Google sign-in and email section on this page). In Google Cloud, enable the Google Calendar API and Gmail API for that client and add this redirect URI: <code>{location.origin}/api/auth/google/callback</code></p>}
+      {!ready && <p className="small">An admin needs to add the Google OAuth client first (Google and Gmail section on this page). In Google Cloud, enable the Google Calendar API and Gmail API for that client and add this redirect URI: <code>{location.origin}/api/auth/google/callback</code></p>}
       <div className="time-row">
         <a className={'btn primary' + (ready ? '' : ' disabled')} href={ready ? start('calendar') : undefined}>Connect Google Calendar</a>
         <a className={'btn' + (ready ? '' : ' disabled')} href={ready ? start('calendar,gmail') : undefined}>Connect Calendar and Gmail</a>

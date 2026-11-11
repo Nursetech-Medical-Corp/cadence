@@ -1,5 +1,5 @@
 // Invites: an admin invites someone by email into this workspace with a role. They get a one-time link, valid
-// for 7 days, where they set their name and password (or use Google), and are signed in. Only a hash of the
+// for 7 days, where they set their name (a password is optional), and are signed in. Only a hash of the
 // link's secret is stored, so a copy of the database cannot be used to accept invites.
 import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
@@ -44,13 +44,13 @@ export function findInvite(db: Db, secret: string): Invite {
   return inv;
 }
 
-/** Joins the workspace: makes (or completes) the person, sets the password, marks the invite used. Returns the person id. */
+/** Joins the workspace: makes (or completes) the person, sets the password if one was given, marks the invite used. Returns the person id. */
 export function acceptInvite(db: Db, secret: string, input: {name?: unknown; password?: unknown}, createPerson: (name: string, email: string) => string) {
   const inv = findInvite(db, secret);
   const name = String(input.name ?? '').trim() || inv.name || inv.email.split('@')[0];
   if (name.length > 100) throw new Invalid('Names are limited to 100 characters');
   const password = String(input.password ?? '');
-  const hash = hashPassword(password);
+  const hash = password ? hashPassword(password) : null; // passwordless unless they choose one
   const existing = db.prepare('select id from people where lower(email) = ?').get(inv.email) as {id: string} | undefined;
   const id = existing?.id ?? createPerson(name, inv.email);
   db.prepare('update people set name = ?, password = ?, role = ?, active = 1 where id = ?').run(name, hash, inv.role, id);

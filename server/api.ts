@@ -18,6 +18,7 @@ import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks,
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
 import {handleMcpHttp} from './mcp-http.ts';
+import {devLogMode, googleSignInCallback, googleSignInReady, googleSignInStart, logSignIn, clientIp, publicUrl, sendSmtp, smtpReady, staffGoogleOnly, type SignInMethod} from './signin.ts';
 import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
 import {migrateApprovals} from './approvals.ts';
@@ -54,14 +55,16 @@ const cookieValue = (cookie: string | undefined, name: string) => cookie?.split(
  * Passing a Tasks instance (tests) serves just that one.
  */
 /** What every workspace handler shares: the account store and a way to reach all workspaces. */
-type Shared = {accounts: Accounts; all: () => {id: string; name: string; tasks: Tasks}[]};
+type Shared = {accounts: Accounts; all: () => {id: string; name: string; tasks: Tasks}[]; signInLog: string};
 
 export function apiMiddleware(single?: Tasks): Handler {
   if (single) {
-    const shared: Shared = {accounts: new Accounts(new DatabaseSync(':memory:')), all: () => [{id: 'main', name: 'Cadence', tasks: single}]};
+    const shared: Shared = {accounts: new Accounts(new DatabaseSync(':memory:')), all: () => [{id: 'main', name: 'Cadence', tasks: single}], signInLog: join(single.dataDir, 'signin-log.jsonl')};
     return workspaceApi(single, {id: 'main', dir: single.dataDir, main: true}, () => single, () => {}, shared);
   }
-  const shared: Shared = {accounts: openAccounts(), all: () => listWorkspaces().map(w => ({id: w.id, name: w.name, tasks: open(w).tasks}))};
+  // The sign-in log sits beside the account store, in the data volume.
+  const shared: Shared = {accounts: openAccounts(), all: () => listWorkspaces().map(w => ({id: w.id, name: w.name, tasks: open(w).tasks})),
+    signInLog: join(dirname(listWorkspaces().find(w => w.id === 'main')!.db), 'signin-log.jsonl')};
   const handlers = new Map<string, {h: Handler; tasks: Tasks}>();
   const close = (id: string) => { const x = handlers.get(id); if (x) { x.tasks.db.close(); handlers.delete(id); } };
   const open = (w: WorkspaceInfo): {h: Handler; tasks: Tasks} => {
@@ -77,7 +80,7 @@ export function apiMiddleware(single?: Tasks): Handler {
   if (process.env.TASKS_DEMO === '1') seedSampleWorkspaces(w => open(w).tasks);
   return (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://local');
-    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/')) return next();
+    if (url.pathname !== '/mcp' && !url.pathname.startsWith('/api/') && !url.pathname.startsWith('/auth/google/')) return next();
     const asked = String(req.headers['x-workspace'] ?? '') || url.searchParams.get('ws') || '';
     const list = listWorkspaces();
     const w = list.find(x => x.id === (asked || cookieValue(req.headers.cookie, 'tasks_ws') || 'main')) ?? (asked ? null : list[0]);
@@ -86,7 +89,7 @@ export function apiMiddleware(single?: Tasks): Handler {
   };
 }
 
-function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolean}, openTasks: (w: WorkspaceInfo) => Tasks, closeWorkspace: (id: string) => void, {accounts, all}: Shared): Handler {
+function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolean}, openTasks: (w: WorkspaceInfo) => Tasks, closeWorkspace: (id: string) => void, {accounts, all, signInLog}: Shared): Handler {
   // The main workspace keeps backups in data/backups (or TASKS_BACKUPS); others in their own folder.
   const bdir = info.main ? undefined : join(info.dir, 'backups');
   migrate(tasks.db);
@@ -163,7 +166,17 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const isAdmin = (pid: string | null) => !!pid && !!(tasks.db.prepare('select admin from people where id = ?').get(pid) as {admin: number} | undefined)?.admin;
   const access = (p: Project) => (p.settings as {access?: Access}).access;
   const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict);
-  const systemMail = (to: string, subject: string, text: string) => { const main = all().find(w => w.id === 'main') ?? all()[0]; return main ? sendEmail(main.tasks.db, to, subject, text) : Promise.resolve(false); };
+  // System mail (sign-in links, invites): SMTP, else the main workspace's connected Gmail sender. False when neither is set up.
+  const mainDb = () => (all().find(w => w.id === 'main') ?? all()[0])?.tasks.db;
+  const gmailReady = () => { const db = mainDb(); if (!db) return false; const g = getWorkspace(db).google; return !!(g.refreshToken && g.senderEmail); };
+  const systemMail = async (to: string, subject: string, text: string) => {
+    if (smtpReady()) return sendSmtp(to, subject, text);
+    const db = mainDb();
+    return db ? sendEmail(db, to, subject, text) : false;
+  };
+  /** Email sign-in links are offered when PUBLIC_URL is set and mail can go out (or, on localhost, links go to the log). */
+  const emailLinkReady = () => !!publicUrl() && (smtpReady() || gmailReady() || devLogMode());
+  const logAttempt = (req: IncomingMessage, email: string, method: SignInMethod, result: string) => logSignIn(signInLog, req, email, method, result);
   const memberId = (t: Tasks, email: string) => (t.db.prepare('select id from people where lower(email) = ? and active = 1').get(email) as {id: string} | undefined)?.id ?? null;
   /** Workspaces where this account is an active member. */
   /** Who a set of linked accounts is in a workspace: the first of them (the signed-in one first) that is a member. */
@@ -179,6 +192,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const url = new URL(req.url ?? '/', 'http://local');
+    // Google sign-in lives outside /api so its redirect URI is {PUBLIC_URL}/auth/google/callback.
+    if (url.pathname === '/auth/google/start' && req.method === 'GET') return googleSignInStart(req, res);
+    if (url.pathname === '/auth/google/callback' && req.method === 'GET') {
+      const secureCb = req.headers['x-forwarded-proto'] === 'https' || 'encrypted' in req.socket;
+      return googleSignInCallback(req, res, url, {hasAccount: e => accounts.has(e), log: (e, r) => logAttempt(req, e, 'google', r),
+        signIn: e => accountCookie(accounts.startSession(e), secureCb)});
+    }
     // MCP over HTTP for remote AI apps: token required, every tool permission-checked.
     if (url.pathname === '/mcp') return handleMcpHttp(tasks, req, res);
     if (!url.pathname.startsWith('/api/')) return next();
@@ -219,6 +239,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           return send(res, 200, {required: ws.requireLogin, forced: loginForced(), account, setup: ws.requireLogin && !accounts.count(),
             signup: accounts.signup(), owner: !!account && accounts.owner() === account,
             linked: emails.slice(1), memberOf: account && !me ? memberships(emails) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
+            signInGoogle: googleSignInReady(), signInLink: emailLinkReady(),
             caps: Object.fromEntries(tasks.listProjects().map(p => [p.id, [...caps(actor, p.id)]]))});
         }
         // First run of a hosted server: the first account becomes admin of every workspace.
@@ -250,7 +271,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           if (tries.length >= 5) return send(res, 429, {error: 'Too many new accounts from here. Try again later.'});
           const email = String(body.email ?? '').trim().toLowerCase(), name = String(body.name ?? '').trim().slice(0, 80) || email.split('@')[0];
           if (!/^[^\s@<>",;:]+@[^\s@<>",;:]+\.[a-z]{2,}$/i.test(email)) throw new Invalid('Enter a valid email address');
-          if (accounts.has(email)) throw new Invalid('That email already has an account. Sign in, or use Forgot password.');
+          if (accounts.has(email)) throw new Invalid('That email already has an account. Sign in instead.');
           const hash = hashPassword(String(body.password ?? ''));
           loginTries.set(key, [...tries, Date.now()]);
           const w = createWorkspace({name: `${name.split(' ')[0]}'s workspace`});
@@ -262,26 +283,34 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           res.setHeader('set-cookie', signIn(email));
           return send(res, 201, {ok: true, workspace: w.id});
         }
-        // Forgot password: a one-time link by email. The answer is the same whether or not the email has an account.
-        if (b === 'forgot' && m === 'POST') {
-          const key = `forgot|${req.socket.remoteAddress}`, tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
-          if (tries.length >= 5) return send(res, 429, {error: 'Too many requests. Wait 15 minutes and try again.'});
-          loginTries.set(key, [...tries, Date.now()]);
-          const email = String(body.email ?? '').trim().toLowerCase();
-          if (accounts.has(email)) {
-            const origin = typeof req.headers.origin === 'string' && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : `${secure ? 'https' : 'http'}://${req.headers.host}`;
-            const link = `${origin}/#/reset/${accounts.startReset(email)}`;
-            const sent = await systemMail(email, 'Reset your Cadence password', `Someone asked to reset the password for ${email} on Cadence.\n\nChoose a new password here (the link works once, for one hour):\n${link}\n\nIf it was not you, ignore this email; your password stays the same.`).catch(() => false);
-            if (!sent) console.log(`[cadence] No email sender is set up. Password reset link for ${email}: ${link}`);
-          }
-          return send(res, 200, {ok: true, message: 'If that email has an account, a reset link is on its way. It works once, for one hour.'});
+        // Email me a sign-in link: the same answer whether or not the email has an account. The link opens a page
+        // whose Sign in button posts the token, so mail scanners that fetch links do not use it up.
+        if (b === 'email-link' && !c && m === 'POST') {
+          const email = String(body.email ?? '').trim().toLowerCase().slice(0, 200), ip = clientIp(req), now = Date.now();
+          const recent = (k: string) => (loginTries.get(k) ?? []).filter(t => now - t < 15 * 60_000);
+          const byEmail = recent(`elink|${email}`), byIp = recent(`elink-ip|${ip}`);
+          if (byEmail.length >= 5 || byIp.length >= 10) { logAttempt(req, email, 'link', 'rate limited'); return send(res, 429, {error: 'Too many sign-in links. Wait 15 minutes and try again.'}); }
+          loginTries.set(`elink|${email}`, [...byEmail, now]); loginTries.set(`elink-ip|${ip}`, [...byIp, now]);
+          const reply = {ok: true, message: 'If that email has an account, a sign-in link is on its way. It works once, for 15 minutes.'};
+          const base = publicUrl();
+          if (!accounts.has(email)) { logAttempt(req, email, 'link', 'no account'); return send(res, 200, reply); }
+          if (staffGoogleOnly(email)) { logAttempt(req, email, 'link', 'refused: staff use Google'); return send(res, 200, reply); }
+          if (!base) { logAttempt(req, email, 'link', 'refused: PUBLIC_URL not set'); return send(res, 200, reply); }
+          const link = `${base}/#/signin-link/${accounts.startSignInLink(email)}`;
+          const sent = await systemMail(email, 'Your Cadence sign-in link', `Use this link to sign in to Cadence as ${email}. It works once, for 15 minutes:
+${link}
+
+If you did not ask for it, ignore this email.`)
+            .catch(e => { console.error('Sign-in link email failed', (e as Error).message); return false; });
+          if (!sent) console.log(`[cadence] No email sender is set up. Sign-in link for ${email}: ${link}`);
+          logAttempt(req, email, 'link', sent ? 'link sent' : 'link printed in server log');
+          return send(res, 200, reply);
         }
-        if (b === 'reset' && m === 'POST') {
-          const hash = hashPassword(String(body.password ?? ''));
-          const email = accounts.useReset(String(body.token ?? ''));
-          if (!email) throw new Invalid('This link has expired or was already used. Ask for a new one.');
-          accounts.setHash(email, hash);
-          syncHash(email, hash);
+        if (b === 'email-link' && c === 'use' && m === 'POST') {
+          const email = accounts.useSignInLink(String(body.token ?? ''));
+          if (!email) { logAttempt(req, '', 'link', 'invalid or expired'); throw new Invalid('This link has expired or was already used. Ask for a new one.'); }
+          if (staffGoogleOnly(email)) { logAttempt(req, email, 'link', 'refused: staff use Google'); throw new Denied('Staff accounts sign in with Google.'); }
+          logAttempt(req, email, 'link', 'ok');
           res.setHeader('set-cookie', signIn(email));
           return send(res, 200, {ok: true});
         }
@@ -295,9 +324,11 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const email = String(body.email ?? '').trim().toLowerCase();
           const key = `${email}|${req.socket.remoteAddress}`;
           const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
-          if (tries.length >= 8) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
-          if (!accounts.verify(email, String(body.password ?? ''), legacyHashes(email))) { loginTries.set(key, [...tries, Date.now()]); return send(res, 401, {error: 'Email or password is wrong'}); }
+          if (tries.length >= 8) { logAttempt(req, email, 'password', 'rate limited'); return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'}); }
+          if (staffGoogleOnly(email)) { logAttempt(req, email, 'password', 'refused: staff use Google'); return send(res, 403, {error: 'Staff accounts sign in with Google.'}); }
+          if (!accounts.verify(email, String(body.password ?? ''), legacyHashes(email))) { loginTries.set(key, [...tries, Date.now()]); logAttempt(req, email, 'password', 'wrong password'); return send(res, 401, {error: 'Email or password is wrong'}); }
           loginTries.delete(key);
+          logAttempt(req, email, 'password', 'ok');
           res.setHeader('set-cookie', signIn(email));
           return send(res, 200, {ok: true, memberOf: memberships(accounts.group(email))});
         }
@@ -316,12 +347,14 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         }
         if (b === 'logout' && m === 'POST') { accounts.endSession(token); res.setHeader('set-cookie', accountCookie('', secure)); return send(res, 200, {ok: true}); }
         if (b === 'google' && c === 'start') {
-          const mode = q('mode') === 'connect' ? 'connect' : q('mode') === 'link' ? 'link' : 'login';
+          // Signing in with Google has its own route; this one is for connections (Gmail sender, calendars).
+          if (q('mode') !== 'connect' && q('mode') !== 'link') { res.statusCode = 302; res.setHeader('location', '/auth/google/start'); res.end(); return; }
+          const mode = q('mode') === 'connect' ? 'connect' : 'link';
           // A browser link cannot send x-person, so in open mode the app passes ?as=.
           const who = actor ?? (!ws.requireLogin ? q('as') ?? null : null);
           return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' => w === 'calendar' || w === 'gmail'));
         }
-        if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url, actor, email => { if (!accounts.has(email)) accounts.setHash(email, null); return signIn(email); });
+        if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url);
       }
       // ---- Invites: the link works while signed out; accepting signs you in ----
       if (a === 'invites' && b && b.length > 20) {
@@ -329,20 +362,27 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
           const inv = findInvite(tasks.db, b);
           const w = listWorkspaces().find(x => x.id === info.id);
           return send(res, 200, {email: inv.email, name: inv.name, role: ws.roles.find(r => r.id === inv.role)?.name ?? inv.role, workspace: w?.name ?? 'Tasks',
-            invitedBy: inv.by ? tasks.listPeople().find(p => p.id === inv.by)?.name ?? null : null, hasAccount: !!accounts.hash(inv.email), googleReady: !!(ws.google.clientId && ws.google.clientSecret)});
+            invitedBy: inv.by ? tasks.listPeople().find(p => p.id === inv.by)?.name ?? null : null, hasAccount: accounts.has(inv.email), hasPassword: !!accounts.hash(inv.email), signedIn: account === inv.email, staff: staffGoogleOnly(inv.email), passwordless: googleSignInReady() || emailLinkReady()});
         }
         if (c === 'accept' && m === 'POST') {
           const key = `invite|${req.socket.remoteAddress}`;
           const tries = (loginTries.get(key) ?? []).filter(t => Date.now() - t < 15 * 60_000);
           if (tries.length >= 20) return send(res, 429, {error: 'Too many attempts. Wait 15 minutes and try again.'});
           loginTries.set(key, [...tries, Date.now()]);
-          // Someone who already has an account joins with its password; it is not changed.
-          const inv = findInvite(tasks.db, b), existing = accounts.hash(inv.email);
-          if (accounts.has(inv.email) && !(existing ? checkPassword(String(body.password ?? ''), existing) : account === inv.email))
-            throw new Invalid(existing ? 'You already have an account. Enter its password to join.' : 'Sign in with Google first, then open this link again.');
-          const pid = acceptInvite(tasks.db, b, body, (name, email) => tasks.createPerson({name, email}).id);
-          if (!accounts.has(inv.email)) accounts.setHash(inv.email, (tasks.db.prepare('select password from people where id = ?').get(pid) as {password: string}).password);
+          // Someone who already has an account joins signed in as it, or with its password; the password is not changed.
+          // A new account needs only a name; a password is optional. Staff (STAFF_GOOGLE_DOMAIN) get no password and finish with Google.
+          const inv = findInvite(tasks.db, b), existing = accounts.hash(inv.email), staff = staffGoogleOnly(inv.email);
+          if (accounts.has(inv.email) && account !== inv.email && !(existing && !staff && checkPassword(String(body.password ?? ''), existing))) {
+            logAttempt(req, inv.email, 'invite', 'refused: existing account not signed in');
+            throw new Invalid(existing && !staff ? 'You already have an account. Enter its password to join.' : 'Sign in first, then open this link again.');
+          }
+          // Without Google or email links on this server, a new account needs a password to sign in again later.
+          if (!accounts.has(inv.email) && !staff && !body.password && !googleSignInReady() && !emailLinkReady()) throw new Invalid('Choose a password (8 or more characters)');
+          const pid = acceptInvite(tasks.db, b, staff || accounts.has(inv.email) ? {name: body.name} : body, (name, email) => tasks.createPerson({name, email}).id);
+          if (!accounts.has(inv.email)) accounts.setHash(inv.email, (tasks.db.prepare('select password from people where id = ?').get(pid) as {password: string | null}).password);
           syncHash(inv.email, accounts.hash(inv.email));
+          if (staff && account !== inv.email) { logAttempt(req, inv.email, 'invite', 'joined, Google sign-in required'); return send(res, 200, {ok: true, person: pid, google: true}); }
+          logAttempt(req, inv.email, 'invite', 'ok');
           res.setHeader('set-cookie', signIn(inv.email));
           return send(res, 200, {ok: true, person: pid});
         }
@@ -378,12 +418,16 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (!b && m === 'GET') return send(res, 200, listInvites(tasks.db));
         if (!b && m === 'POST') {
           const {invite, secret} = createInvite(tasks.db, body, actor, ws.roles.map(r => r.id));
-          const origin = typeof req.headers.origin === 'string' && /^https?:\/\//.test(req.headers.origin) ? req.headers.origin : `http://${req.headers.host}`;
-          const link = `${origin}/?ws=${info.id}#/invite/${secret}`;
+          // Emailed links start with PUBLIC_URL, never the request's Host or Origin. Without PUBLIC_URL the invite is not
+          // emailed; the admin copies the link (built from the address they are using) and sends it themselves.
+          const base = publicUrl();
+          const link = `${base ?? `${secure ? 'https' : 'http'}://${req.headers.host}`}/?ws=${info.id}#/invite/${secret}`;
           const who = actor ? tasks.listPeople().find(p => p.id === actor)?.name ?? 'Someone' : 'Someone';
           const wname = listWorkspaces().find(x => x.id === info.id)?.name ?? 'Cadence';
+          const subject = `${who} invited you to ${wname} on Cadence`, text = `${who} invited you to the ${wname} workspace on Cadence.\n\nJoin here (the link works once and expires in 7 days):\n${link}`;
           let emailed = false;
-          try { emailed = await sendEmail(tasks.db, invite.email, `${who} invited you to ${wname} on Cadence`, `${who} invited you to the ${wname} workspace on Cadence.\n\nJoin here (the link works once and expires in 7 days):\n${link}`); } catch (e) { console.error('Invite email failed', e); }
+          // SMTP, else this workspace's connected Gmail sender.
+          if (base) try { emailed = smtpReady() ? await sendSmtp(invite.email, subject, text) : await sendEmail(tasks.db, invite.email, subject, text); } catch (e) { console.error('Invite email failed', e); }
           return send(res, 201, {...invite, link, emailed});
         }
         if (b && m === 'DELETE') { revokeInvite(tasks.db, b); return send(res, 200, {ok: true}); }
