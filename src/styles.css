@@ -1104,3 +1104,9 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 /* Customization */
 .mine-note { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; margin-top: 8px; }
+
+/* Sidebar: arrow to show a project's views */
+.proj-caret { border: 0; background: none; padding: 0; width: 16px; height: 16px; display: inline-grid; place-items: center; color: var(--muted); cursor: pointer; border-radius: 4px; flex: none; }
+.proj-caret:hover { background: var(--hover); color: var(--text); }
+.proj-caret svg { transition: transform .12s; }
+.proj-caret.open svg { transform: rotate(90deg); }

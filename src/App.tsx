@@ -1,7 +1,7 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock} from 'lucide-react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -254,6 +254,9 @@ export function App() {
 function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, onShortcuts, signedIn}: {store: Store; me: string; setMe: (id: string) => void; route: Route; unread: number; openPalette: () => void; open: (id: string) => void; onToggle: () => void; onShortcuts: () => void; signedIn: boolean}) {
   const [who, setWho] = useState(false);
   const [wsOpen, setWsOpen] = useState(() => localStorage.getItem('side-ws') !== '0');
+  // Projects whose views are shown under them (the arrow next to each project).
+  const [openProjects, setOpenProjects] = useState<string[]>(() => JSON.parse(localStorage.getItem('side-open-projects') ?? '[]'));
+  const toggleProject = (id: string) => setOpenProjects(l => { const n = l.includes(id) ? l.filter(x => x !== id) : [...l, id]; localStorage.setItem('side-open-projects', JSON.stringify(n)); return n; });
   const [newName, setNewName] = useState('');
   const person = store.people.find(p => p.id === me);
   const projectId = route.page === 'project' ? route.id : null;
@@ -292,10 +295,11 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
       </div>
       <ProjectList store={store} activeId={projectId} render={(p, n, x) => {
         const views = viewsFor(store, p.id);
-        const active = projectId === p.id;
+        const active = projectId === p.id, expanded = openProjects.includes(p.id);
         return <>
-          <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: views[0]?.id ?? ''})} />
-          {active && views.map(v => {
+          <ProjectNavButton store={store} project={p} active={active} extra={x} onOpen={() => go({page: 'project', id: p.id, view: views[0]?.id ?? ''})}
+            expanded={expanded} onToggle={() => toggleProject(p.id)} />
+          {expanded && views.map(v => {
             const Icon = viewIcon(v.kind);
             const on = route.page === 'project' && (route.view === v.id || (!route.view && v === views[0]));
             return <button key={v.id} className={'nav-btn nav-sub' + (on ? ' active' : '')} onClick={() => go({page: 'project', id: p.id, view: v.id})}><Icon size={14} color={VIEW_COLORS[v.kind]} />{v.name}</button>;
@@ -329,14 +333,16 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
 }
 /** Click opens the project, double-click renames it in place. */
 /** Click opens the project, double-click renames it in place. Grip, icon kit and star show on hover. */
-function ProjectNavButton({store, project, active, extra, onOpen}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode; menu: React.ReactNode}; onOpen: () => void}) {
+function ProjectNavButton({store, project, active, extra, onOpen, expanded, onToggle}: {store: Store; project: Project; active: boolean; extra: {grip: React.ReactNode; star: React.ReactNode; icon: React.ReactNode; menu: React.ReactNode}; onOpen: () => void; expanded: boolean; onToggle: () => void}) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(project.name);
   const done = () => { setEditing(false); if (name.trim() && name !== project.name) store.updateProject(project.id, {name: name.trim()}); else setName(project.name); };
   return (
     <div role="button" tabIndex={0} className={'nav-btn proj-nav' + (active ? ' active' : '') + (isRollup(project) ? ' is-rollup' : '')} onClick={() => !editing && onOpen()}
       onKeyDown={e => { if (e.key === 'Enter' && !editing) onOpen(); }} onDoubleClick={() => { setName(project.name); setEditing(true); }} title={isRollup(project) ? 'Work from many projects together. Double-click to rename' : 'Double-click to rename'}>
-      {extra.grip}{extra.icon}
+      {extra.grip}
+      <button className={'proj-caret' + (expanded ? ' open' : '')} title={expanded ? 'Hide views' : 'Show views'} aria-expanded={expanded} onClick={e => { e.stopPropagation(); onToggle(); }}><ChevronRight size={13} /></button>
+      {extra.icon}
       {editing
         ? <input autoFocus className="nav-edit" value={name} onChange={e => setName(e.target.value)} onBlur={done} onClick={e => e.stopPropagation()}
             onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') { setName(project.name); setEditing(false); } }} />
