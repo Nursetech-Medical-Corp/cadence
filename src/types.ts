@@ -103,6 +103,20 @@ export type Notification = {id: string; person: string; itemId: string | null; k
 
 // 0 none, 1 urgent, 2 high, 3 medium, 4 low (sorted ascending with none last).
 export const PRIORITIES = ['None', 'Urgent', 'High', 'Medium', 'Low'] as const;
+/** Kinds of notification, as people choose which reach their phone and desktop. The Inbox keeps them all. */
+export const NOTIFY_KINDS = [
+  {kind: 'assigned', label: 'Assigned to me'},
+  {kind: 'mention', label: 'Mentions'},
+  {kind: 'assigned-comment', label: 'Comments assigned to me'},
+  {kind: 'comment', label: 'Comments on my work'},
+  {kind: 'completed', label: 'My work completed'},
+  {kind: 'approval', label: 'Approvals and reviews'},
+  {kind: 'ai', label: 'AI agent requests'},
+  {kind: 'due', label: 'Due today and tomorrow'},
+  {kind: 'overdue', label: 'Overdue'},
+  {kind: 'timer', label: 'Timer left running'},
+  {kind: 'automation', label: 'Automations'},
+] as const;
 
 export type ItemPatch = Partial<Pick<Item,
   'parentId' | 'type' | 'title' | 'body' | 'status' | 'priority' | 'assignees' | 'start' | 'due' |

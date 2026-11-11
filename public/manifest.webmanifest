@@ -1,0 +1,20 @@
+{
+  "name": "Cadence",
+  "short_name": "Cadence",
+  "description": "Tasks, spaces and sprints for your team and its AI agents.",
+  "id": "/",
+  "start_url": "/#/mywork",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6d5dfc",
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ],
+  "shortcuts": [
+    {"name": "My work", "url": "/#/mywork"},
+    {"name": "Inbox", "url": "/#/inbox"}
+  ]
+}

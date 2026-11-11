@@ -99,7 +99,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
               <button className="gutter-btn" title="Click to add below. Alt+click to add above" onClick={e => { e.stopPropagation(); if (e.altKey) startInsertBefore(i, depth); else startInsertAfter(i, depth); }}><Plus size={14} /></button>
               <span className="gutter-btn grip" title="Drag to move"><GripVertical size={14} /></span>
             </span>
-            <span className="indent" style={{width: depth * 20}} />
+            <span className="indent" style={{width: depth * 20, '--d': depth} as React.CSSProperties} />
             <button className="twisty" style={{visibility: children.length ? 'visible' : 'hidden'}}
               onClick={() => setCollapsed(c => { const n = new Set(c); n.has(i.id) ? n.delete(i.id) : n.add(i.id); return n; })}>
               {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
@@ -107,7 +107,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             <Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} />
             {project.settings.rollup && <SpaceChip item={i} projects={store.projects} />}
             {i.type !== 'Task' && <TypeBadge type={i.type} />}
-            <RowTitle item={i}
+            <RowTitle item={i} onOpen={() => open(i.id)}
               onSave={title => store.updateItem(i.id, {title})}
               onEnter={() => startInsertAfter(i, depth)}
               onTab={shift => shift ? outdent(i) : indent(i)} />
@@ -144,7 +144,9 @@ export function ListView({store, project, items: shown, allItems: items, open, s
   );
 }
 
-function RowTitle({item, onSave, onEnter, onTab}: {item: Item; onSave: (v: string) => void; onEnter: () => void; onTab: (shift: boolean) => void}) {
+function RowTitle({item, onSave, onEnter, onTab, onOpen}: {item: Item; onSave: (v: string) => void; onEnter: () => void; onTab: (shift: boolean) => void; onOpen: () => void}) {
+  // On a phone a tap opens the task (rename it there), instead of bringing up the keyboard.
+  if (matchMedia('(max-width: 760px)').matches) return <span className="title-wrap"><button className="title title-btn" onClick={onOpen}>{item.title}</button></span>;
   return (
     <span className="title-wrap" onKeyDownCapture={e => {
       if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); onEnter(); }

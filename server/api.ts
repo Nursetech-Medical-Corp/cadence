@@ -9,7 +9,9 @@ import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
 import {exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, retention, saveSettings, snapshot} from './backup.ts';
 import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, migrate, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
-import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts} from './accounts.ts';
+import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
+import * as push from './push.ts';
+import {NOTIFY_KINDS} from '../src/types.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {googleCallback, googleStart, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
@@ -111,6 +113,30 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   setInterval(periodic, 3600 * 1000).unref();
   startWebhooks(tasks);
   tasks.onNotify(n => { sendNotificationEmail(tasks.db, n).catch(e => console.error('Email notification failed', e.message)); });
+  // Push to the person's phones and desktops (every device of their linked accounts), unless they turned that kind off or it is quiet time.
+  const personEmail = (id: string) => (tasks.db.prepare('select email from people where id = ? and active = 1').get(id) as {email: string | null} | undefined)?.email?.trim().toLowerCase() || null;
+  const pushTo = async (emails: string[], msg: push.PushMessage) => {
+    const v = accounts.vapid(), subject = process.env.CADENCE_PUSH_CONTACT ?? `mailto:${accounts.owner() ?? 'admin@example.com'}`;
+    let sent = 0;
+    await Promise.all(accounts.subs(emails).map(async s => {
+      try {
+        const status = await push.send(s, msg, v, subject);
+        if (status === 404 || status === 410) accounts.unsubscribe(s.endpoint); else if (status < 300) sent++;
+      } catch (e) { console.error('Push failed', (e as Error).message); }
+    }));
+    return sent;
+  };
+  tasks.onNotify(n => {
+    const email = personEmail(n.person);
+    if (!email) return;
+    const group = accounts.group(email), prefs = accounts.notifyPrefs(group);
+    if (prefs.off.includes(n.kind) || quietNow(prefs)) return;
+    const actorName = n.actor ? (tasks.db.prepare('select name from people where id = ?').get(n.actor) as {name: string} | undefined)?.name : undefined;
+    const spaces = all(), wsName = spaces.length > 1 ? spaces.find(w => w.id === info.id)?.name : undefined;
+    const unread = (tasks.db.prepare('select count(*) as n from notifications where person = ? and read = 0').get(n.person) as {n: number}).n + 1;
+    void pushTo(group, {title: [actorName ?? 'Cadence', wsName].filter(Boolean).join(' in '), body: n.text, unread,
+      url: n.itemId ? `/?ws=${info.id}#/open/${n.itemId}` : `/?ws=${info.id}#/inbox`, tag: n.itemId ?? undefined});
+  });
   // Live updates go only to people who can see the project the change belongs to.
   const clients = new Map<ServerResponse, string | null>();
   const eventProject = (e: ChangeEvent): string | null =>
@@ -663,6 +689,36 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (!person) throw new Invalid('person is required');
         if (!b && m === 'GET') return send(res, 200, tasks.listNotifications(person, q('unread') === 'true'));
         if (b === 'read' && m === 'POST') { tasks.markRead(person, body.ids); return send(res, 200, {ok: true}); }
+      }
+
+      // Phone and desktop notifications: this device's subscription, which kinds, quiet hours, a test.
+      if (a === 'push') {
+        if (bearer) throw new Denied('Device notifications belong to people, not tokens');
+        const own = account ? emails : actor && personEmail(actor) ? accounts.group(personEmail(actor)!) : [];
+        if (!own.length) throw new Invalid('Add an email to your person on the Team page to get notifications on your devices');
+        if (!b && m === 'GET') return send(res, 200, {key: accounts.vapid().publicKey, prefs: accounts.notifyPrefs(own), devices: accounts.subs(own).length});
+        if (b === 'subscribe' && m === 'POST') {
+          const sb = (body.subscription ?? {}) as {endpoint?: unknown; keys?: {p256dh?: unknown; auth?: unknown}};
+          const sub = {endpoint: String(sb.endpoint ?? ''), p256dh: String(sb.keys?.p256dh ?? ''), auth: String(sb.keys?.auth ?? '')};
+          const key = Buffer.from(sub.p256dh, 'base64url');
+          if (!push.isPushService(sub.endpoint) || key.length !== 65 || key[0] !== 4 || Buffer.from(sub.auth, 'base64url').length !== 16) throw new Invalid('That is not a browser push subscription');
+          if (body.replaces) for (const e of own) accounts.unsubscribe(String(body.replaces), e);
+          accounts.subscribe(own[0], sub);
+          return send(res, 200, {devices: accounts.subs(own).length});
+        }
+        if (b === 'subscribe' && m === 'DELETE') { for (const e of own) accounts.unsubscribe(q('endpoint') ?? '', e); return send(res, 200, {devices: accounts.subs(own).length}); }
+        if (b === 'prefs' && m === 'PUT') {
+          const hm = (v: unknown) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+          const tz = String(body.tz ?? 'UTC');
+          try { new Intl.DateTimeFormat('en', {timeZone: tz}); } catch { throw new Invalid('Unknown time zone'); }
+          const quiet = body.quiet as {from?: unknown; to?: unknown} | null;
+          const p: NotifyPrefs = {tz, off: Array.isArray(body.off) ? NOTIFY_KINDS.map(k => k.kind as string).filter(k => (body.off as unknown[]).includes(k)) : [],
+            quiet: quiet && hm(quiet.from) && hm(quiet.to) ? {from: quiet.from as string, to: quiet.to as string} : null,
+            pausedUntil: typeof body.pausedUntil === 'string' && !isNaN(Date.parse(body.pausedUntil)) ? new Date(body.pausedUntil).toISOString() : null};
+          accounts.setNotifyPrefs(own[0], p);
+          return send(res, 200, p);
+        }
+        if (b === 'test' && m === 'POST') return send(res, 200, {sent: await pushTo(own, {title: 'Cadence', body: 'Notifications work on this device.', url: `/?ws=${info.id}#/inbox`})});
       }
 
       if (a === 'activity') {

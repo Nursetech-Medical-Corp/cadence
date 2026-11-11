@@ -758,6 +758,27 @@ export class Tasks {
       if (p.settings.autoRollover) for (const s of this.listSprints(p.id).filter(s => s.end < today))
         if (this.listItems({projectId: p.id, open: true}).some(i => i.sprint === s.id)) this.rolloverSprint(s.id);
     }
+    this.reminders();
+  }
+
+  /** Reminders, each sent once: due today or tomorrow and overdue (8 am to 8 pm only), and timers left running 4 hours. */
+  reminders(now = new Date()) {
+    const sent = (person: string, itemId: string, kind: string, since: string) => !!this.db.prepare('select 1 from notifications where person = ? and item_id = ? and kind = ? and created >= ?').get(person, itemId, kind, since);
+    const keys = new Map(this.listProjects().map(p => [p.id, p.key]));
+    const ref = (i: Item) => `${keys.get(i.projectId)}-${i.number}: ${i.title}`;
+    if (now.getHours() >= 8 && now.getHours() < 20) {
+      const today = this.today(), tomorrow = addUnit(today, 1, 'day');
+      for (const i of this.listItems({open: true})) {
+        if (!i.due || i.due > tomorrow) continue;
+        const [kind, text, since] = i.due < today ? ['overdue', `${ref(i)} is overdue (due ${i.due})`, ''] : ['due', `${ref(i)} is due ${i.due === today ? 'today' : 'tomorrow'}`, today];
+        for (const a of i.assignees) if (!sent(a, i.id, kind, since)) this.notify(a, null, i.id, kind, text);
+      }
+    }
+    const long = new Date(now.getTime() - 4 * 3600_000).toISOString();
+    for (const t of this.db.prepare('select item_id, person, start from time_entries where end is null and start < ?').all(long) as {item_id: string; person: string; start: string}[]) {
+      const i = this.item(t.item_id);
+      if (!sent(t.person, t.item_id, 'timer', t.start)) this.notify(t.person, null, t.item_id, 'timer', `Your timer on ${ref(i)} has run over 4 hours. Stop it if you are done.`);
+    }
   }
 
   // Templates. Item templates keep a tree of items (no ids); project templates keep the setup and optionally the items.

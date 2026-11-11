@@ -12,6 +12,19 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdirSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {listWorkspaces} from './workspaces.ts';
+import {makeVapid, type PushSub, type Vapid} from './push.ts';
+
+/** What reaches a person's devices. The Inbox always keeps everything. */
+export type NotifyPrefs = {off: string[]; quiet: {from: string; to: string} | null; pausedUntil: string | null; tz: string};
+export const DEFAULT_NOTIFY: NotifyPrefs = {off: [], quiet: null, pausedUntil: null, tz: 'UTC'};
+/** True while pushes should wait: paused, or inside quiet hours in the person's own time zone. */
+export function quietNow(p: NotifyPrefs, now = new Date()) {
+  if (p.pausedUntil && p.pausedUntil > now.toISOString()) return true;
+  if (!p.quiet) return false;
+  const hm = new Intl.DateTimeFormat('en-GB', {timeZone: p.tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(now);
+  const {from, to} = p.quiet;
+  return from <= to ? hm >= from && hm < to : hm >= from || hm < to;
+}
 
 const DAYS = 30;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -24,7 +37,9 @@ export class Accounts {
       create table if not exists account_sessions (hash text primary key, email text not null, created text not null, expires text not null);
       create table if not exists account_links (a text not null, b text not null, created text not null, primary key (a, b));
       create table if not exists account_resets (hash text primary key, email text not null, expires text not null);
-      create table if not exists server_settings (key text primary key, value text not null);`);
+      create table if not exists server_settings (key text primary key, value text not null);
+      create table if not exists push_subs (endpoint text primary key, email text not null, p256dh text not null, auth text not null, created text not null);
+      create table if not exists notify_prefs (email text primary key, value text not null);`);
   }
 
   /** Server-wide settings kept by the owner (the account that set the server up). */
@@ -34,6 +49,31 @@ export class Accounts {
   owner(): string | null { return this.setting('owner') ?? (this.db.prepare('select email from accounts order by created limit 1').get() as {email: string} | undefined)?.email ?? null; }
   /** Who may create an account on their own: 'invite' (only through an invite link, the default) or 'open'. */
   signup(): 'open' | 'invite' { return this.setting('signup') === 'open' ? 'open' : 'invite'; }
+
+  /** The server's push key pair, made on first use. */
+  vapid(): Vapid {
+    const saved = this.setting('vapid');
+    if (saved) return JSON.parse(saved) as Vapid;
+    const v = makeVapid();
+    this.setSetting('vapid', JSON.stringify(v));
+    return v;
+  }
+  /** A device that gets push notifications for this account (one per browser or installed app). */
+  subscribe(email: string, s: PushSub) {
+    this.db.prepare('insert into push_subs (endpoint, email, p256dh, auth, created) values (?, ?, ?, ?, ?) on conflict(endpoint) do update set email = excluded.email, p256dh = excluded.p256dh, auth = excluded.auth')
+      .run(s.endpoint, email, s.p256dh, s.auth, new Date().toISOString());
+  }
+  unsubscribe(endpoint: string, email?: string) { this.db.prepare(`delete from push_subs where endpoint = ?${email ? ' and email = ?' : ''}`).run(...(email ? [endpoint, email] : [endpoint])); }
+  subs(emails: string[]): PushSub[] {
+    if (!emails.length) return [];
+    return this.db.prepare(`select endpoint, p256dh, auth from push_subs where email in (${emails.map(() => '?').join(',')})`).all(...emails) as PushSub[];
+  }
+  /** Notification settings: the first of these linked accounts that saved any. */
+  notifyPrefs(emails: string[]): NotifyPrefs {
+    for (const e of emails) { const r = this.db.prepare('select value from notify_prefs where email = ?').get(e) as {value: string} | undefined; if (r) return {...DEFAULT_NOTIFY, ...JSON.parse(r.value)}; }
+    return DEFAULT_NOTIFY;
+  }
+  setNotifyPrefs(email: string, p: NotifyPrefs) { this.db.prepare('insert into notify_prefs (email, value) values (?, ?) on conflict(email) do update set value = excluded.value').run(email, JSON.stringify(p)); }
 
   /** A one-time password reset link, valid for an hour. Only its hash is stored. */
   startReset(email: string) {

@@ -18,6 +18,8 @@ import {QuickCapture, ShortcutsDialog, moveFocus, targetIds, useHotkeys, type Ac
 import {ItemPanel} from './ItemPanel.tsx';
 import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
+import {NotifySettings} from './NotifySettings.tsx';
+import {setBadge} from './device.ts';
 import {AcceptInvite, NoAccess, ResetPassword, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
@@ -65,6 +67,7 @@ function readRoute(): Route {
   if (page === 'today') return {page: 'today'};
   if (page === 'templates' || page === 'routines' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
   if (page === 'signin') return {page: 'signin'};
+  if (page === 'open' && id) { sessionStorage.setItem('open-after', id); history.replaceState(null, '', '#/mywork'); return {page: 'mywork'}; }
   return {page: 'mywork'};
 }
 const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : `/${r.page}`; };
@@ -107,7 +110,8 @@ export function App() {
     if (matchMedia('(max-width: 760px)').matches) { setDrawer(d => !d); return; }
     setCollapsed(c => { localStorage.setItem('side-collapsed', c ? '0' : '1'); return !c; });
   };
-  useEffect(() => { const f = () => setDrawer(false); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
+  // Going somewhere else closes the menu drawer, and on a phone the full-screen task too.
+  useEffect(() => { const f = () => { setDrawer(false); if (matchMedia('(max-width: 760px)').matches) setOpenId(null); }; addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
     const x0 = e.clientX, w0 = sideW;
@@ -118,7 +122,7 @@ export function App() {
 
   useEffect(() => { const f = () => setRoute(readRoute()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   useEffect(() => { if (store.ready && !store.people.some(p => p.id === me) && store.people[0]) setMe(store.people[0].id); }, [store.ready, store.people]);
-  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}&unread=true`).then(n => setUnread(n.length)).catch(() => {}); }, [me, store.tick]);
+  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}&unread=true`).then(n => { setUnread(n.length); setBadge(n.length); }).catch(() => {}); }, [me, store.tick]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       // Undo/redo for item changes. Text fields keep their own native undo.
@@ -250,6 +254,13 @@ export function App() {
       {capture && <QuickCapture store={store} me={me} projectId={route.page === 'project' ? route.id : undefined} close={() => setCapture(false)} />}
       {shortcuts && <ShortcutsDialog close={() => setShortcuts(false)} />}
       {tour && TOURS.find(t => t.id === tour) && <TourRunner tour={TOURS.find(t => t.id === tour)!} store={store} close={() => setTour(null)} />}
+      <nav className="tabbar">
+        <button className={route.page === 'mywork' ? 'on' : ''} onClick={() => go({page: 'mywork'})}><Sun size={20} />My work</button>
+        <button className={route.page === 'inbox' ? 'on' : ''} onClick={() => go({page: 'inbox'})}><span className="tab-icon"><Bell size={20} />{unread > 0 && <span className="dot-count">{unread > 99 ? '99+' : unread}</span>}</span>Inbox</button>
+        <button className="tab-new" onClick={() => setCapture(true)} aria-label="New task"><Plus size={24} /></button>
+        <button onClick={() => setPalette(true)}><Search size={20} />Search</button>
+        <button className={drawer ? 'on' : ''} onClick={() => setDrawer(d => !d)}><Layers size={20} />Spaces</button>
+      </nav>
       {store.error && <div className="toast">{store.error}</div>}
       {!store.error && store.notice && <div className="toast">{store.notice} <span className="small" style={{opacity: .6}}>Ctrl+Z undo, Ctrl+Shift+Z redo</span></div>}
     </div>
@@ -454,7 +465,8 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
       <button className="btn ghost small" title="Go back to the team setup" onClick={() => store.setPref(`view:${view.id}`, null)}>Reset to team view</button></div>}
     {!settings && view && view.config.locked && <div className="locked-note"><Lock size={12} /> This view is locked, so its filters, sort and columns stay as they are. Unlock it from the view's ... menu.</div>}
     {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
-    <div className="content">
+    {/* Keyed by view, so one view's scroll position never carries into the next. */}
+    <div className="content" key={(view?.id ?? '') + (settings ? 's' : '')}>
       <ViewBoundary key={(view?.id ?? '') + (settings ? 's' : '')}>
       {settings && <SettingsView store={store} project={own} onDeleted={() => go({page: 'mywork'})} />}
       {!settings && view?.kind === 'list' && <FileDrop store={store} projectId={own.id}><ListView {...props} /></FileDrop>}
@@ -610,26 +622,41 @@ function ColumnsMenu({store, project, config, setConfig}: {store: Store; project
   );
 }
 
+/** Notifications the app sends on its own (no person behind them). */
+const REMINDERS = ['due', 'overdue', 'timer', 'automation'];
+
 function Inbox({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [list, setList] = useState<Notification[]>([]);
+  const [tab, setTab] = useState<'unread' | 'all'>('unread');
+  const [settings, setSettings] = useState(false);
   useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}`).then(setList).catch(() => {}); }, [me, store.tick]);
   const person = (id: string | null) => store.people.find(p => p.id === id);
+  const unread = list.filter(n => !n.read).length;
+  const shown = tab === 'unread' ? list.filter(n => !n.read) : list;
   return (
     <div className="page">
-      <h1>Inbox <span className="spacer" /><button className="btn" onClick={() => api('/notifications/read?person=' + me, {method: 'POST', body: {}}).then(() => setList(l => l.map(n => ({...n, read: true}))))}>Mark all read</button></h1>
-      <div style={{marginTop: 14}}>
-        {list.map(n => (
+      <h1>Inbox <span className="spacer" />
+        <button className={'btn' + (settings ? ' active' : '')} onClick={() => setSettings(s => !s)} title="Notification settings"><Settings size={14} /> Settings</button>
+      </h1>
+      {settings && <NotifySettings />}
+      <div className="inbox-bar">
+        <div className="seg"><button className={tab === 'unread' ? 'on' : ''} onClick={() => setTab('unread')}>Unread{unread ? ` ${unread}` : ''}</button><button className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>All</button></div>
+        <span className="spacer" />
+        {unread > 0 && <button className="btn ghost" onClick={() => api('/notifications/read?person=' + me, {method: 'POST', body: {}}).then(() => setList(l => l.map(n => ({...n, read: true}))))}>Mark all read</button>}
+      </div>
+      <div>
+        {shown.map(n => (
           <div key={n.id} className={'note' + (n.read ? ' read' : '')} onClick={() => {
             if (!n.read) api('/notifications/read?person=' + me, {method: 'POST', body: {ids: [n.id]}});
             if (n.itemId && store.items.has(n.itemId)) open(n.itemId);
           }}>
             <Avatar person={person(n.actor)} size={24} />
-            <span className="grow"><b>{person(n.actor)?.name ?? 'Someone'}</b> {n.text}</span>
+            <span className="grow">{n.actor || !REMINDERS.includes(n.kind) ? <><b>{person(n.actor)?.name ?? 'Someone'}</b> </> : null}{n.text}</span>
             <span className="muted small">{new Date(n.created).toLocaleString()}</span>
           </div>
         ))}
       </div>
-      {!list.length && <Empty title="All caught up">You get notified when someone assigns you, mentions you, or comments on or completes your items.</Empty>}
+      {!shown.length && <Empty title="All caught up">You get notified when someone assigns you, mentions you, or comments on or completes your items, and before things are due.</Empty>}
     </div>
   );
 }

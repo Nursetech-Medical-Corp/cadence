@@ -39,6 +39,12 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - Put it behind HTTPS (Caddy, nginx or a tunnel) that sets `X-Forwarded-Proto`, so session cookies are marked Secure.
 - `CADENCE_REQUIRE_LOGIN=0` turns forced sign-in off; `pnpm dev` leaves it off for local use.
 - Locked out: `pnpm reset-password you@example.com` on the server prints a new password.
+- People can create their own account only if the owner opens sign-up (Team page, Server); otherwise by invite. Forgot password emails a one-time link through the connected Gmail sender, or prints it in the server log when none is set up.
+
+### On phones
+Cadence installs as an app. On iPhone or iPad, open your server's address in Safari, tap Share, then Add to Home Screen. On Android or desktop Chrome and Edge, use Install app in the address bar or menu. Phones get a tab bar (My work, Inbox, new task, Search, Spaces), and a tap on a task opens it full screen.
+
+Notifications: Inbox, Settings, Turn on, on each device. They arrive with the app closed, on desktops too. Choose which kinds to get, set quiet hours, or pause for an hour or until tomorrow; the Inbox always keeps everything. Push needs HTTPS (localhost works for testing), and on iPhone the app must be added to the Home Screen first. `CADENCE_PUSH_CONTACT` (for example `mailto:you@example.com`) sets the contact push services see; it defaults to the owner's email.
 
 ## Screenshots
 
@@ -96,7 +102,8 @@ Serves the app and API on http://127.0.0.1:8080 (set `PORT` and `HOST` to change
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
 
 ### Teams, security and approvals
-- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, email invites with one-time links, roles with fine-grained permissions and per-space access.
+- One account per person across every workspace on the server, first-run owner setup, sign-in with a password or Google, create account (when the owner allows it), forgot password links, linked work and personal accounts, email invites with one-time links, roles with fine-grained permissions and per-space access.
+- Notifications in the Inbox, by email, and as push on phones and desktops: assignments, mentions, comments, approvals, AI requests, due today and tomorrow, overdue, and timers left running.
 - Approvals and e-signatures: request a review or approval, sign with a password re-check, and keep a fingerprint of what was signed. Workflow rules per item type (allowed moves, required fields, approval before done).
 - Protections: CSRF and origin checks, rate-limited sign-in, hashed tokens and passwords, safe webhooks, CSV formula injection guards.
 
