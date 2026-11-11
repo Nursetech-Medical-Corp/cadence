@@ -8,11 +8,16 @@ export function seedSampleWorkspaces(open: (w: WorkspaceInfo) => Tasks) {
   if (listWorkspaces().length > 1) return;
   const main = listWorkspaces()[0];
   updateWorkspace(main.id, {name: 'Acme Studio', color: '#0ea5e9', icon: 'A'});
-  open(main); // seeds the work projects
+  const work = open(main); // seeds the work projects
+  // An AI agent to connect over MCP, as in docs/MCP.md.
+  const bot = work.createPerson({name: 'secretary-bot-1'});
+  work.db.prepare("update people set kind = 'ai', role = 'contributor' where id = ?").run(bot.id);
   const w = createWorkspace({name: 'Personal', color: '#10b981', icon: 'P'});
   const t = open(w);
   const me = t.createPerson({name: 'David', email: 'david@example.com'});
   t.db.prepare('update people set admin = 1 where id = ?').run(me.id);
+  const bot2 = t.createPerson({name: 'secretary-bot-1'});
+  t.db.prepare("update people set kind = 'ai', role = 'contributor' where id = ?").run(bot2.id);
   const d = (n: number) => addUnit(t.today(), n, 'day');
   const by = me.id, mine = {assignees: [me.id]};
 

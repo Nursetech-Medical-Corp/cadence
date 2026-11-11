@@ -18,6 +18,7 @@ import {MyWork} from './MyWork.tsx';
 import {AcceptInvite, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
 import {QuickViewHost} from './QuickView.tsx';
+import {ContextMenus} from './ContextMenu.tsx';
 import {FileDrop, FilesView} from './FilesView.tsx';
 import {ProjectList, includedIn, isRollup, rollupProject} from './ProjectNav.tsx';
 import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
@@ -211,6 +212,7 @@ export function App() {
       {openId && store.items.has(openId) && <ItemPanel key={openId} store={store} id={openId} close={close} open={open} me={me} />}
       {palette && <Palette store={store} close={() => setPalette(false)} open={id => { setPalette(false); open(id); }} />}
       <QuickViewHost />
+      <ContextMenus store={store} open={open} />
       {capture && <QuickCapture store={store} me={me} projectId={route.page === 'project' ? route.id : undefined} close={() => setCapture(false)} />}
       {shortcuts && <ShortcutsDialog close={() => setShortcuts(false)} />}
       {tour && TOURS.find(t => t.id === tour) && <TourRunner tour={TOURS.find(t => t.id === tour)!} store={store} close={() => setTour(null)} />}
@@ -413,7 +415,7 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
   const save = () => { setEditing(false); if (name.trim() && name !== view.name) store.updateView(view.id, {name: name.trim()}); else setName(view.name); };
   return (
     <span className="picker">
-      <button className={'tab' + (active ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: view.id})} onDoubleClick={() => setEditing(true)}>
+      <button className={'tab' + (active ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: view.id})} onDoubleClick={() => setEditing(true)} onContextMenu={e => { e.preventDefault(); setMenu(true); }}>
         <Icon size={14} />
         {editing ? <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setName(view.name); setEditing(false); } }} onClick={e => e.stopPropagation()} /> : view.name}
         {active && !editing && <span data-pop-trigger className="icon" role="button" aria-label="View options" onClick={e => { e.stopPropagation(); setMenu(m => !m); }}><MoreHorizontal size={13} /></span>}

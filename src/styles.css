@@ -994,3 +994,4 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 
 .proj-more { background: none; border: 0; padding: 2px; color: var(--text3, #aaa); opacity: 0; cursor: pointer; display: inline-flex; }
 .proj-nav:hover .proj-more, .proj-more:focus-visible { opacity: 1; }
+.ctx-menu { z-index: 200; min-width: 210px; }

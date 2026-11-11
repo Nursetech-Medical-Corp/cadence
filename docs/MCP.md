@@ -1,29 +1,29 @@
 # Connecting AI agents (MCP)
 
-Tasks ships its own MCP server, so Claude (and any other MCP client) can read and run your projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
+Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
 
 There are two ways to connect. Both act as one person in the workspace, and can do only what that person's role allows.
 
 ## 1. Same computer (stdio)
 
-No token needed. The agent acts as the person you name.
+No token needed. The agent acts as the person you name. Create a person for each agent first (Team and permissions, add a person, set them to AI agent), for example `secretary-bot-1`. The demo already has one.
 
 **Claude Code**
 
 ```bash
-claude mcp add tasks -- pnpm --dir /path/to/tasks mcp -- --as "David"
+claude mcp add cadence -- pnpm --dir /path/to/cadence mcp -- --as "secretary-bot-1"
 ```
 
 Add `--workspace Personal` (a workspace name or id) to work in a workspace other than the first one:
 
 ```bash
-claude mcp add tasks-personal -- pnpm --dir /path/to/tasks mcp -- --as "David" --workspace Personal
+claude mcp add cadence-personal -- pnpm --dir /path/to/cadence mcp -- --as "secretary-bot-1" --workspace Personal
 ```
 
 **Claude Desktop** (Settings, Developer, Edit config):
 
 ```json
-{"mcpServers": {"tasks": {"command": "pnpm", "args": ["--dir", "/path/to/tasks", "mcp", "--", "--as", "David"]}}}
+{"mcpServers": {"cadence": {"command": "pnpm", "args": ["--dir", "/path/to/cadence", "mcp", "--", "--as", "secretary-bot-1"]}}}
 ```
 
 ## 2. Over the network (HTTP)
@@ -33,7 +33,7 @@ claude mcp add tasks-personal -- pnpm --dir /path/to/tasks mcp -- --as "David" -
 3. Point the client at `http://<host>/mcp?ws=<workspace id>` with the token. The Team page shows the exact URL for the current workspace.
 
 ```bash
-claude mcp add --transport http tasks "http://127.0.0.1:5190/mcp?ws=main" --header "Authorization: Bearer tt_your_token"
+claude mcp add --transport http cadence "http://127.0.0.1:5190/mcp?ws=main" --header "Authorization: Bearer tt_your_token"
 ```
 
 Tokens are stored hashed, can be revoked at any time, and every tool call goes through the same permission checks as the app. Tokens cannot sign approvals and cannot change access rules.
