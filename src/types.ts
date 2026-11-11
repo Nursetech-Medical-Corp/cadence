@@ -135,6 +135,7 @@ export type ChangeEvent =
   | {kind: 'view'; projectId: string}
   | {kind: 'template'}
   | {kind: 'events'}
+  | {kind: 'proposals'}
   | {kind: 'refresh'};
 
 export type Sprint = {
