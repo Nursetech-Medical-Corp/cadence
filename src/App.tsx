@@ -1,6 +1,6 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft} from 'lucide-react';
+import {FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, PenLine, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -371,7 +371,8 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
   const ids = useMemo(() => new Set([own.id, ...included.map(p => p.id)]), [own.id, included]);
   const items = useMemo(() => [...store.items.values()].filter(i => ids.has(i.projectId)), [store.items, ids]);
   const config = view?.config ?? {};
-  const setConfig = (patch: Partial<ViewConfig>) => view && store.updateView(view.id, {config: {...view.config, ...patch}});
+  // A locked view keeps its setup; only unlocking changes it.
+  const setConfig = (patch: Partial<ViewConfig>) => view && (!view.config.locked || 'locked' in patch) && store.updateView(view.id, {config: {...view.config, ...patch}});
   const currentSprint = useMemo(() => { const t = store.today; const list = store.sprints.filter(s => s.projectId === project.id); return (list.find(s => s.start <= t && t <= s.end) ?? null)?.id ?? null; }, [store.sprints, store.today, project.id]);
   const filtered = useMemo(() => applyFilters(items, config, {project, today: store.today, currentSprint}), [items, config, project, store.today, currentSprint]);
   const sprints = useMemo(() => store.sprints.filter(s => s.projectId === project.id), [store.sprints, project.id]);
@@ -408,6 +409,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
         <button className={'tab' + (settings ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: 'settings'})}><Settings size={14} /> Settings</button>
       </div>
     </header>
+    {!settings && view && view.config.locked && <div className="locked-note"><Lock size={12} /> This view is locked, so its filters, sort and columns stay as they are. Unlock it from the view's ... menu.</div>}
     {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
     <div className="content">
       <ViewBoundary key={(view?.id ?? '') + (settings ? 's' : '')}>
@@ -438,11 +440,14 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
     <span className="picker">
       <button className={'tab' + (active ? ' active' : '')} onClick={() => go({page: 'project', id: project.id, view: view.id})} onDoubleClick={() => setEditing(true)} onContextMenu={e => { e.preventDefault(); setMenu(true); }}>
         <Icon size={14} />
+        {view.config.locked && <Lock size={11} className="muted" />}{view.config.privateTo && <EyeOff size={11} className="muted" />}
         {editing ? <input autoFocus value={name} onChange={e => setName(e.target.value)} onBlur={save} onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setName(view.name); setEditing(false); } }} onClick={e => e.stopPropagation()} /> : view.name}
         {active && !editing && <span data-pop-trigger className="icon" role="button" aria-label="View options" onClick={e => { e.stopPropagation(); setMenu(m => !m); }}><MoreHorizontal size={13} /></span>}
       </button>
       <Popover open={menu} onClose={() => setMenu(false)}>
         <button className="pop-row" onClick={() => { setMenu(false); setEditing(true); }}><Pencil size={14} /> Rename</button>
+        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...view.config, locked: !view.config.locked}}); }}>{view.config.locked ? <><Unlock size={14} /> Unlock view</> : <><Lock size={14} /> Lock view (keep filters, sort and columns)</>}</button>
+        <button className="pop-row" onClick={() => { setMenu(false); store.updateView(view.id, {config: {...view.config, privateTo: view.config.privateTo ? undefined : getMe() || undefined}}); }}>{view.config.privateTo ? <><Users size={14} /> Share with everyone</> : <><EyeOff size={14} /> Make private (only you see it)</>}</button>
         <button className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(project.id, view.name + ' copy', view.kind, view.config); if (v) go({page: 'project', id: project.id, view: v.id}); }}><Copy size={14} /> Duplicate</button>
         <button className="pop-row" onClick={async () => {
           setMenu(false);

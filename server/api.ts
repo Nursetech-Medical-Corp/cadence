@@ -294,7 +294,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const projects = tasks.listProjects().filter(p => canSee(p.id)), ids = new Set(projects.map(p => p.id));
         return send(res, 200, {
           people: tasks.listPeople(), projects, items: tasks.listItems().filter(i => ids.has(i.projectId)), today: tasks.today(),
-          sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id)),
+          sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id)).filter(v => !v.config.privateTo || v.config.privateTo === actor),
         });
       }
 
@@ -361,7 +361,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       }
 
       if (a === 'views') {
-        if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '')); }
+        if (!b && m === 'GET') { need(q('projectId') ?? '', 'view'); return send(res, 200, tasks.listViews(q('projectId') ?? '').filter(v => !v.config.privateTo || v.config.privateTo === actor)); }
         if (!b && m === 'POST') { need(body.projectId, 'views'); return send(res, 201, tasks.createView(body)); }
         const vr = b ? tasks.db.prepare('select project_id from views where id = ?').get(b) as {project_id: string} | undefined : undefined;
         if (b && !vr) throw new NotFound('View not found');
