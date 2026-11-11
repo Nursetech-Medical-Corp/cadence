@@ -1,7 +1,7 @@
 import {Fragment, useEffect, useRef, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
-import {ArrowDown, ArrowUp, EyeOff, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
+import {ArrowDown, ArrowUp, Eye, EyeOff, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
 import {between, fmtMinutes, type Store} from './store.ts';
 import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf, itemKey, SpaceChip} from './components.tsx';
@@ -11,7 +11,7 @@ import {FilesCell} from './FilesCell.tsx';
 import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
-export const DEFAULT_HIDDEN = ['start', 'estimate', 'tags', 'parent'];
+export const DEFAULT_HIDDEN = ['start', 'tags', 'parent'];
 const CALC_LABEL: Record<string, string> = {count: 'Count', filled: 'Filled', empty: 'Empty', unique: 'Unique', sum: 'Sum', avg: 'Average', min: 'Min', max: 'Max', checked: 'Checked', done: 'Done'};
 /** Column ids and names, for the Columns menu in the toolbar. */
 export const tableColumns = (project: Project) => [
@@ -157,7 +157,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
               <span className={'resize' + (live?.id === c.id ? ' on' : '')} onPointerDown={e => startResize(e, c)} onMouseDown={e => { e.preventDefault(); e.stopPropagation(); }} onClick={e => e.stopPropagation()} title="Drag to resize" />
             </th>
           ))}
-          <th className="add-col"><AddColumnButton store={store} project={project} /></th>
+          <th className="add-col"><AddColumnButton store={store} project={project} hidden={hidden} show={id => setConfig({hidden: hidden.filter(x => x !== id)})} /></th>
         </tr></thead>
         <tbody>
           {first > 0 && <tr aria-hidden style={{height: first * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
@@ -266,12 +266,21 @@ function ColumnHeader({col, sorts, setSorts, hide, project, store}: {
   );
 }
 
-function AddColumnButton({store, project}: {store: Store; project: Project}) {
+/** + at the end of the header: show a hidden column (Estimate, Start, Tags...) or make a new one. */
+function AddColumnButton({store, project, hidden, show}: {store: Store; project: Project; hidden: string[]; show: (id: string) => void}) {
   const [open, setOpen] = useState(false);
+  const hiddenCols = tableColumns(project).filter(([id]) => hidden.includes(id));
   return (
     <span className="picker">
       <button className="icon" title="Add a column" onClick={() => setOpen(o => !o)}><Plus size={15} /></button>
-      <Popover open={open} onClose={() => setOpen(false)} className="wide"><AddField store={store} project={project} onDone={() => setOpen(false)} /></Popover>
+      <Popover open={open} onClose={() => setOpen(false)} className="wide">
+        {hiddenCols.length > 0 && <>
+          <div className="pop-label">Hidden columns</div>
+          <div className="hidden-cols">{hiddenCols.map(([id, name]) => <button key={id} className="btn small" onClick={() => { show(id); setOpen(false); }}><Eye size={12} /> {name}</button>)}</div>
+          <div className="pop-label">New column</div>
+        </>}
+        <AddField store={store} project={project} onDone={() => setOpen(false)} />
+      </Popover>
     </span>
   );
 }
