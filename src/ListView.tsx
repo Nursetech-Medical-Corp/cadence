@@ -2,7 +2,8 @@ import {Fragment, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
-import {ChevronDown, ChevronRight, GripVertical, Plus, Repeat, Maximize2} from 'lucide-react';
+import {ChevronDown, ChevronRight, GripVertical, Plus, Maximize2} from 'lucide-react';
+import {RoutineMark} from './RoutineControls.tsx';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
 import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move, SpaceChip} from './components.tsx';
@@ -113,7 +114,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
               onEnter={() => startInsertAfter(i, depth)}
               onTab={shift => shift ? outdent(i) : indent(i)} />
             {children.length > 0 && <Progress done={children.filter(c => c.completed).length} total={children.length} />}
-            {i.recur && <Repeat size={13} className="muted" aria-label="Repeats" />}
+            <RoutineMark item={i} />
             <TagEditor tags={i.tags} onChange={tags => store.updateItem(i.id, {tags})} />
             <span className="spacer" />
             <span className="row-meta">

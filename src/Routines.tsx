@@ -66,7 +66,7 @@ export function useSopLinks(store: Store) {
 type Group = 'sop' | 'often' | 'person' | 'space' | 'mode';
 type Tab = 'list' | 'timeline' | 'workload';
 
-export function RoutinesPage({store, open}: {store: Store; open: (id: string) => void}) {
+export function RoutinesPage({store, open, focus}: {store: Store; open: (id: string) => void; focus?: string}) {
   const all = useMemo(() => [...store.items.values()].filter(i => i.recur && !i.recur.spawned && !i.completed).sort((a, b) => (a.due ?? '9').localeCompare(b.due ?? '9')), [store.items]);
   const [tab, setTab] = useState<Tab>(() => (localStorage.getItem('routines-tab') as Tab) ?? 'list');
   const [group, setGroup] = useState<Group>(() => (localStorage.getItem('routines-group') as Group) ?? 'sop');
@@ -75,6 +75,20 @@ export function RoutinesPage({store, open}: {store: Store; open: (id: string) =>
   const [space, setSpace] = useState('');
   const [busy, setBusy] = useState(false);
   const sopLink = useSopLinks(store);
+  // Opened from a task's Routine link (#/routines/<id>): show the list with every filter cleared, then scroll to that row and flash it.
+  useEffect(() => {
+    if (!focus) return;
+    setTab('list'); setShow('all'); setWho(''); setSpace('');
+    let tries = 0;
+    const t = setInterval(() => {
+      const el = document.querySelector(`[data-rid="${focus}"]`) as HTMLElement | null;
+      if (el || ++tries > 20) {
+        clearInterval(t);
+        if (el) { el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.setAttribute('data-flash', ''); el.setAttribute('data-focus', ''); setTimeout(() => el.removeAttribute('data-flash'), 2500); }
+      }
+    }, 100);
+    return () => clearInterval(t);
+  }, [focus]);
   const act = async (ids: string[], action: 'skip' | 'pause' | 'resume' | 'end' | 'delay' | 'wait', extra: {to?: string; on?: string[]} = {}) => {
     if (!ids.length) return;
     if (action === 'end' && !confirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`)) return;
@@ -161,7 +175,7 @@ function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLin
             const s = stateOf(i), m = modeOf(i), note = routineNote(i, store.items, store.projects);
             const sop = sopOf(i), href = sopLink(sop);
             return (
-              <div key={i.id} className={'rt-row routine-row' + (s === 'paused' || s === 'waiting' ? ' paused' : '')}>
+              <div key={i.id} data-rid={i.id} className={'rt-row routine-row' + (s === 'paused' || s === 'waiting' ? ' paused' : '')}>
                 <button className={'switch' + (s === 'paused' ? '' : ' on')} disabled={busy} title={s === 'paused' ? 'Off. Turn on to schedule the next one.' : 'On. Turn off to pause it.'} onClick={() => act([i.id], s === 'paused' ? 'resume' : 'pause')} />
                 <span className="rt-title">
                   <span className="grow" style={{cursor: 'pointer'}} onClick={() => open(i.id)} title={i.title}>{i.title}</span>

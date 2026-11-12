@@ -52,7 +52,7 @@ const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.
 const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'; focus?: string} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -64,6 +64,7 @@ function readRoute(): Route {
   if (page === 'insights') return {page: 'insights'};
   if (page === 'ai') return {page: 'ai'};
   if (page === 'templates' && id) return {page: 'template', id};
+  if (page === 'routines' && id) return {page: 'routines', focus: id};
   if (page === 'timesheet') return {page: 'timesheet'};
   if (page === 'invite' && id) return {page: 'invite', id};
   if (page === 'signin-link' && id) return {page: 'signin-link', id};
@@ -73,7 +74,7 @@ function readRoute(): Route {
   if (page === 'open' && id) { sessionStorage.setItem('open-after', id); history.replaceState(null, '', '#/mywork'); return {page: 'mywork'}; }
   return {page: 'mywork'};
 }
-const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : `/${r.page}`; };
+const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : r.page === 'routines' && r.focus ? `/routines/${r.focus}` : `/${r.page}`; };
 
 export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint: string}[] = [
   {kind: 'list', label: 'List', icon: List, hint: 'Nested outline, fastest for writing'},
@@ -245,7 +246,7 @@ export function App() {
         {route.page === 'today' && <div className="content"><Everything store={store} open={open} /></div>}
         {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
         {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
-        {route.page === 'routines' && <div className="content"><RoutinesPage store={store} open={open} /></div>}
+        {route.page === 'routines' && <div className="content"><RoutinesPage store={store} open={open} focus={route.focus} /></div>}
         {route.page === 'parked' && <div className="content"><ParkedPage store={store} open={open} /></div>}
         {route.page === 'timesheet' && <div className="content"><TimesheetPage store={store} open={open} /></div>}
         {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}

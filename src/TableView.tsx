@@ -9,6 +9,7 @@ import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
+import {RoutineMark} from './RoutineControls.tsx';
 import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
@@ -17,7 +18,7 @@ const CALC_LABEL: Record<string, string> = {count: 'Count', filled: 'Filled', em
 /** Column ids and names, for the Columns menu in the toolbar. */
 export const tableColumns = (project: Project) => [
   ['key', 'ID'], ['title', 'Title'], ['parent', 'Parent'], ['status', 'Status'], ['type', 'Type'], ['assignees', 'Assignee'], ['priority', 'Priority'], ['sprint', 'Sprint'],
-  ['start', 'Start'], ['due', 'Due'], ['estimate', 'Estimate'], ['tags', 'Tags'], ...project.fields.map(f => ['f:' + f.id, f.name]),
+  ['start', 'Start'], ['due', 'Due'], ['estimate', 'Estimate'], ['repeat', 'Routine'], ['tags', 'Tags'], ...project.fields.map(f => ['f:' + f.id, f.name]),
 ] as [string, string][];
 
 export function TableView({store, project, items, allItems, sprints, open, config, setConfig, selected, toggle, setSelected, createExtra}: ViewProps) {
@@ -49,7 +50,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
         ))}
       </select>)},
     {id: 'status', name: 'Status', width: 140, sortVal: i => project.statuses.findIndex(s => s.id === i.status), cell: i => <StatusSelect project={project} value={i.status} onChange={status => up(i)({status})} />},
-    {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} />},
+    {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <span className="type-cell"><TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} /><RoutineMark item={i} /></span>},
     {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => up(i)({assignees})} />},
     {id: 'priority', name: 'Priority', width: 110, sortVal: i => i.priority || 9, cell: i => <PrioritySelect value={i.priority} onChange={priority => up(i)({priority})} showLabel />},
     {id: 'sprint', name: 'Sprint', width: 130, sortVal: i => sprints.find(s => s.id === i.sprint)?.start ?? '9', raw: i => i.sprint, cell: i => <SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => up(i)({sprint})} />},
@@ -57,6 +58,8 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     {id: 'due', name: 'Due', width: 130, sortVal: i => i.due ?? '9', raw: i => i.due, cell: i => <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => up(i)({due})} />},
     {id: 'estimate', name: 'Estimate', width: 110, sortVal: i => estimateOf(i, store.items).hours ?? 0, raw: i => estimateOf(i, store.items).hours, cell: i => (
       <EstimateCell item={i} items={store.items} onChange={estimate => up(i)({estimate})} />)},
+    {id: 'repeat', name: 'Routine', width: 150, sortVal: i => !i.recur ? '~' : i.recur.paused ? 'b' : i.recur.waiting ? 'c' : 'a', raw: i => i.recur ? (i.recur.paused ? 'paused' : i.recur.waiting ? 'waiting' : 'on') : null,
+      cell: i => i.recur ? <RoutineMark item={i} label /> : <span className="muted">-</span>},
     {id: 'tags', name: 'Tags', width: 160, sortVal: i => i.tags.join(','), raw: i => i.tags, cell: i => (
       <InlineText value={i.tags.join(', ')} placeholder="-" onSave={v => up(i)({tags: v.split(',').map(s => s.trim()).filter(Boolean)})} />)},
     ...project.fields.map((f): Col => {
