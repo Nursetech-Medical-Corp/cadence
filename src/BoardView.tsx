@@ -142,7 +142,8 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                     const text = adding.text;
                     setAdding({group: g.id, text: ''});
                     const item = await store.quickAdd(project.id, text, groupBy === 'status' ? {status: g.id} : {});
-                    const patch = {...createExtra, ...(groupBy === 'status' ? {} : g.patch(item!))};
+                    if (!item) { setAdding({group: g.id, text}); return; }
+                    const patch = {...createExtra, ...(groupBy === 'status' ? {} : g.patch(item))};
                     if (item && Object.keys(patch).length) store.updateItem(item.id, patch);
                   }
                 }} />

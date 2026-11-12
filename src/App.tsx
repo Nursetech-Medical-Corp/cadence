@@ -1,5 +1,5 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {NewItemSpotlight, NewItemsButton} from './NewItems.tsx';
+import {NewItemSpotlight, NewItemsButton, AddToSpace} from './NewItems.tsx';
 import {CoverHeader} from './Cover.tsx';
 import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
@@ -638,6 +638,7 @@ function Toolbar({store, project, view, config, setConfig, openItem}: {store: St
       {(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'routines'] as string[]).includes(view.kind) && <SortButton project={project} config={config} setConfig={setConfig} />}
       <FilterButton store={store} project={project} sprints={store.sprints.filter(s => s.projectId === project.id)} value={config.filter} onChange={filter => setConfig({filter})} />
       <NewItemsButton store={store} />
+      <AddToSpace store={store} project={project} />
       <button className={'btn' + (config.hideDone ? ' on' : '')} onClick={() => setConfig({hideDone: !config.hideDone})}>{config.hideDone ? 'Done hidden' : 'Showing done'}</button>
       {view.kind === 'board' && (
         <select className="plain-select" value={config.groupBy ?? 'status'} onChange={e => setConfig({groupBy: e.target.value as ViewConfig['groupBy']})} title="Group by">
