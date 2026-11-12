@@ -94,7 +94,12 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
       <Search size={12} /><input placeholder={`Find among ${ordered.length} spaces`} value={q} autoFocus={searching} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Escape' && (setQ(''), setSearching(false))} />
       {q && <button className="icon" onClick={() => setQ('')}><X size={12} /></button>}
     </div>}
-    {shown.map(p => row(p, false))}
+    {(() => {
+      // Shared spaces first, then the ones only you (and people you share with) can see, like Google Drive.
+      const priv = shown.filter(p => p.settings.access?.private), team = shown.filter(p => !p.settings.access?.private);
+      if (!priv.length || q) return shown.map(p => row(p, false));
+      return <>{team.map(p => row(p, false))}<div className="nav-subhead" title="Personal spaces: only you and the people you share them with">Private to me</div>{priv.map(p => row(p, false))}</>;
+    })()}
     {q && !shown.length && <div className="muted small" style={{padding: '4px 12px'}}>No space matches.</div>}
     <SearchToggle onClick={() => setSearching(s => !s)} hidden={ordered.length > 8} />
   </>;

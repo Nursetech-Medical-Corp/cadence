@@ -8,6 +8,7 @@ import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelec
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
+import {useQuickAssist} from './QuickAssist.tsx';
 import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
@@ -26,6 +27,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   // Adding a row in between: the row it goes next to.
   const [insertAt, setInsertAt] = useState<{id: string; above: boolean} | null>(null);
   const [draft, setDraft] = useState('');
+  const qa = useQuickAssist(store, project.types, draft, setDraft);
   const [pinned, setPinned] = useState<string[]>([]);
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -164,7 +166,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
             <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
             {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>
-            {insertAt?.id === i.id && <InsertRow cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
+            {insertAt?.id === i.id && <InsertRow store={store} types={project.types} cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
               // Between this row and the one shown next to it.
               const sibs = rows, at = sibs.findIndex(x => x.id === i.id);
               const sort = insertAt.above ? between(sibs[at - 1]?.sort, i.sort) : between(i.sort, sibs[at + 1]?.sort);
@@ -178,14 +180,15 @@ export function TableView({store, project, items, allItems, sprints, open, confi
             <tr className="draft">
               <td className="sel-col" />
               {shown.map(c => <td key={c.id}>{c.id === 'title'
-                ? <span className="title-cell"><span className="check ghost" /><input autoFocus className="inline" placeholder="Name it, then Tab to fill other columns" value={draft}
+                ? <span className="title-cell"><span className="check ghost" /><span className="qa-wrap grow"><input autoFocus className="inline" placeholder="Name it, then Tab to fill other columns" value={draft} {...qa.props}
                     onChange={e => setDraft(e.target.value)}
-                    onBlur={() => { if (!draft.trim()) setDrafting(false); }}
+                    onBlur={() => { qa.props.onBlur(); if (!draft.trim()) setDrafting(false); }}
                     onKeyDown={e => {
+                      if (qa.keyDown(e)) return;
                       if (e.key === 'Enter') { e.preventDefault(); commit(false); }
                       if (e.key === 'Tab' && !e.shiftKey && draft.trim()) { e.preventDefault(); commit(true); }
                       if (e.key === 'Escape') { setDraft(''); setDrafting(false); }
-                    }} /></span>
+                    }} />{qa.ui}</span></span>
                 : c.id === 'key' ? <span className="muted small">new</span> : <span className="muted small">-</span>}</td>)}
               <td />
             </tr>
@@ -332,11 +335,12 @@ function ContactCell({value, href, onChange}: {value: string; href: (v: string) 
 }
 
 /** An inline row for adding a task between two rows. Enter adds and opens another below it, Esc stops. */
-function InsertRow({cols, onAdd, onDone}: {cols: number; onAdd: (text: string) => Promise<void>; onDone: () => void}) {
+function InsertRow({store, types, cols, onAdd, onDone}: {store: Store; types: string[]; cols: number; onAdd: (text: string) => Promise<void>; onDone: () => void}) {
   const [text, setText] = useState('');
+  const qa = useQuickAssist(store, types, text, setText);
   return <tr className="draft insert-row"><td className="sel-col" /><td colSpan={cols + 1}>
-    <span className="title-cell"><span className="check ghost" /><input autoFocus className="inline" placeholder="New row here. Enter to add, Esc to stop" value={text}
-      onChange={e => setText(e.target.value)} onBlur={() => { if (!text.trim()) onDone(); }}
-      onKeyDown={async e => { if (e.key === 'Escape') onDone(); if (e.key === 'Enter' && text.trim()) { e.preventDefault(); const t = text; setText(''); await onAdd(t); } }} /></span>
+    <span className="title-cell"><span className="check ghost" /><span className="qa-wrap grow"><input autoFocus className="inline" placeholder="New row here. Enter to add, Esc to stop" value={text} {...qa.props}
+      onChange={e => setText(e.target.value)} onBlur={() => { qa.props.onBlur(); if (!text.trim()) onDone(); }}
+      onKeyDown={async e => { if (qa.keyDown(e)) return; if (e.key === 'Escape') onDone(); if (e.key === 'Enter' && text.trim()) { e.preventDefault(); const t = text; setText(''); await onAdd(t); } }} />{qa.ui}</span></span>
   </td></tr>;
 }

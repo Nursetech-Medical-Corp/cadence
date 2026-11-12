@@ -41,7 +41,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
   const ghostDay = new Map<string, Item[]>();
   if (!config.hideRepeats) for (const i of items) {
     const r = i.recur;
-    if (!r || r.paused || r.spawned || i.completed || !i.due || perWeek(r) > 1) continue;
+    if (!r || r.paused || r.waiting || r.spawned || i.completed || !i.due || perWeek(r) > 1) continue;
     for (const d of upcoming(r, i.due, 60)) { if (d > last) break; if (d >= start) ghostDay.set(d, [...(ghostDay.get(d) ?? []), i]); }
   }
   const segment = (i: Item, d: string) => config.dueOnly || !i.start || i.start >= i.due! ? '' : d === i.start ? ' seg-start' : d === i.due ? ' seg-end' : ' seg-mid';

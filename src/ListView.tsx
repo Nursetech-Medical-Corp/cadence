@@ -98,6 +98,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             <span className="row-gutter">
               <button className="gutter-btn" title="Click to add below. Alt+click to add above" onClick={e => { e.stopPropagation(); if (e.altKey) startInsertBefore(i, depth); else startInsertAfter(i, depth); }}><Plus size={14} /></button>
               <span className="gutter-btn grip" title="Drag to move"><GripVertical size={14} /></span>
+              <button className="gutter-btn" title="Open details" onClick={e => { e.stopPropagation(); open(i.id); }}><Maximize2 size={13} /></button>
             </span>
             <span className="indent" style={{width: depth * 20, '--d': depth} as React.CSSProperties} />
             <button className="twisty" style={{visibility: children.length ? 'visible' : 'hidden'}}

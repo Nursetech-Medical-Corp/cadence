@@ -3,6 +3,7 @@
 // the signed-in account (accounts.ts).
 // Every write is checked against the actor's role in the item's project (see auth.ts).
 import type {IncomingMessage, ServerResponse} from 'node:http';
+import {listSopLinks, migrateSops, setSopLinks} from './sops.ts';
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
@@ -107,6 +108,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateInvites(tasks.db);
   migrateGoogleLinks(tasks.db);
   migrateEvents(tasks);
+  migrateSops(tasks);
   migrateOAuth(accounts.db);
   startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
   // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
@@ -1047,11 +1049,29 @@ If you did not ask for it, ignore this email.`)
           const ids = (Array.isArray(body.ids) ? body.ids : []) as string[], action = String(body.action);
           if (!ids.length) throw new Invalid('Pick at least one routine');
           for (const iid of ids) need(tasks.findItem(iid).projectId, 'edit');
-          if (held('routine', [ids[0], action, actor])) return send(res, 202, ids.map(iid => propose(tasks, actor!, 'routine', [iid, action, actor])));
+          const opts = {to: body.to ? String(body.to) : undefined, on: Array.isArray(body.on) ? (body.on as string[]) : undefined};
+          for (const d of opts.on ?? []) need(tasks.findItem(d).projectId, 'view');
+          if (held('routine', [ids[0], action, actor, opts])) return send(res, 202, ids.map(iid => propose(tasks, actor!, 'routine', [iid, action, actor, opts])));
           const out: unknown[] = [], errors: string[] = [];
-          for (const iid of ids) { try { out.push(tasks.routine(iid, action as 'skip', actor)); } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); } }
+          for (const iid of ids) { try { out.push(tasks.routine(iid, action as 'skip', actor, opts)); } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); } }
           return send(res, 200, {items: out, errors});
         }
+      }
+      // Parked work: archived ideas and rejected items, and items snoozed until a date.
+      if (a === 'parked' && !b && m === 'GET') return send(res, 200, tasks.listParked().filter(i => canSee(i.projectId)));
+      if (a === 'park' && b && m === 'POST') {
+        const it = tasks.findItem(b);
+        need(it.projectId, 'edit');
+        const action = String(body.action);
+        const op = action === 'archive' ? 'archiveItem' : action === 'restore' ? 'restoreItem' : action === 'snooze' ? 'snoozeItem' : null;
+        if (!op) throw new Invalid('Action must be archive, restore or snooze');
+        const args = op === 'archiveItem' ? [it.id, {reason: body.reason, kind: body.kind}, actor] : op === 'snoozeItem' ? [it.id, (body.until as string) ?? null, actor] : [it.id, actor];
+        if (held(op, args)) return send(res, 202, propose(tasks, actor!, op, args));
+        return send(res, 200, (tasks[op] as (...x: unknown[]) => unknown)(...args));
+      }
+      if (a === 'sops') {
+        if (!b && m === 'GET') return send(res, 200, listSopLinks(tasks));
+        if (!b && m === 'PUT') { needAdmin(); return send(res, 200, setSopLinks(tasks, body.links as {code: string; url: string}[])); }
       }
       if (a === 'proposals') {
         if (!actor) throw new Invalid('Pick who you are first');

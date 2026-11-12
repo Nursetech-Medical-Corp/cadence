@@ -94,7 +94,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
   // Routines: faded copies on their next dates. Only the live copy is a real item; these are previews.
   const ghosts = (i: Item, s: [string, string]) => {
     const r = i.recur;
-    if (!r || r.paused || r.spawned || i.completed || !i.due) return [];
+    if (!r || r.paused || r.waiting || r.spawned || i.completed || !i.due) return [];
     const end = addDays(range.start, range.days), len = daysBetween(s[0], s[1]);
     return upcoming(r, i.due, 120).filter(d => d <= end).map(d => [addDays(d, -len), d] as [string, string]);
   };

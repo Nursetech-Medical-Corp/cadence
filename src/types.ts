@@ -23,6 +23,8 @@ export type Recur = {
   copySubitems?: boolean;       // copy open-or-closed subitems into the new occurrence, reset to To do
   spawned?: string;
   paused?: boolean;             // routine switched off: hidden from views, sprints and plans until turned back on
+  waiting?: boolean;            // routine waits for the items it depends on; starts by itself when they are done
+  slot?: string | null;         // this copy was delayed: the date it was scheduled for, so the next one stays on schedule
 };
 
 export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'; owner?: string | null};
@@ -38,6 +40,8 @@ export type Project = {
 export type InheritKey = 'assignees' | 'sprint' | 'priority' | 'tags' | 'due' | 'start' | `f:${string}`;
 
 export type ProjectSettings = {
+  /** Keys this space used before a rename; old item links like NT-12 still work. */
+  oldKeys?: string[];
   /** Optional header at the top of the space: a color band or an uploaded picture. */
   cover?: Cover | null;
   inherit: InheritKey[];
@@ -137,6 +141,7 @@ export type ChangeEvent =
   | {kind: 'template'}
   | {kind: 'events'}
   | {kind: 'proposals'}
+  | {kind: 'sops'}
   | {kind: 'refresh'};
 
 export type Sprint = {

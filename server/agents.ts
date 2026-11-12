@@ -88,7 +88,7 @@ export function saveAgentSettings(tasks: Tasks, agent: string, patch: Partial<Ag
 // ---- Proposals: agent changes held for the owner ----
 
 /** Ops that change the workspace. Logging, comments, claims, submissions and timers are not held. */
-export const WRITE_OPS = new Set(['routine', 'createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
+export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoozeItem', 'createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes']);

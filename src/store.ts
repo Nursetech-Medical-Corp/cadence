@@ -1,5 +1,6 @@
 // Client state: everything loads once, edits apply instantly, server confirms, SSE keeps every tab in sync.
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {defaultTokens} from './QuickAssist.tsx';
 import type {ChangeEvent, Item, ItemPatch, Person, Project, Sprint, TimeEntry, View, ViewKind} from './types.ts';
 import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from './types.ts';
 
@@ -85,6 +86,11 @@ export function useStore(me: string) {
   const lastEvent = useRef<ChangeEvent | null>(null);
   const projectsRef = useRef<Project[]>([]);
   const itemsRef = useRef<Map<string, Item>>(new Map());
+  const prefsRef = useRef<Record<string, unknown>>({});
+  prefsRef.current = prefs;
+  // Items you just made in this window: the views tint them and scroll to the newest one (New items menu).
+  const [lastNew, setLastNew] = useState<{id: string; at: number} | null>(null);
+  const markNew = (id: string) => setLastNew({id, at: Date.now()});
   // A rollup shows other projects' work; new items go to the parent's project or the rollup's first project.
   const realProject = (pid: string, parentId?: string | null) => {
     if (parentId) return itemsRef.current.get(parentId)?.projectId ?? pid;
@@ -175,12 +181,14 @@ export function useStore(me: string) {
     },
     async quickAdd(projectId: string, text: string, extra: {parentId?: string | null; status?: string; sort?: number; sprint?: string | null} = {}) {
       projectId = realProject(projectId, extra.parentId);
-      try { const item = await api<Item>('/items/quick', {method: 'POST', body: {projectId, text, ...extra}}); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
+      // "Always add my defaults" (New items menu): fill in what the line does not set itself.
+      if ((prefsRef.current.newDefaults as {auto?: boolean} | undefined)?.auto) { const d = defaultTokens({people, me, prefs: prefsRef.current}, text); if (d) text = `${text} ${d}`; }
+      try { const item = await api<Item>('/items/quick', {method: 'POST', body: {projectId, text, ...extra}}); markNew(item.id); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
       catch (e) { fail(e); return null; }
     },
     async createItem(input: ItemPatch & {projectId: string; title: string}) {
       input = {...input, projectId: realProject(input.projectId, input.parentId)};
-      try { const item = await api<Item>('/items', {method: 'POST', body: input}); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
+      try { const item = await api<Item>('/items', {method: 'POST', body: input}); markNew(item.id); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
       catch (e) { fail(e); return null; }
     },
     deleteItem(id: string, record = true) {
@@ -312,7 +320,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, ...actions};
+  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, lastNew, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.

@@ -35,7 +35,7 @@ const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); retu
 const leafOpen = (tasks: Tasks, projectId?: string) => {
   const all = tasks.listItems({projectId});
   const parents = new Set(all.map(i => i.parentId).filter(Boolean));
-  return {all, parents, open: all.filter(i => !i.completed && !i.recur?.paused && !parents.has(i.id))};
+  return {all, parents, open: all.filter(i => !i.completed && !i.recur?.paused && !i.recur?.waiting && !i.fields.archived && !(typeof i.fields.snooze === 'string' && i.fields.snooze > tasks.today()) && !parents.has(i.id))};
 };
 
 export function estimateMissing(tasks: Tasks, projectId?: string) {
