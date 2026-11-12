@@ -54,7 +54,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
 | Approvals | Approvals page | `request_approval`, `list_approvals` |
-| Job roles and access | Team page: Job roles matrix (company roles by space), People (job roles per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
+| Job roles and access | Team page: Job roles matrix (company roles by space; drag to reorder), People (job roles shown and set per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
 | Personal workspaces | Workspace switcher: New workspace (any signed-in member, unless the server owner turns it off) | none (app only) |
 
 UI-only settings (no tool, by design): sign-in, permission levels, job roles and who has them, company domain, access rules and tokens; each person's own layout and new-item defaults; feature switches.
