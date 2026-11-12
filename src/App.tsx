@@ -341,6 +341,9 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
         </button>
         {wsOpen && <>
           <button className={'nav-btn' + (route.page === 'plan' ? ' active' : '')} onClick={() => go({page: 'plan'})}><Sparkles size={15} /> Plan and forecast</button>
+          {(['routines', 'parked'] as const).map(scope => { const sp = store.projects.find(p => p.settings.rollup?.scope === scope); const on = !!sp && route.page === 'project' && route.id === sp.id;
+            return <button key={scope} className={'nav-btn' + (on ? ' active' : '')} title={scope === 'routines' ? 'Every repeating task from every space' : 'Archived ideas, rejected work and snoozed items'} onClick={() => go({page: scope})}>
+              {scope === 'routines' ? <Repeat size={15} /> : <Archive size={15} />} {sp?.name ?? (scope === 'routines' ? 'Routines' : 'Archive and later')}</button>; })}
           {store.settings.features.timeTracking && <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>}
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
           {store.settings.features.insights && <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>}

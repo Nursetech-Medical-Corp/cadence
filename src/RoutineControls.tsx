@@ -62,4 +62,4 @@ export function RoutineMark({item, label, corner}: {item: Item; label?: boolean;
 }
 
 /** Who may be assigned: auto-job routines are run by AI agents, so only agents are offered. */
-export const peopleFor = <P extends {kind?: string}>(i: Pick<Item, 'tags'>, people: P[]) => i.tags.includes('auto-job') ? people.filter(p => p.kind === 'ai') : people;
+export const peopleFor = <P extends {kind?: string}>(i: Pick<Item, 'tags'>, people: P[]) => i.tags.includes('auto-job') && people.some(p => p.kind === 'ai') ? people.filter(p => p.kind === 'ai') : people;

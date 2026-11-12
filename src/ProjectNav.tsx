@@ -96,13 +96,11 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     </div>}
     {(() => {
       // Shared spaces first, then the ones only you (and people you share with) can see, like Google Drive.
-      // Built-in spaces (Routines, Archive and later) sit at the end under their own heading.
-      const sys = shown.filter(p => p.settings.rollup?.scope), rest = shown.filter(p => !p.settings.rollup?.scope);
+      // Built-in spaces (Routines, Archive and later) are reached from the Workspace section, not listed here.
+      const rest = shown.filter(p => !p.settings.rollup?.scope);
       const priv = rest.filter(p => p.settings.access?.private), team = rest.filter(p => !p.settings.access?.private);
-      if (q) return shown.map(p => row(p, false));
-      return <>{team.map(p => row(p, false))}
-        {priv.length > 0 && <><div className="nav-subhead" title="Personal spaces: only you and the people you share them with">Private to me</div>{priv.map(p => row(p, false))}</>}
-        {sys.length > 0 && <><div className="nav-subhead" title="Always here: every routine, and everything archived or snoozed, from every space">Built in</div>{sys.map(p => row(p, false))}</>}</>;
+      if (q || !priv.length) return rest.map(p => row(p, false));
+      return <>{team.map(p => row(p, false))}<div className="nav-subhead" title="Personal spaces: only you and the people you share them with">Private to me</div>{priv.map(p => row(p, false))}</>;
     })()}
     {q && !shown.length && <div className="muted small" style={{padding: '4px 12px'}}>No space matches.</div>}
     <SearchToggle onClick={() => setSearching(s => !s)} hidden={ordered.length > 8} />

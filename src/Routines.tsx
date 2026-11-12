@@ -79,7 +79,7 @@ export function RoutineSummary({items}: {items: Item[]}) {
       <div title="Estimate times how often each comes back, for routines that are on"><b>{fmtHours(hoursWeek(all))}</b><span>per week</span></div>
       {MODES.map(m => <div key={m} title={MODE_TIP[m]}><b>{fmtHours(hoursWeek(all.filter(i => modeOf(i) === m)))}</b><span>{MODE_LABEL[m].toLowerCase()} / wk</span></div>)}
     </div>
-    <p className="muted small">Every repeating task from every space. Each has one live copy; finish it and the next appears. <b>Skip</b> closes this cycle. <b>Delay</b> moves only this copy. <b>Wait</b> holds it until other work is done. <b>Switch off</b> pauses it everywhere. Auto jobs go to AI agents only.</p>
+    <p className="muted small">Every repeating task from every space. Each has one live copy; finish it and the next appears. <b>Skip</b> closes this cycle. <b>Delay</b> moves only this copy. <b>Wait</b> holds it until other work is done. <b>Switch off</b> pauses it everywhere. Auto jobs go to AI agents only (once the workspace has one).</p>
   </div>;
 }
 
@@ -154,7 +154,7 @@ function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLin
   act: (ids: string[], a: 'skip' | 'pause' | 'resume' | 'end') => void; delay: (i: Item) => void; wait: (i: Item) => void; sopLink: (code: string) => string | undefined}) {
   // Auto jobs are run by AI agents, so switching to Auto job drops people from the assignees.
   const setMode = (i: Item, m: Mode) => store.updateItem(i.id, {tags: [...i.tags.filter(t => !(MODES as readonly string[]).includes(t)), ...(m === 'unset' ? [] : [m])],
-    ...(m === 'auto-job' ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
+    ...(m === 'auto-job' && store.people.some(p => p.kind === 'ai') ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
   return (
     <div className="routine-table">
       <div className="rt-row rt-head small muted">
