@@ -162,7 +162,7 @@ function QuickAdd({store, me}: {store: Store; me: string}) {
         {realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
       <span className="qa-wrap grow"><input className="search" style={{width: '100%'}} placeholder={`Add a task for yourself. Type @ to assign, ! for priority, due: for a date`} value={text} onChange={e => setText(e.target.value)} {...qa.props}
-        onKeyDown={async e => { if (qa.keyDown(e)) return; if (e.key === 'Enter' && text.trim() && project) { const t = /(^|\s)@\S/.test(text) ? text : `${text} @${first}`; setText(''); await store.quickAdd(project, t); } }} />{qa.ui}</span>
+        onKeyDown={async e => { if (qa.keyDown(e)) return; if (e.key === 'Enter' && text.trim() && project) { const t = /(^|\s)@\S/.test(text) ? text : `${text} @${first}`; const keep = text; setText(''); if (!await store.quickAdd(project, t)) setText(keep); } }} />{qa.ui}</span>
     </div>
   );
 }

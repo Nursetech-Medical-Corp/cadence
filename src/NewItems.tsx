@@ -1,8 +1,9 @@
 // New items you just made: tint them for a few minutes and scroll to the newest so it never gets lost when a
-// sort or filter puts it somewhere else. Settings live in your own preferences (New items menu in a view's toolbar).
+// sort or filter puts it somewhere else. Settings live in your own preferences (New entry menu in a view's toolbar).
 import {useEffect, useState} from 'react';
 import {Highlighter} from 'lucide-react';
-import type {Store} from './store.ts';
+import {rollupTarget, rollupSpaces, type Store} from './store.ts';
+import type {Project} from './types.ts';
 import {Popover} from './components.tsx';
 import {newDefaults, defaultTokens, type NewDefaults} from './QuickAssist.tsx';
 
@@ -51,7 +52,7 @@ export function NewItemsButton({store}: {store: Store}) {
   const setCfg = (p: Partial<NewPrefs>) => store.setPref('newItems', {...cfg, ...p});
   const setD = (p: Partial<NewDefaults>) => store.setPref('newDefaults', {...d, ...p});
   return <span className="picker">
-    <button className={'btn' + (open ? ' on' : '')} title="New lines: highlight them, jump to them, and the defaults Ctrl+Space adds" onClick={() => setOpen(o => !o)}><Highlighter size={14} /> New line</button>
+    <button className={'btn' + (open ? ' on' : '')} title="New entries: highlight them, jump to them, and the defaults Ctrl+Space adds" onClick={() => setOpen(o => !o)}><Highlighter size={14} /> New entry</button>
     <Popover open={open} onClose={() => setOpen(false)} className="wide">
       <div className="pop-label">When you add an item</div>
       <label className="pop-row"><input type="checkbox" checked={cfg.jump} onChange={e => setCfg({jump: e.target.checked})} /> Scroll to it and flash it</label>
@@ -75,4 +76,18 @@ export function NewItemsButton({store}: {store: Store}) {
       <div className="muted small" style={{padding: '4px 8px'}}>Adds: <code>{defaultTokens(store, '') || 'nothing'}</code>. For a color rule instead, use Colors with "Created (minutes ago) at most 10".</div>
     </Popover>
   </span>;
+}
+
+/** Rollup toolbar: which space items you add here are saved in. A rollup only shows work, so each new item needs a real space. */
+export function AddToSpace({store, project}: {store: Store; project: Project}) {
+  const spaces = rollupSpaces(store.projects, project);
+  const cur = rollupTarget(store.projects, store.prefs, project.id);
+  if (!project.settings.rollup || !spaces.length) return null;
+  const picks = (store.prefs.rollupAdd as Record<string, string> | undefined) ?? {};
+  return <label className="add-to" title={`${project.name} shows work from other spaces. Items you add here are saved in this space and show up here too.`}>
+    Add to
+    <select className="plain-select" value={cur?.id ?? ''} onChange={e => store.setPref('rollupAdd', {...picks, [project.id]: e.target.value})}>
+      {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+    </select>
+  </label>;
 }
