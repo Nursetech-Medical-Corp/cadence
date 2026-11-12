@@ -7,6 +7,8 @@ import {GripVertical, Link2, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight
 import type {Comment, Item} from './types.ts';
 import {api, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
+import {RoutineBadge, RoutineControls, SopLinks, peopleFor} from './RoutineControls.tsx';
+import {ParkButtons} from './Parked.tsx';
 import {BlockEditor} from './BlockEditor.tsx';
 import {WorkSection} from './AIWork.tsx';
 import {ApprovalsSection} from './Approvals.tsx';
@@ -151,8 +153,10 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
           {parent && <><button className="link" onClick={() => open(parent.id)}>{itemKey(parent, store.projects)} {parent.title.slice(0, 30)}</button> / </>}
           {itemKey(item, store.projects)}
         </span>
+        <RoutineBadge item={item} />
         <span className="spacer" />
         <SaveTemplateButton store={store} item={item} />
+        <ParkButtons store={store} item={item} />
         <button className="icon" title="Delete" onClick={() => { if (confirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`)) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>
         {nav && <button className={'icon' + (nav.pinned ? ' on' : '')} title={nav.pinned ? 'Pinned: stays open when you click elsewhere. Click to unpin' : 'Pin open (otherwise clicking outside closes it)'} onClick={nav.togglePin}>{nav.pinned ? <Pin size={15} /> : <PinOff size={15} />}</button>}
         <button className="icon" title="Close (Esc)" onClick={close}><X size={16} /></button>
@@ -167,11 +171,12 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         const rows: [string, string, React.ReactNode][] = [
           ['status', 'Status', <StatusSelect project={project} value={item.status} onChange={status => up({status})} />],
           ['type', 'Type', <TypeSelect project={project} value={item.type} onChange={type => up({type})} />],
-          ['assignees', 'Assignees', <PeoplePicker value={item.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => up({assignees})} />],
+          ['assignees', 'Assignees', <PeoplePicker value={item.assignees} people={peopleFor(item, store.people)} onReorder={store.reorderPeople} onChange={assignees => up({assignees})} />],
           ['priority', 'Priority', <PrioritySelect value={item.priority} onChange={priority => up({priority})} showLabel />],
           ['sprint', 'Sprint', <SprintSelect projectId={project.id} sprints={sprints} value={item.sprint} onChange={sprint => up({sprint})} />],
           ['start', 'Start', <DateInput value={item.start} onChange={start => up({start})} placeholder="Set start" />],
           ['due', 'Due', <DateInput value={item.due} today={item.completed ? undefined : store.today} onChange={due => up({due})} placeholder="Set due" />],
+          ...(item.completed ? [['completed', 'Completed', <CompletedInput value={item.completed} onChange={completed => up({completed})} />] as [string, string, React.ReactNode]] : []),
           ...((item.parentId || item.deps.length) ? [['follow', 'Dates', <select className="plain-select" title="Dynamic dates: move with the parent, or follow the item this one waits on" value={(item.fields.follow as string) ?? ''}
             onChange={e => up({fields: {...item.fields, follow: e.target.value || undefined}})}>
             <option value="">Fixed, set by hand</option>
@@ -184,8 +189,8 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
             <option value="">None</option>
             {all.filter(i => i.projectId === project.id && i.id !== item.id && project.types.indexOf(i.type) < Math.max(project.types.indexOf(item.type), 1)).map(i => <option key={i.id} value={i.id}>{i.type}: {i.title.slice(0, 50)}</option>)}
           </select>],
-          ['tags', 'Tags', <TagEditor tags={item.tags} onChange={tags => up({tags})} />],
-          ['repeat', 'Repeat', <RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} />],
+          ['tags', 'Tags', <div className="tags-cell"><TagEditor tags={item.tags} onChange={tags => up({tags})} /><SopLinks store={store} item={item} /></div>],
+          ['repeat', 'Repeat', <div className="repeat-cell"><RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} /><RoutineControls store={store} item={item} /></div>],
           ['project', 'Project', <select className="plain-select" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
           ...project.fields.filter(f => f.kind !== 'time').map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)
             ? <FieldCell field={f} item={item} project={project} value={item.fields[f.id]} store={store} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />
@@ -284,4 +289,15 @@ function RelatedLinks({store, item, open}: {store: Store; item: Item; open: (id:
     </div>
     {matches.map(m => <button key={m.id} className="pop-row" onClick={() => { save([...mine.filter(l => !(l.id === m.id && l.rel === rel)), {rel, id: m.id}]); setQ(''); }}><span className="muted small">{itemKey(m, store.projects)}</span> {m.title}</button>)}
   </>;
+}
+
+/** When done work was finished, in local time. People can correct it (for work marked done late). */
+function CompletedInput({value, onChange}: {value: string; onChange: (iso: string) => void}) {
+  const toLocal = (iso: string) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  const [draft, setDraft] = useState(toLocal(value));
+  useEffect(() => setDraft(toLocal(value)), [value]);
+  const commit = () => { if (draft && draft !== toLocal(value)) onChange(new Date(draft).toISOString()); };
+  return <input type="datetime-local" className="plain-input" value={draft} max={toLocal(new Date().toISOString())}
+    title="When this was finished. Change it if it was marked done late."
+    onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit(); }} />;
 }

@@ -22,9 +22,12 @@ export type Recur = {
   reopen?: boolean;             // reopen this same item instead of creating a new one
   copySubitems?: boolean;       // copy open-or-closed subitems into the new occurrence, reset to To do
   spawned?: string;
+  paused?: boolean;             // routine switched off: hidden from views, sprints and plans until turned back on
+  waiting?: boolean;            // routine waits for the items it depends on; starts by itself when they are done
+  slot?: string | null;         // this copy was delayed: the date it was scheduled for, so the next one stays on schedule
 };
 
-export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'};
+export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'; owner?: string | null};
 
 export type Project = {
   id: string; name: string; key: string;
@@ -37,6 +40,8 @@ export type Project = {
 export type InheritKey = 'assignees' | 'sprint' | 'priority' | 'tags' | 'due' | 'start' | `f:${string}`;
 
 export type ProjectSettings = {
+  /** Keys this space used before a rename; old item links like NT-12 still work. */
+  oldKeys?: string[];
   /** Optional header at the top of the space: a color band or an uploaded picture. */
   cover?: Cover | null;
   inherit: InheritKey[];
@@ -53,8 +58,10 @@ export type ProjectSettings = {
   icon?: string; color?: string;
   /** When dates move: skip weekends, and whether steps that follow another move always (gap) or only when they would overlap. */
   dates?: {skipWeekends?: boolean; shift?: 'gap' | 'overlap'};
-  /** A rollup shows work from other projects together. include null means every project. */
-  rollup?: {include: string[] | null};
+  /** A rollup shows work from other projects together. include null means every project.
+   *  scope makes it a built-in space that is always there: 'routines' (every repeating item, paused and waiting ones too)
+   *  or 'parked' (archived and snoozed items). Built-in spaces cannot be deleted. */
+  rollup?: {include: string[] | null; scope?: 'routines' | 'parked'};
 };
 
 export type TypeRule = {
@@ -120,7 +127,7 @@ export const NOTIFY_KINDS = [
 
 export type ItemPatch = Partial<Pick<Item,
   'parentId' | 'type' | 'title' | 'body' | 'status' | 'priority' | 'assignees' | 'start' | 'due' |
-  'estimate' | 'tags' | 'sprint' | 'sort' | 'recur' | 'fields' | 'projectId' | 'deps'>>;
+  'estimate' | 'tags' | 'sprint' | 'sort' | 'recur' | 'fields' | 'projectId' | 'deps' | 'completed'>>;
 
 export type ChangeEvent =
   | {kind: 'item'; item: Item}
@@ -134,6 +141,9 @@ export type ChangeEvent =
   | {kind: 'sprint'; projectId: string}
   | {kind: 'view'; projectId: string}
   | {kind: 'template'}
+  | {kind: 'events'}
+  | {kind: 'proposals'}
+  | {kind: 'sops'}
   | {kind: 'refresh'};
 
 export type Sprint = {
@@ -142,9 +152,9 @@ export type Sprint = {
   created: string;
 };
 
-export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files';
+export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines';
 export type ViewConfig = {
-  text?: string; assignee?: string; hideDone?: boolean; types?: string[]; sprint?: string;
+  text?: string; assignee?: string; hideDone?: boolean; hideRepeats?: boolean; types?: string[]; sprint?: string;
   groupBy?: 'status' | 'priority' | 'assignee' | 'type' | 'sprint';
   columns?: {id: string; width: number}[]; hidden?: string[];
   /** Table footer calculation per column id: sum, avg, count and so on. */
@@ -162,7 +172,7 @@ export type ViewConfig = {
   /** List rows: the order of the priority, assignee and status fields. Time and due date keep their place. */
   rowFields?: string[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
-  zoom?: 'day' | 'week' | 'month'; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
+  zoom?: 'day' | 'week' | 'month'; calHours?: 'week' | 'day' | null; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
 /** Filters: a group of rules joined by AND or OR; a rule can itself be a group (one level of nesting in the UI). */
 export type FilterRule = {field: string; op: 'is' | 'is-not' | 'contains' | 'empty' | 'not-empty' | 'before' | 'after' | 'gte' | 'lte'; value?: string};

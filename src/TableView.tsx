@@ -3,11 +3,14 @@ import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, Eye, EyeOff, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
 import type {FieldDef, Item, Project} from './types.ts';
-import {between, fmtMinutes, type Store} from './store.ts';
+import {api, between, fmtMinutes, type Store} from './store.ts';
 import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf, itemKey, SpaceChip} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
 import {FilesCell} from './FilesCell.tsx';
+import {useQuickAssist} from './QuickAssist.tsx';
+import {RoutineMark, SopLinks, peopleFor} from './RoutineControls.tsx';
+import {nextOccurrence} from './recur.ts';
 import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
@@ -16,7 +19,10 @@ const CALC_LABEL: Record<string, string> = {count: 'Count', filled: 'Filled', em
 /** Column ids and names, for the Columns menu in the toolbar. */
 export const tableColumns = (project: Project) => [
   ['key', 'ID'], ['title', 'Title'], ['parent', 'Parent'], ['status', 'Status'], ['type', 'Type'], ['assignees', 'Assignee'], ['priority', 'Priority'], ['sprint', 'Sprint'],
-  ['start', 'Start'], ['due', 'Due'], ['estimate', 'Estimate'], ['tags', 'Tags'], ...project.fields.map(f => ['f:' + f.id, f.name]),
+  ['start', 'Start'], ['due', 'Due'], ['estimate', 'Estimate'], ['repeat', 'Routine'], ['tags', 'Tags'],
+  ...(project.settings.rollup?.scope === 'routines' ? [['r-mode', 'Mode'], ['r-state', 'On / off'], ['r-next', 'Then'], ['r-sop', 'SOP']] : []),
+  ...(project.settings.rollup?.scope === 'parked' ? [['p-kind', 'Parked as'], ['p-reason', 'Reason'], ['p-until', 'Snoozed until'], ['p-restore', 'Restore']] : []),
+  ...project.fields.map(f => ['f:' + f.id, f.name]),
 ] as [string, string][];
 
 export function TableView({store, project, items, allItems, sprints, open, config, setConfig, selected, toggle, setSelected, createExtra}: ViewProps) {
@@ -26,6 +32,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   // Adding a row in between: the row it goes next to.
   const [insertAt, setInsertAt] = useState<{id: string; above: boolean} | null>(null);
   const [draft, setDraft] = useState('');
+  const qa = useQuickAssist(store, project.types, draft, setDraft);
   const [pinned, setPinned] = useState<string[]>([]);
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -47,16 +54,20 @@ export function TableView({store, project, items, allItems, sprints, open, confi
         ))}
       </select>)},
     {id: 'status', name: 'Status', width: 140, sortVal: i => project.statuses.findIndex(s => s.id === i.status), cell: i => <StatusSelect project={project} value={i.status} onChange={status => up(i)({status})} />},
-    {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} />},
-    {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => up(i)({assignees})} />},
+    {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <span className="type-cell"><TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} /><RoutineMark item={i} corner /></span>},
+    {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={peopleFor(i, store.people)} onReorder={store.reorderPeople} onChange={assignees => up(i)({assignees})} />},
     {id: 'priority', name: 'Priority', width: 110, sortVal: i => i.priority || 9, cell: i => <PrioritySelect value={i.priority} onChange={priority => up(i)({priority})} showLabel />},
     {id: 'sprint', name: 'Sprint', width: 130, sortVal: i => sprints.find(s => s.id === i.sprint)?.start ?? '9', raw: i => i.sprint, cell: i => <SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => up(i)({sprint})} />},
     {id: 'start', name: 'Start', width: 130, sortVal: i => i.start ?? '9', raw: i => i.start, cell: i => <DateInput value={i.start} onChange={start => up(i)({start})} />},
     {id: 'due', name: 'Due', width: 130, sortVal: i => i.due ?? '9', raw: i => i.due, cell: i => <DateInput value={i.due} today={i.completed ? undefined : store.today} onChange={due => up(i)({due})} />},
     {id: 'estimate', name: 'Estimate', width: 110, sortVal: i => estimateOf(i, store.items).hours ?? 0, raw: i => estimateOf(i, store.items).hours, cell: i => (
       <EstimateCell item={i} items={store.items} onChange={estimate => up(i)({estimate})} />)},
+    {id: 'repeat', name: 'Routine', width: 150, sortVal: i => !i.recur ? '~' : i.recur.paused ? 'b' : i.recur.waiting ? 'c' : 'a', raw: i => i.recur ? (i.recur.paused ? 'paused' : i.recur.waiting ? 'waiting' : 'on') : null,
+      cell: i => i.recur ? <RoutineMark item={i} label /> : <span className="muted">-</span>},
     {id: 'tags', name: 'Tags', width: 160, sortVal: i => i.tags.join(','), raw: i => i.tags, cell: i => (
       <InlineText value={i.tags.join(', ')} placeholder="-" onSave={v => up(i)({tags: v.split(',').map(s => s.trim()).filter(Boolean)})} />)},
+    ...routineCols(project, store),
+    ...parkedCols(project, store),
     ...project.fields.map((f): Col => {
       const val = (i: Item) => { try { return valueOf(f, i, project, store); } catch { return null; } };
       return {id: 'f:' + f.id, name: f.name, width: COMPUTED.includes(f.kind) && f.kind !== 'formula' ? 170 : 140,
@@ -164,7 +175,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
             <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
             {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>
-            {insertAt?.id === i.id && <InsertRow cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
+            {insertAt?.id === i.id && <InsertRow store={store} types={project.types} cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
               // Between this row and the one shown next to it.
               const sibs = rows, at = sibs.findIndex(x => x.id === i.id);
               const sort = insertAt.above ? between(sibs[at - 1]?.sort, i.sort) : between(i.sort, sibs[at + 1]?.sort);
@@ -178,14 +189,15 @@ export function TableView({store, project, items, allItems, sprints, open, confi
             <tr className="draft">
               <td className="sel-col" />
               {shown.map(c => <td key={c.id}>{c.id === 'title'
-                ? <span className="title-cell"><span className="check ghost" /><input autoFocus className="inline" placeholder="Name it, then Tab to fill other columns" value={draft}
+                ? <span className="title-cell"><span className="check ghost" /><span className="qa-wrap grow"><input autoFocus className="inline" placeholder="Name it, then Tab to fill other columns" value={draft} {...qa.props}
                     onChange={e => setDraft(e.target.value)}
-                    onBlur={() => { if (!draft.trim()) setDrafting(false); }}
+                    onBlur={() => { qa.props.onBlur(); if (!draft.trim()) setDrafting(false); }}
                     onKeyDown={e => {
+                      if (qa.keyDown(e)) return;
                       if (e.key === 'Enter') { e.preventDefault(); commit(false); }
                       if (e.key === 'Tab' && !e.shiftKey && draft.trim()) { e.preventDefault(); commit(true); }
                       if (e.key === 'Escape') { setDraft(''); setDrafting(false); }
-                    }} /></span>
+                    }} />{qa.ui}</span></span>
                 : c.id === 'key' ? <span className="muted small">new</span> : <span className="muted small">-</span>}</td>)}
               <td />
             </tr>
@@ -332,11 +344,46 @@ function ContactCell({value, href, onChange}: {value: string; href: (v: string) 
 }
 
 /** An inline row for adding a task between two rows. Enter adds and opens another below it, Esc stops. */
-function InsertRow({cols, onAdd, onDone}: {cols: number; onAdd: (text: string) => Promise<void>; onDone: () => void}) {
+function InsertRow({store, types, cols, onAdd, onDone}: {store: Store; types: string[]; cols: number; onAdd: (text: string) => Promise<void>; onDone: () => void}) {
   const [text, setText] = useState('');
+  const qa = useQuickAssist(store, types, text, setText);
   return <tr className="draft insert-row"><td className="sel-col" /><td colSpan={cols + 1}>
-    <span className="title-cell"><span className="check ghost" /><input autoFocus className="inline" placeholder="New row here. Enter to add, Esc to stop" value={text}
-      onChange={e => setText(e.target.value)} onBlur={() => { if (!text.trim()) onDone(); }}
-      onKeyDown={async e => { if (e.key === 'Escape') onDone(); if (e.key === 'Enter' && text.trim()) { e.preventDefault(); const t = text; setText(''); await onAdd(t); } }} /></span>
+    <span className="title-cell"><span className="check ghost" /><span className="qa-wrap grow"><input autoFocus className="inline" placeholder="New row here. Enter to add, Esc to stop" value={text} {...qa.props}
+      onChange={e => setText(e.target.value)} onBlur={() => { qa.props.onBlur(); if (!text.trim()) onDone(); }}
+      onKeyDown={async e => { if (qa.keyDown(e)) return; if (e.key === 'Escape') onDone(); if (e.key === 'Enter' && text.trim()) { e.preventDefault(); const t = text; setText(''); await onAdd(t); } }} />{qa.ui}</span></span>
   </td></tr>;
+}
+
+// Extra columns in the built-in spaces. Routines: mode (who runs it), on/off switch, the date after this one, SOP link.
+const MODES = [['auto-job', 'Auto job'], ['hybrid', 'Hybrid'], ['manual', 'Manual']] as const;
+const routineAct = (store: Store, id: string, action: string) => api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [id], action}}).then(r => { if (r.errors?.length) alert(r.errors.join('\n')); }).catch(e => store.fail(e));
+function routineCols(project: Project, store: Store): Col[] {
+  if (project.settings.rollup?.scope !== 'routines') return [];
+  const modeOf = (i: Item) => MODES.find(([m]) => i.tags.includes(m))?.[0] ?? '';
+  const setMode = (i: Item, m: string) => store.updateItem(i.id, {tags: [...i.tags.filter(t => !MODES.some(([x]) => x === t)), ...(m ? [m] : [])],
+    ...(m === 'auto-job' ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
+  const next = (i: Item) => i.recur && i.due ? nextOccurrence(i.recur, i.recur.slot ?? i.due, i.recur.slot ?? i.due) : null;
+  return [
+    {id: 'r-mode', name: 'Mode', width: 120, sortVal: i => modeOf(i) || '~', raw: i => modeOf(i) || null, cell: i => (
+      <select className={'plain-select mode-chip mode-' + (modeOf(i) || 'unset')} value={modeOf(i)} title="Auto job: an AI agent runs it (agents only). Hybrid: AI drafts, a person decides. Manual: a person does it." onChange={e => setMode(i, e.target.value)}>
+        <option value="">Not set</option>{MODES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+      </select>)},
+    {id: 'r-state', name: 'On / off', width: 110, sortVal: i => i.recur?.paused ? 'c' : i.recur?.waiting ? 'b' : 'a', raw: i => i.recur?.paused ? 'paused' : i.recur?.waiting ? 'waiting' : 'on', cell: i => (
+      <span className="r-state"><button className={'switch' + (i.recur?.paused ? '' : ' on')} title={i.recur?.paused ? 'Off. Turn on to schedule the next one.' : 'On. Turn off to pause it.'} onClick={() => routineAct(store, i.id, i.recur?.paused ? 'resume' : 'pause')} />
+        <span className="muted small">{i.recur?.paused ? 'paused' : i.recur?.waiting ? 'waiting' : i.recur?.slot ? 'delayed' : 'on'}</span></span>)},
+    {id: 'r-next', name: 'Then', width: 110, sortVal: i => next(i) ?? '9', raw: i => next(i), cell: i => <span className="muted small" title="The date after this one">{next(i) ?? '-'}</span>},
+    {id: 'r-sop', name: 'SOP', width: 130, sortVal: i => i.tags.find(t => /^sop-/i.test(t)) ?? '~', raw: i => i.tags.find(t => /^sop-/i.test(t)) ?? null, cell: i => <SopLinks store={store} item={i} />},
+  ];
+}
+// Archive and later: how it was parked, why, until when, and a Restore button.
+function parkedCols(project: Project, store: Store): Col[] {
+  if (project.settings.rollup?.scope !== 'parked') return [];
+  const arch = (i: Item) => i.fields.archived as {kind?: string; reason?: string} | undefined;
+  const park = (i: Item, body: Record<string, unknown>) => api(`/park/${i.id}`, {method: 'POST', body}).catch(e => store.fail(e));
+  return [
+    {id: 'p-kind', name: 'Parked as', width: 120, sortVal: i => arch(i)?.kind ?? (i.fields.snooze ? 'snoozed' : '~'), raw: i => arch(i)?.kind ?? (i.fields.snooze ? 'snoozed' : null), cell: i => <span className="tag">{arch(i)?.kind ?? (i.fields.snooze ? 'snoozed' : '-')}</span>},
+    {id: 'p-reason', name: 'Reason', width: 220, sortVal: i => arch(i)?.reason ?? '~', raw: i => arch(i)?.reason ?? null, cell: i => <span className="small" title={arch(i)?.reason}>{arch(i)?.reason ?? ''}</span>},
+    {id: 'p-until', name: 'Snoozed until', width: 130, sortVal: i => String(i.fields.snooze ?? '9'), raw: i => (i.fields.snooze as string) ?? null, cell: i => i.fields.snooze ? <DateInput value={i.fields.snooze as string} onChange={until => park(i, {action: 'snooze', until})} /> : <span className="muted">-</span>},
+    {id: 'p-restore', name: 'Restore', width: 100, sortVal: () => 0, cell: i => <button className="btn ghost small" title="Bring it back to its space's views" onClick={() => park(i, {action: 'restore'})}>Restore</button>},
+  ];
 }

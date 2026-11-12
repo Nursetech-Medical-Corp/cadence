@@ -22,6 +22,9 @@ export function filterFields(project: Project, store: Store, sprints: Sprint[]):
     {id: 'start', label: 'Start date', kind: 'date'},
     {id: 'estimate', label: 'Estimate (h)', kind: 'number'},
     {id: 'recurring', label: 'Repeats', kind: 'choice', options: [{value: 'yes', label: 'Yes'}]},
+    {id: 'createdMins', label: 'Created (minutes ago)', kind: 'number'},
+    {id: 'updatedMins', label: 'Changed (minutes ago)', kind: 'number'},
+    {id: 'createdBy', label: 'Created by', kind: 'choice', options: store.people.map(p => ({value: p.id, label: p.name}))},
     ...project.fields.map(f => ({id: 'f:' + f.id, label: f.name, kind: (f.kind === 'number' ? 'number' : f.kind === 'date' ? 'date' : f.kind === 'select' ? 'choice' : 'text') as FieldSpec['kind'],
       options: f.options?.map(o => ({value: o, label: o}))})).map(x => project.fields.find(f => 'f:' + f.id === x.id)?.kind === 'multi' ? {...x, kind: 'choice' as const} : x),
   ];
@@ -62,6 +65,9 @@ export function matchFilter(i: Item, g: FilterGroup | undefined, ctx: {project: 
     else if (r.field === 'start') vals = i.start ? [i.start] : [];
     else if (r.field === 'estimate') vals = i.estimate != null ? [String(i.estimate)] : [];
     else if (r.field === 'recurring') vals = i.recur ? ['yes'] : [];
+    else if (r.field === 'createdMins') vals = [String(Math.floor((Date.now() - Date.parse(i.created)) / 60000))];
+    else if (r.field === 'updatedMins') vals = [String(Math.floor((Date.now() - Date.parse(i.updated)) / 60000))];
+    else if (r.field === 'createdBy') vals = i.createdBy ? [i.createdBy] : [];
     else { const v = i.fields[r.field.slice(2)]; vals = v == null || v === '' ? [] : Array.isArray(v) ? v.map(String) : [String(v)]; }
     const v = r.field === 'sprint' && r.value === 'current' ? ctx.currentSprint ?? '' : (r.field === 'due' || r.field === 'start') ? dateValue(r.value, ctx.today) : r.value ?? '';
     switch (r.op) {

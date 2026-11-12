@@ -1,6 +1,6 @@
 # Connecting AI agents (MCP)
 
-Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your spaces and projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 53 tools in total.
+Cadence ships its own MCP server, so Claude (and any other MCP client) can read and run your spaces and projects: create and update work, plan sprints, replan schedules, run templates, review AI work, read history, and more. 89 tools in total. The full feature map is in [AI-GUIDE.md](AI-GUIDE.md) (served by `get_guide`).
 
 There are three ways to connect. All act as one person in the workspace, and can do only what that person's role allows.
 
@@ -80,12 +80,20 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
 | AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
+| Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
+| Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
+| SOP links | `list_sop_links`, `set_sop_links` (admins) |
+| Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |
+| Agents | `agent_inbox`, `suggest_work`, `my_proposals` |
 
 Agents can run a board like a project manager: create and change anything their role allows, set up views,
 import and export items, and track time. They cannot approve: accepting a claim, approving or sending back AI work,
 and signing approvals are refused for AI workers, whatever their role. An agent's own work is timed automatically:
 the clock starts at its first logged step once it is cleared to work and stops when it submits, with the outcome as the note.
 A person's review time is kept as a "review" time entry.
+
+| Area | Tools |
+| --- | --- |
 | Integrations | `upsert_external` (CRM or accounting records), `create_from_email`, `calendar_events`, `gmail_search` |
 
 `calendar_events` and `gmail_search` work after the person connects their Google account on the Team page.
@@ -100,3 +108,7 @@ A person's review time is kept as a "review" time entry.
 ## REST API
 
 Everything the app does is also a REST call under `/api/...` with the same Bearer token (send `content-type: application/json`). Routes are listed in `server/api.ts`. Pick the workspace with the `x-workspace` header or `?ws=`.
+
+## New tools not showing in Claude?
+
+Claude caches a connector's tool list. After an update, open Settings, Connectors, Cadence and reconnect (or remove and add it again) so new tools appear.

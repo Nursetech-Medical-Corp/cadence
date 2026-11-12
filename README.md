@@ -73,6 +73,9 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 | ![Board with header, colors and timers on cards](docs/screenshots/board.jpg) | ![Everything across workspaces](docs/screenshots/everything.jpg) |
 | ![Template editor with relative dates](docs/screenshots/template.jpg) | ![Workspace switcher with logos](docs/screenshots/workspaces.jpg) |
 | ![New space with level presets](docs/screenshots/newspace.jpg) | ![Customization: team setup, personal layouts, feature switches](docs/screenshots/customization.jpg) |
+| ![Routines: switch each one on or off, mode, owner, estimate, this date and the next, by SOP](docs/screenshots/routines.jpg) | ![Routines timeline by month, quarter or year](docs/screenshots/routines-timeline.jpg) |
+| ![Routines workload per person against capacity](docs/screenshots/routines-workload.jpg) | ![Archive and later: parked ideas, rejected items, snoozed work](docs/screenshots/archive-later.jpg) |
+| ![A routine task: Routine chip in the header, Skip, Delay, Wait, Pause and In Routines](docs/screenshots/routine-task.jpg) | ![Table: repeat mark next to the type, click it to manage the routine](docs/screenshots/routine-table.jpg) |
 
 ## Features
 
@@ -81,12 +84,25 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Workspaces hold spaces (a team or area: Engineering, QA, Sales). Each space picks its levels when created: General (Project, Phase, Task, Subtask), Simple, Jira style (Project, Epic, Story, Subtask), Azure DevOps (Epic, Feature, User Story, Task), or your own. Statuses grouped into to do, doing and done, and custom fields. (The API calls a space a project.)
 - Rollup space: one space that shows work from all spaces, or the ones you pick, in every view.
 - Unlimited nesting, dependencies, multiple assignees, priorities, tags, estimates, start and due dates.
-- Sidebar: search, favorites, drag to reorder, an icon and color kit per space; an arrow shows a space's views.
+- Sidebar: search, favorites, drag to reorder, an icon and color kit per space; an arrow shows a space's views. Double-click a space or view name to rename it. Private spaces sit under "Private to me".
+- Rename a space's key (NT to GEN) and old keys like NT-12 keep working.
+
+### Routines (repeating work)
+- One live copy per routine; finish it and the next appears, so nothing piles up.
+- A built-in Routines space, always in the sidebar: a Routines view (group by SOP, frequency, person, space or mode; switches; edit owner, estimate, date and mode inline) plus the usual Table, Board, Timeline, Calendar and Workload views, with Mode, On/off, Then and SOP columns. Workload counts every date a routine comes back.
+- Auto-job routines are assigned to AI agents only (the agent's owner reviews).
+- Per routine: switch off (pause), Skip this one, Delay only this copy (the next stays on schedule), Wait until other work is done (a hire, a setup), or End. Switch a whole SOP off at once.
+- Each task that repeats shows a Routine chip in its header and a repeat mark in lists, tables and boards; both open it on the Routines page.
+- SOP links: tag work with an SOP code (`SOP-07.2`) and it opens that SOP's document.
+
+### Archive and later
+- Archive ideas (maybe later), parked work (not now) and rejected items (decided no) without deleting them, or snooze an item until a date. They live in the built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns.
 
 ### Views
 - List: an outline with nesting. Enter adds the next item, Tab indents, a hover gutter adds above or below and drags.
 - Table: spreadsheet editing, resizable and reorderable columns, multi-level sort, filters, a property visibility panel, column totals (sum, average, min, max, counts, percent), and virtual scrolling for large tables.
 - Board: Kanban by any field, swimlanes, WIP limits, card covers from image attachments.
+- Sort works in every view: rows in tables, lists and timelines, cards in boards, items within a calendar day, and workload lists (priority, due, status, any column).
 - Timeline (Gantt): drag to move and resize, drag to link dependencies, parent spans, critical path, named baselines, sprint bands, and an overrun marker when subtasks run past a parent.
 - Calendar, Workload (hours per person against capacity), Backlog, Sprint (burndown, velocity, capacity, rollover), and Files.
 - Everything: one dashboard, calendar, timeline and list across all your workspaces, all editable.
@@ -97,7 +113,8 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Automatic: created time, last edited time, created by.
 
 ### Writing fast
-- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates.
+- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates. Ctrl+Space adds your defaults from the New line menu (assignee, due, priority, estimate, sprint, tags).
+- New items are tinted for a few minutes and the view jumps to them; turn either off in the New menu. Filters can match "created in the last N minutes".
 - Quick capture from anywhere (C), with dictation. Command palette (Ctrl+K). Rebindable shortcuts.
 - Block editor for descriptions: headings, lists, checklists, code, images (paste a screenshot), links to other items with `[[KEY-12]]`.
 

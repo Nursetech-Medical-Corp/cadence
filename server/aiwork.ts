@@ -34,9 +34,23 @@ export function migrateAiWork(tasks: Tasks) {
 export const personKind = (tasks: Tasks, pid: string | null) => pid ? ((tasks.db.prepare('select kind from people where id = ?').get(pid) as {kind: string} | undefined)?.kind ?? 'human') : 'human';
 /** Who hears about AI activity on an item: whoever accepted it, the creator, and human assignees. */
 function humansToTell(tasks: Tasks, i: Item) {
-  const r = i.fields.review as {by?: string} | undefined;
-  return [...new Set([r?.by, i.createdBy, ...i.assignees].filter((x): x is string => !!x && personKind(tasks, x) !== 'ai'))];
+  const r = i.fields.review as {by?: string; agent?: string} | undefined;
+  return [...new Set([agentOwner(tasks, r?.agent ?? null), r?.by, i.createdBy, ...i.assignees].filter((x): x is string => !!x && personKind(tasks, x) !== 'ai'))];
 }
+/** The person an AI agent belongs to (null for agents without an owner, from before owners existed). */
+export const agentOwner = (tasks: Tasks, agent: string | null) => agent ? ((tasks.db.prepare('select owner from people where id = ?').get(agent) as {owner?: string | null} | undefined)?.owner ?? null) : null;
+/** Who may accept a claim or approve work: the agent's owner, a person assigned to the task, or an admin. */
+export function mayReview(tasks: Tasks, reviewer: string | null, i: Item, agent: string | null | undefined) {
+  const owner = agentOwner(tasks, agent ?? null);
+  if (!owner || !reviewer) return true; // agents without an owner, and open mode without a person: as before
+  if (reviewer === owner || i.assignees.includes(reviewer)) return true;
+  return !!(tasks.db.prepare('select admin from people where id = ?').get(reviewer) as {admin?: number} | undefined)?.admin;
+}
+const notOwner = (tasks: Tasks, agent: string | null | undefined) => {
+  const owner = agentOwner(tasks, agent ?? null);
+  const name = owner ? (tasks.db.prepare('select name from people where id = ?').get(owner) as {name?: string} | undefined)?.name : null;
+  return new Invalid(`Only ${name ?? 'the agent\'s owner'}, someone assigned to this task, or an admin can approve this agent's work`);
+};
 const review = (i: Item) => (i.fields.review ?? null) as Review | null;
 const setReview = (tasks: Tasks, i: Item, r: Review, extra: Record<string, unknown> = {}, actor: string | null = null) =>
   tasks.updateItem(i.id, {...extra, fields: {...tasks.item(i.id).fields, review: r}}, actor, {system: true});
@@ -81,6 +95,7 @@ export function decide(tasks: Tasks, itemId: string, reviewer: string | null, ac
   if (personKind(tasks, reviewer) === 'ai') throw new Invalid('Only a person can accept or decline an AI claim');
   const i = tasks.item(itemId), r = review(i);
   if (!r || r.state !== 'claimed') throw new Invalid('There is no open claim on this task');
+  if (!mayReview(tasks, reviewer, i, r.agent)) throw notOwner(tasks, r.agent);
   log(tasks, itemId, reviewer, 'review', accept ? `Accepted the claim${note ? ': ' + note : ''}` : `Declined the claim${note ? ': ' + note : ''}`);
   if (!accept) return setReview(tasks, i, {...r, state: 'declined', by: reviewer, at: now(), note}, {}, reviewer);
   return setReview(tasks, i, {...r, state: 'accepted', by: reviewer, at: now(), note}, {assignees: [...new Set([...i.assignees, r.agent!])], status: statusOf(tasks, i, 'doing')}, reviewer);
@@ -102,6 +117,7 @@ export function reviewWork(tasks: Tasks, itemId: string, reviewer: string | null
   if (personKind(tasks, reviewer) === 'ai') throw new Invalid('Only a person can review AI work');
   const i = tasks.item(itemId), r = review(i);
   if (!r || r.state !== 'submitted') throw new Invalid('Nothing is waiting for review on this task');
+  if (!mayReview(tasks, reviewer, i, r.agent)) throw notOwner(tasks, r.agent);
   log(tasks, itemId, reviewer, 'review', approve ? `Approved${comment ? ': ' + comment : ''}` : `Sent back: ${comment || 'needs changes'}`);
   if (reviewer && tasks.runningTimer(reviewer)?.itemId === itemId) tasks.stopTimer(reviewer, approve ? 'Review: approved' : 'Review: sent back');
   if (comment.trim() && reviewer) tasks.addComment(itemId, reviewer, (approve ? 'Approved. ' : 'Changes requested. ') + comment);

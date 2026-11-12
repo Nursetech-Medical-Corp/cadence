@@ -225,6 +225,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           </div>
         </section>}
         {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
+        {me.person && <AgentsCard />}
         {me.account && <ConnectedAppsCard />}
         {self && <TokensCard people={[self]} admin={false} me={self.id} />}
         {me.person && <MyDataCard />}
@@ -307,6 +308,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
       </section>}
 
       {me.person && <GoogleCard me={me.person.id} ready={!!ws?.google.clientId && !!ws?.google.hasSecret} />}
+      {me.person && <AgentsCard />}
       {me.account && <ConnectedAppsCard />}
       <TokensCard people={people} admin={isAdmin} me={me.person?.id ?? null} />
 
@@ -382,7 +384,9 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
     <section className="set-card">
       <div className="set-card-head"><h3><Shield size={15} /> {personal ? 'Sharing' : 'Access'}</h3><span className="muted small">{personal
         ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
-        : 'Who can see and change this space. Enforced once sign-in is required (Team page). Only admins can change this.'}</span></div>
+        : 'Shared space: everyone in the workspace sees it with their default role (set on the Team page) unless you change it below. Inviting someone to the workspace gives them every shared space, never your private ones.'}</span></div>
+      {!personal && canEdit && me && <div className="set-item"><span className="grow muted small">Keep this space to yourself and the people you pick, like a private Google Doc.</span>
+        <button className="btn small" onClick={() => { if (confirm('Make this space private? Only you and people you give a role below will see it.')) save({default: 'none', members: {...access.members, [me]: 'admin'}, private: true}); }}>Make private</button></div>}
       <div className="set-item">
         <span className="grow">Everyone else in the workspace</span>
         <select className="plain-select" value={access.default} disabled={!canEdit} onChange={e => save({...access, default: e.target.value})}>
@@ -563,7 +567,54 @@ function GoogleCard({me, ready}: {me: string; ready: boolean}) {
       ))}
       {links.some(l => l.scopes.includes('calendar')) && <button className="btn small" disabled={busy} onClick={() => run('Your events in the next 7 days', async () => (await api<{title: string; start: string; account: string}[]>(`/google/events?from=${today}&to=${week}`)).map(e => `${e.start.replace('T', ' ').slice(0, 16)}  ${e.title}  (${e.account})`))}>Test: events in the next 7 days</button>}
       {out && <div className="g-out"><b className="small">{out.title}</b>{out.rows.slice(0, 20).map((r, n) => <div key={n} className="small">{r}</div>)}</div>}
+      {links.some(l => l.scopes.includes('calendar')) && <CalendarSync links={links.filter(l => l.scopes.includes('calendar'))} reconnect={start('calendar-full')} />}
     </section>
+  );
+}
+
+type CalSettings = {linkId: string | null; calendarId: string; pushTasks: 'none' | 'due'; tasksCalendarId: string | null; doneRule: 'mark' | 'delete'; syncCalendars: string[];
+  workStart: string; workEnd: string; tz: string; sync?: {calendar_id: string; last_sync: string | null; error: string | null; channel_expires: string | null}[]};
+/** Two-way Google Calendar sync: where meetings go, which calendars come in, task due dates, work hours. */
+function CalendarSync({links, reconnect}: {links: GLink[]; reconnect: string}) {
+  const [s, setS] = useState<CalSettings | null>(null);
+  const [cals, setCals] = useState<{id: string; name: string; primary: boolean; canWrite: boolean}[]>([]);
+  const [msg, setMsg] = useState('');
+  const load = () => api<CalSettings>('/calendar/settings').then(setS).catch(e => setMsg(String(e instanceof Error ? e.message : e)));
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (s?.linkId) api<typeof cals>(`/google/calendars?link=${s.linkId}`).then(setCals).catch(e => setMsg(String(e instanceof Error ? e.message : e))); }, [s?.linkId]);
+  if (!s) return null;
+  const save = async (patch: Partial<CalSettings>) => { try { setS(await api<CalSettings>('/calendar/settings', {method: 'PUT', body: patch})); setMsg('Saved.'); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } };
+  const calId = (c: {id: string; primary: boolean}) => c.primary ? 'primary' : c.id;
+  const full = !!links.find(l => l.id === s.linkId)?.scopes.split(/\s+/).includes('https://www.googleapis.com/auth/calendar');
+  return (
+    <div className="cal-sync">
+      <h4>Calendar sync (two-way)</h4>
+      <p className="small muted">Meetings you schedule in Cadence go to your Google calendar with invitations and a Meet link. Events in the calendars you pick below come into Cadence every few minutes (instantly when the server has a public https address). Events other people organize show read-only.</p>
+      <div className="time-row"><span className="small">Account</span>
+        <select className="plain-select" value={s.linkId ?? ''} onChange={e => save({linkId: e.target.value || null, calendarId: 'primary', syncCalendars: ['primary']})}>{links.map(l => <option key={l.id} value={l.id}>{l.email}</option>)}</select></div>
+      <div className="time-row"><span className="small">Meetings go to</span>
+        <select className="plain-select" value={s.calendarId} onChange={e => save({calendarId: e.target.value})}>{cals.filter(c => c.canWrite).map(c => <option key={c.id} value={calId(c)}>{c.name}{c.primary ? ' (primary)' : ''}</option>)}</select></div>
+      <div className="small">Bring these calendars into Cadence:</div>
+      <div className="cal-sync-list">{cals.map(c => <label key={c.id} className="small"><input type="checkbox" checked={s.syncCalendars.includes(calId(c))}
+        onChange={e => save({syncCalendars: e.target.checked ? [...s.syncCalendars, calId(c)] : s.syncCalendars.filter(x => x !== calId(c))})} /> {c.name}</label>)}</div>
+      <div className="time-row"><span className="small">Task due dates</span>
+        <select className="plain-select" value={s.pushTasks} onChange={e => save({pushTasks: e.target.value as CalSettings['pushTasks']})}><option value="none">Not on my calendar</option><option value="due">All-day event for each task assigned to me</option></select>
+        {s.pushTasks === 'due' && <>
+          <select className="plain-select" value={s.tasksCalendarId ?? s.calendarId} onChange={e => save({tasksCalendarId: e.target.value})}>{cals.filter(c => c.canWrite).map(c => <option key={c.id} value={calId(c)}>{c.name}</option>)}</select>
+          {full ? <button className="btn small" onClick={async () => { try { setS(await api<CalSettings>('/calendar/cadence-calendar', {method: 'POST'})); setMsg('Made a "Cadence" calendar for due dates.'); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}>Make a "Cadence" calendar</button>
+            : <a className="btn small ghost" href={reconnect} title="Reconnect with full Calendar permission so Cadence can make its own calendar">Allow making a Cadence calendar</a>}
+          <select className="plain-select" value={s.doneRule} onChange={e => save({doneRule: e.target.value as CalSettings['doneRule']})}><option value="mark">When done: mark [Done]</option><option value="delete">When done: remove</option></select>
+        </>}
+      </div>
+      <div className="time-row"><span className="small">Work hours (for Find a time)</span>
+        <input className="plain-input" type="time" value={s.workStart} onChange={e => save({workStart: e.target.value})} /> to <input className="plain-input" type="time" value={s.workEnd} onChange={e => save({workEnd: e.target.value})} />
+        <input className="plain-input" style={{width: 160}} value={s.tz} title="Time zone" onChange={e => setS({...s, tz: e.target.value})} onBlur={e => save({tz: e.target.value})} /></div>
+      <div className="time-row">
+        <button className="btn small" onClick={async () => { setMsg('Syncing...'); try { const r = await api<{calendar: string; changes: number}[]>('/calendar/sync', {method: 'POST'}); setMsg(`Synced: ${r.map(x => `${x.changes} changes from ${x.calendar}`).join(', ')}`); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}>Sync now</button>
+        {s.sync?.map(x => <span key={x.calendar_id} className={'small ' + (x.error ? 'danger-text' : 'muted')}>{x.calendar_id}: {x.error ? x.error : x.last_sync ? `synced ${new Date(x.last_sync).toLocaleString()}` : 'not synced yet'}{x.channel_expires ? ', live' : ''}</span>)}
+      </div>
+      {msg && <div className="small">{msg}</div>}
+    </div>
   );
 }
 
@@ -617,6 +668,91 @@ function MyDataCard() {
       <div className="set-item"><span className="grow">Restore personal spaces and layouts</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'all'); e.target.value = ''; }} /></label></div>
       <div className="set-item"><span className="grow">Restore layouts only</span><label className="btn small">Choose file<input type="file" accept="application/json,.json" hidden onChange={e => { restore(e.target.files?.[0], 'prefs'); e.target.value = ''; }} /></label></div>
       {msg && <p className="small">{msg}</p>}
+    </section>
+  );
+}
+
+type AgentSettings = {provider: string; spaces: string[] | null; workTypes: 'ai' | 'ai+either'; watchAssignments: boolean; checkFrequency: string; maxClaims: number;
+  writePolicy: 'review' | 'direct'; autoApprove: string[]; canCreate: boolean; canInviteOutside: boolean; webhook: string | null};
+type AgentRow = {id: string; name: string; owner: string | null; settings: AgentSettings};
+const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (the team's project manager). Each run:
+1. Call agent_inbox (pass the "now" from your last run as since).
+2. For each new task for your owner and each available task: decide if you can do it well with your tools. If yes, claim_task (existing work) or suggest_work (new work) with a short plan. If not, skip it.
+3. For work you are accepted on or that was sent back: do it, log_step as you go (links, screenshots), then submit_work with a report and what you missed.
+4. Never mark work done and never invite people outside the workspace. Your changes wait for your owner unless they follow an approved AI SOP.`;
+
+/** Where to paste the key, per AI app. Kept short; the Learn page has the full walk-through. */
+function ConnectSteps({provider, url, prompt}: {provider: string; url: string; prompt: string}) {
+  const bare = url.replace(/[&?]key=[^&]+/, ''), key = /[?&]key=([^&]+)/.exec(url)?.[1] ?? '';
+  const copy = (t: string) => <button className="btn ghost small" onClick={() => navigator.clipboard.writeText(t)}><Copy size={11} /> Copy</button>;
+  const promptBox = <><pre className="proposal-args">{prompt}</pre>{copy(prompt)}</>;
+  if (provider === 'meta') return <div className="small">
+    <div><b>Muse (Meta AI)</b> has no box for a connector address. You ask Muse to build one, and the key goes in its Secure Credentials Store, never in the chat.</div>
+    <ol>
+      <li>In Muse, send: <code className="agent-key">Create a custom connector named Cadence for the MCP server at {bare} (streamable HTTP). It needs the header Authorization: Bearer KEY. Ask me for KEY through the secure credential flow, then list its tools to test it and save it as a skill.</code> {copy(`Create a custom connector named Cadence for the MCP server at ${bare} (streamable HTTP). It needs the header Authorization: Bearer KEY. Ask me for KEY through the secure credential flow, then list its tools to test it and save it as a skill.`)}</li>
+      <li>When Muse opens the credential prompt, paste this key there: <code className="agent-key">{key}</code> {copy(key)}</li>
+      <li>Ask Muse to run this on a schedule (Muse calls these scheduled tasks):</li>
+    </ol>{promptBox}</div>;
+  if (provider === 'chatgpt') return <div className="small">
+    <ol>
+      <li>ChatGPT on the web: Settings, Apps, Advanced settings, turn on Developer mode. On Business or Enterprise an admin turns it on first.</li>
+      <li>Create app. Name: Cadence. MCP server URL: <code className="agent-key">{url}</code> {copy(url)} Authentication: none (the key is in the address).</li>
+      <li>ChatGPT asks you to confirm each change it makes. Open Scheduled in the sidebar and add a task with this prompt:</li>
+    </ol>{promptBox}</div>;
+  return <div className="small">
+    <ol>
+      <li>Claude: Settings (or Customize), Connectors, +, Add custom connector. Name: Cadence agent. URL: <code className="agent-key">{url}</code> {copy(url)} Leave the OAuth fields empty. On a Team plan an Owner adds it first.</li>
+      <li>Make a scheduled task in Claude with this prompt, and turn on only the Cadence agent connector for it:</li>
+    </ol>{promptBox}</div>;
+}
+
+/** Your own AI agents: add one, connect it with its key, and set what it may do. */
+function AgentsCard() {
+  const [list, setList] = useState<AgentRow[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [name, setName] = useState('');
+  const [provider, setProvider] = useState('claude');
+  const [key, setKey] = useState<{agent: string; url: string; token: string} | null>(null);
+  const [msg, setMsg] = useState('');
+  const load = () => api<AgentRow[]>('/agents').then(setList).catch(e => setMsg(String(e instanceof Error ? e.message : e)));
+  useEffect(() => { load(); api<Project[]>('/projects').then(ps => setProjects(ps.filter(p => !p.settings.rollup))).catch(() => {}); }, []);
+  const save = async (a: AgentRow, patch: Partial<AgentSettings>) => {
+    try { const r = await api<{settings: AgentSettings}>(`/agents/${a.id}`, {method: 'PATCH', body: patch}); setList(list.map(x => x.id === a.id ? {...x, settings: r.settings} : x)); setMsg('Saved.'); }
+    catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
+  };
+  return (
+    <section className="set-card agents-card">
+      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">
+        Optional. The Cadence connector you already use in Claude works <b>as you</b>: what it does is logged as you and applies right away. Add an agent here only when you want an AI to work <b>on its own</b> (on a schedule, while you are away) under its own name, with its changes held for your approval. Its key is its login: whoever has the key acts as the agent, so keep it private. Step-by-step guides for Claude, ChatGPT and Muse (Meta AI) are on the Learn page.</span></div>
+      <div className="time-row">
+        <input className="plain-select" placeholder="Agent name, like David's Claude" value={name} onChange={e => setName(e.target.value)} />
+        <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Muse (Meta AI)</option><option value="other">Other</option></select>
+        <button className="btn primary" disabled={!name.trim()} onClick={async () => { try { await api('/agents', {method: 'POST', body: {name, provider}}); setName(''); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><Plus size={13} /> Add agent</button>
+      </div>
+      {list.map(a => (
+        <div key={a.id} className="agent-card">
+          <div className="time-row"><b className="grow">{a.name}</b><span className="tag">{a.settings.provider}</span>
+            <button className="btn small" onClick={async () => { try { const r = await api<{token: string; mcpUrl: string}>(`/agents/${a.id}/token`, {method: 'POST', body: {name: 'Connector'}}); setKey({agent: a.id, url: r.mcpUrl, token: r.token}); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><KeyRound size={12} /> Get connection key</button>
+          </div>
+          {key?.agent === a.id && <div className="g-out small">
+            <b>Shown once. Keep it private. It is this agent's login; anyone with it acts as {a.name}.</b>
+            <ConnectSteps provider={a.settings.provider} url={key.url} prompt={RUN_PROMPT(a.name)} />
+            <div className="muted">Run it {a.settings.checkFrequency}. Lost the key? Get a new one; revoke old ones under Tokens.</div>
+          </div>}
+          <div className="agent-grid small">
+            <label>Changes it makes <select className="plain-select" value={a.settings.writePolicy} onChange={e => save(a, {writePolicy: e.target.value as AgentSettings['writePolicy']})}><option value="review">Wait for my approval</option><option value="direct">Apply right away</option></select></label>
+            <label>Work it may take <select className="plain-select" value={a.settings.workTypes} onChange={e => save(a, {workTypes: e.target.value as AgentSettings['workTypes']})}><option value="ai+either">Marked AI or Either</option><option value="ai">Marked AI only</option></select></label>
+            <label><input type="checkbox" checked={a.settings.watchAssignments} onChange={e => save(a, {watchAssignments: e.target.checked})} /> Tell it when I get new tasks</label>
+            <label>Most open claims <input className="plain-input" type="number" min={0} max={100} style={{width: 60}} value={a.settings.maxClaims} onChange={e => save(a, {maxClaims: Number(e.target.value)})} /></label>
+            <label>Checks for work <input className="plain-input" value={a.settings.checkFrequency} onChange={e => setList(list.map(x => x.id === a.id ? {...x, settings: {...x.settings, checkFrequency: e.target.value}} : x))} onBlur={e => save(a, {checkFrequency: e.target.value})} /></label>
+            <label>Approved AI SOPs (no approval needed) <input className="plain-input" placeholder="SOP-07.26, SOP-FIN.1" defaultValue={a.settings.autoApprove.join(', ')} onBlur={e => save(a, {autoApprove: e.target.value.split(/[,\s]+/).filter(Boolean)})} /></label>
+            <label>Webhook when I get new tasks <input className="plain-input" placeholder="https://... (Zapier, n8n, a Claude trigger)" defaultValue={a.settings.webhook ?? ''} onBlur={e => save(a, {webhook: e.target.value.trim() || null})} /></label>
+            <div>Spaces it works in: <label><input type="checkbox" checked={!a.settings.spaces} onChange={e => save(a, {spaces: e.target.checked ? null : []})} /> All</label>
+              {a.settings.spaces && projects.map(p => <label key={p.id}><input type="checkbox" checked={a.settings.spaces!.includes(p.id)} onChange={e => save(a, {spaces: e.target.checked ? [...a.settings.spaces!, p.id] : a.settings.spaces!.filter(x => x !== p.id)})} /> {p.name}</label>)}</div>
+          </div>
+        </div>
+      ))}
+      {msg && <div className="small">{msg}</div>}
     </section>
   );
 }

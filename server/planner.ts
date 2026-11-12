@@ -13,6 +13,7 @@ import {Invalid} from './errors.ts';
 import type {Item, ItemPatch} from '../src/types.ts';
 import type {Tasks} from './service.ts';
 import {addUnit, daysBetween, parseDay} from '../src/dates.ts';
+import {busyHours} from './events.ts';
 
 export type Person = {id: string; name: string; weeklyHours: number; skill: string; rate: number; start: string | null; end: string | null; plannedHire: boolean; active: boolean};
 
@@ -34,7 +35,7 @@ const median = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); retu
 const leafOpen = (tasks: Tasks, projectId?: string) => {
   const all = tasks.listItems({projectId});
   const parents = new Set(all.map(i => i.parentId).filter(Boolean));
-  return {all, parents, open: all.filter(i => !i.completed && !parents.has(i.id))};
+  return {all, parents, open: all.filter(i => !i.completed && !i.recur?.paused && !i.recur?.waiting && !i.fields.archived && !(typeof i.fields.snooze === 'string' && i.fields.snooze > tasks.today()) && !parents.has(i.id))};
 };
 
 export function estimateMissing(tasks: Tasks, projectId?: string) {
@@ -68,7 +69,10 @@ export function replan(tasks: Tasks, opts: {projectId?: string; reassign?: boole
   const byId = new Map(items.map(i => [i.id, i]));
   // Capacity left per person per day.
   const load = new Map<string, Map<string, number>>();
-  const capOn = (p: Person, d: string) => (!weekday(d) || (p.start && d < p.start) || (p.end && d > p.end)) ? 0 : p.weeklyHours / 5;
+  // Meetings (and time-blocks for other work) take hours out of each day.
+  let meetings = new Map<string, Map<string, number>>();
+  try { meetings = busyHours(tasks, today, addUnit(today, 365, 'day')); } catch { /* no events table in old data */ }
+  const capOn = (p: Person, d: string) => (!weekday(d) || (p.start && d < p.start) || (p.end && d > p.end)) ? 0 : Math.max(0, p.weeklyHours / 5 - (meetings.get(p.id)?.get(d) ?? 0));
   const left = (p: Person, d: string) => capOn(p, d) - (load.get(p.id)?.get(d) ?? 0);
   // Order: dependencies first, then earliest due, then priority.
   const order: Item[] = [], seen = new Set<string>();

@@ -9,6 +9,8 @@ import type {Item} from './types.ts';
 import {addDays, daysBetween, parseDay} from './dates.ts';
 import {Avatar} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {upcoming} from './recur.ts';
+import {sortItems, sortsOf} from './Sorting.tsx';
 
 const isWeekend = (d: string) => [0, 6].includes(parseDay(d).getDay());
 
@@ -35,15 +37,22 @@ export function WorkloadView({store, project, items, allItems, open, config, set
     const each = (personId ? hoursFor(i, personId) : i.estimate ?? 0) / span.length;
     return new Map(span.map(d => [d, each]));
   };
+  // Routines count on every date they come back inside the window (unless Hide repeats), not just the live copy.
+  const live = (i: Item) => !!i.recur && !i.recur.paused && !i.recur.waiting && !i.recur.spawned && !i.completed && !config.hideRepeats;
+  const repeats = (i: Item) => live(i) ? upcoming(i.recur!, i.due!, Math.max(0, Math.min(400, daysBetween(i.due!, days[days.length - 1]) + 1))).filter(d => d <= days[days.length - 1]) : [];
   const rows = useMemo(() => {
     const people = [...store.people.map(p => ({id: p.id, person: p})), {id: '', person: undefined}];
     return people.map(r => {
       const mine = open_.filter(i => r.id ? i.assignees.includes(r.id) : !i.assignees.length);
       const hours = new Map<string, number>(), count = new Map<string, number>();
-      for (const i of mine) for (const [d, h] of spread(i, r.id)) { hours.set(d, (hours.get(d) ?? 0) + h); count.set(d, (count.get(d) ?? 0) + 1); }
+      for (const i of mine) {
+        for (const [d, h] of spread(i, r.id)) { hours.set(d, (hours.get(d) ?? 0) + h); count.set(d, (count.get(d) ?? 0) + 1); }
+        const each = r.id ? hoursFor(i, r.id) : i.estimate ?? 0;
+        for (const d of repeats(i)) if (d >= days[0]) { hours.set(d, (hours.get(d) ?? 0) + each); count.set(d, (count.get(d) ?? 0) + 1); }
+      }
       return {...r, items: mine, hours, count};
     }).filter(r => r.id || r.items.length);
-  }, [open_, store.people]);
+  }, [open_, store.people, from, weeks, config.hideRepeats]);
 
   const level = (h: number, cap: number) => h === 0 ? '' : h <= cap * 0.8 ? 'ok' : h <= cap ? 'full' : 'over';
   const W = weeks === 6 ? 34 : weeks === 1 ? 110 : 64;
@@ -88,7 +97,7 @@ export function WorkloadView({store, project, items, allItems, open, config, set
                 </div>;
               })}
               <div className={'wl-cell total ' + (total > cap ? 'over' : '')}>{Math.round(total)}h<span className="muted small"> / {cap}</span></div>
-              {isOpen && r.items.sort((a, b) => (a.start ?? a.due!).localeCompare(b.start ?? b.due!)).map(i => {
+              {isOpen && (sortsOf(config).length ? sortItems(r.items, sortsOf(config), project, store) : r.items.sort((a, b) => (a.start ?? a.due!).localeCompare(b.start ?? b.due!))).map(i => {
                 const s = i.start && i.start <= i.due! ? i.start : i.due!;
                 const a = Math.max(0, daysBetween(from, s)), b = Math.min(days.length - 1, daysBetween(from, i.due!));
                 return (
@@ -98,6 +107,7 @@ export function WorkloadView({store, project, items, allItems, open, config, set
                       {b >= 0 && a < days.length && <div className="wl-bar" draggable onDragStart={() => setDrag(i.id)} onDragEnd={() => { setDrag(null); setOver(null); }} onClick={() => open(i.id)}
                         style={{left: a * W, width: (b - a + 1) * W - 4}} title={`${i.title}: ${i.estimate ?? 0}h, drag onto a person to reassign`}>
                         {i.estimate ? `${i.estimate}h` : 'no estimate'}</div>}
+                      {repeats(i).map(d => { const n = daysBetween(from, d); return n >= 0 && n < days.length ? <div key={d} className="wl-bar ghost" onClick={() => open(i.id)} style={{left: n * W, width: W - 4}} title={`${i.title} repeats on ${d}`}>{i.estimate ? `${i.estimate}h` : ''}</div> : null; })}
                     </div>
                     <div />
                   </div>
@@ -108,7 +118,7 @@ export function WorkloadView({store, project, items, allItems, open, config, set
         })}
       </div>
       <div className="muted small" style={{padding: '10px 16px'}}>
-        Estimates are spread over weekdays from start to due; shared items use each person's own hours, or an even split. Parents with subitems are skipped so hours are not counted twice. Items without an estimate count as 0 hours. Green is under 80% of capacity, amber is near full, red is over. {open_.filter(i => !i.estimate).length} open items have no estimate.
+        Estimates are spread over weekdays from start to due; shared items use each person's own hours, or an even split. Parents with subitems are skipped so hours are not counted twice. Items without an estimate count as 0 hours. Routines count on each date they repeat (faded bars). Green is under 80% of capacity, amber is near full, red is over. {open_.filter(i => !i.estimate).length} open items have no estimate.
       </div>
     </div>
   );

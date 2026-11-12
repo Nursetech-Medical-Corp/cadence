@@ -68,6 +68,9 @@ export function checkRecur(r: unknown) {
   if (x.weekdays !== undefined && (!Array.isArray(x.weekdays) || x.weekdays.some(d => !Number.isInteger(d) || d < 0 || d > 6))) throw new Invalid('Repeat weekdays must be numbers 0 (Sunday) to 6');
   if (x.count !== undefined && x.count !== null && (!Number.isInteger(x.count) || x.count < 1)) throw new Invalid('Repeat count must be 1 or more');
   if (x.until !== undefined && x.until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(x.until))) throw new Invalid('Repeat until must be a date like 2026-12-31');
+  if (x.paused !== undefined && typeof x.paused !== 'boolean') throw new Invalid('Repeat paused must be true or false');
+  if (x.waiting !== undefined && typeof x.waiting !== 'boolean') throw new Invalid('Repeat waiting must be true or false');
+  if (x.slot !== undefined && x.slot !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(x.slot))) throw new Invalid('Repeat slot must be a date like 2026-12-31');
 }
 export const isColor = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c);
 /** Field values must match their column kind, so bad API input cannot break views. */
@@ -165,7 +168,23 @@ export class Tasks {
 
   // People. No passwords yet: the UI picks who you are. Real auth is a later iteration.
   listPeople(): Person[] {
-    return this.db.prepare('select * from people order by coalesce(sort, 1e9), name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai'}));
+    return this.db.prepare('select * from people order by coalesce(sort, 1e9), name').all().map(r => ({id: r.id as string, name: r.name as string, email: (r.email as string) ?? null, color: r.color as string, kind: ((r.kind as string) === 'ai' ? 'ai' : 'human') as 'human' | 'ai', owner: (r.owner as string) ?? null}));
+  }
+  /** An AI agent is never the only one on a task: assigning an agent adds the person it belongs to. */
+  withOwners(assignees: string[]) {
+    if (!assignees.length) return assignees;
+    const rows = this.db.prepare(`select owner from people where kind = 'ai' and owner is not null and id in (${assignees.map(() => '?').join(',')})`).all(...assignees) as {owner: string}[];
+    const add = rows.map(r => r.owner).filter(o => !assignees.includes(o) && this.db.prepare('select 1 from people where id = ?').get(o));
+    return add.length ? [...assignees, ...new Set(add)] : assignees;
+  }
+  /** Auto-job routines are run by AI agents: every person on one must be the owner of an assigned agent (they review). */
+  checkAutoJob(tags: string[], assignees: string[]) {
+    if (!tags.includes('auto-job') || !assignees.length) return;
+    const people = new Map(this.listPeople().map(p => [p.id, p]));
+    const agents = assignees.filter(a => people.get(a)?.kind === 'ai');
+    const owners = new Set(agents.map(a => people.get(a)?.owner).filter(Boolean));
+    const others = assignees.filter(a => people.get(a)?.kind !== 'ai' && !owners.has(a));
+    if (!agents.length || others.length) throw new Invalid('Auto-job routines are run by an AI agent. Assign an AI agent (its owner is added to review), or change the mode to hybrid or manual to give it to a person.');
   }
   /** Puts people in the given order (pickers and sorting by assignee follow it). */
   reorderPeople(ids: string[]) {
@@ -224,10 +243,35 @@ export class Tasks {
       .forEach(([n, k], i) => this.createView({projectId: p.id, name: n, kind: k, config: k === 'gantt' ? {zoom: 'week'} : {}, sort: i}));
     return this.updateProject(p.id, {sort: min - 1});
   }
+  /** Built-in spaces every workspace has: Routines (every repeating item) and Archive and later (parked and snoozed items).
+   *  They work like rollups with the usual views, plus a Routines view. Made once; renaming is fine, deleting is not. */
+  ensureSystemSpaces() {
+    const made: Project[] = [];
+    const spaces: [NonNullable<NonNullable<ProjectSettings['rollup']>['scope']>, string, string, string, [string, ViewKind, ViewConfig?][]][] = [
+      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}]]],
+      ['parked', 'Archive and later', 'ARC', 'lucide:Archive', [['Table', 'table'], ['List', 'list'], ['Board', 'board', {groupBy: 'assignee'}]]],
+    ];
+    for (const [scope, name, key0, icon, views] of spaces) {
+      if (this.listProjects().some(p => p.settings.rollup?.scope === scope)) continue;
+      const used = new Set(this.listProjects().flatMap(p => [p.key.toUpperCase(), ...(p.settings.oldKeys ?? [])]));
+      let key = key0; for (let n = 2; used.has(key); n++) key = key0 + n;
+      const max = Math.max(0, ...this.listProjects().map(p => p.sort));
+      const p = this.createProject({name, key, settings: {rollup: {include: null, scope}, icon}, noViews: true});
+      views.forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config: config ?? {}, sort: i}));
+      made.push(this.updateProject(p.id, {sort: max + 1}));
+    }
+    return made;
+  }
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
-    if (patch.key !== undefined && this.listProjects().some(x => x.id !== pid && x.key.toUpperCase() === String(p.key).toUpperCase())) throw new Invalid(`Key ${p.key} is already used by another space`);
+    if (patch.key !== undefined) {
+      p.key = String(p.key).toUpperCase();
+      if (!/^[A-Z][A-Z0-9]{1,9}$/.test(p.key)) throw new Invalid('A space key is 2 to 10 letters or digits, starting with a letter, like GEN');
+      if (this.listProjects().some(x => x.id !== pid && (x.key.toUpperCase() === p.key || (x.settings.oldKeys ?? []).includes(p.key)))) throw new Invalid(`Key ${p.key} is already used by another space`);
+      // Old keys keep working in links and searches (NT-12 still finds GEN-12).
+      if (p.key !== cur.key) p.settings = {...p.settings, oldKeys: [...new Set([...((cur.settings.oldKeys ?? [])), cur.key])].filter(k => k !== p.key)};
+    }
     if (patch.name !== undefined && (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200)) throw new Invalid('Space names need 1 to 200 characters');
     if (patch.name !== undefined) p.name = p.name.trim();
     if (patch.sort !== undefined && !Number.isFinite(p.sort)) throw new Invalid('Sort must be a number');
@@ -243,7 +287,7 @@ export class Tasks {
     return p;
   }
   deleteProject(pid: string) {
-    this.project(pid);
+    if (this.project(pid).settings.rollup?.scope) throw new Invalid('Routines and Archive and later are built in and always there. Rename them if you like.');
     this.db.prepare('delete from projects where id = ?').run(pid);
     this.emit({kind: 'project-deleted', id: pid});
   }
@@ -257,7 +301,11 @@ export class Tasks {
     if (q.parentId !== undefined) { where.push(q.parentId === null ? 'parent_id is null' : 'parent_id = ?'); if (q.parentId !== null) args.push(q.parentId); }
     if (q.text) { where.push('(title like ? or body like ?)'); args.push(`%${q.text}%`, `%${q.text}%`); }
     if (q.dueBefore) { where.push('due is not null and due <= ?'); args.push(q.dueBefore); }
-    if (q.open) where.push('completed is null');
+    if (q.open) {
+      // Open work: not done, not a paused or waiting routine, not archived, not snoozed past today.
+      where.push("completed is null and coalesce(json_extract(recur, '$.paused'), 0) = 0 and coalesce(json_extract(recur, '$.waiting'), 0) = 0 and json_extract(fields, '$.archived') is null and coalesce(json_extract(fields, '$.snooze'), '') <= ?");
+      args.push(this.today());
+    }
     const sql = `select * from items ${where.length ? 'where ' + where.join(' and ') : ''} order by sort limit ${Math.min(q.limit ?? 5000, 5000)}`;
     return this.db.prepare(sql).all(...args).map(toItem);
   }
@@ -271,13 +319,14 @@ export class Tasks {
     if (typeof ref !== 'string' || !ref) throw new NotFound('Item not found');
     const m = /^([a-z]+)-(\d+)$/i.exec(ref);
     if (m) {
-      const r = this.db.prepare('select i.* from items i join projects p on p.id = i.project_id where upper(p.key) = ? and i.number = ?').get(m[1].toUpperCase(), Number(m[2]));
+      const r = this.db.prepare('select i.* from items i join projects p on p.id = i.project_id where upper(p.key) = ? and i.number = ?').get(m[1].toUpperCase(), Number(m[2]))
+        ?? this.db.prepare("select i.* from items i join projects p on p.id = i.project_id where exists (select 1 from json_each(json_extract(p.settings, '$.oldKeys')) where upper(value) = ?) and i.number = ?").get(m[1].toUpperCase(), Number(m[2]));
       if (r) return toItem(r);
     }
     return this.item(ref);
   }
 
-  createItem(input: ItemPatch & {projectId: string; title: string}, actor: string | null = null): Item {
+  createItem(input: ItemPatch & {projectId: string; title: string}, actor: string | null = null, opts: {system?: boolean} = {}): Item {
     const p = this.project(input.projectId);
     validatePatch(input, new Set(this.listPeople().map(x => x.id)), p.types);
     if (input.start && input.due && input.start > input.due) throw new Invalid('Start must be on or before due');
@@ -297,7 +346,7 @@ export class Tasks {
     const item: Item = {
       id: id(), projectId: p.id, parentId: input.parentId ?? null, number: (max.n as number) + 1,
       type: input.type ?? (p.types.includes('Task') ? 'Task' : p.types[0] ?? 'Task'), title, body: input.body ?? '', status,
-      priority: input.priority ?? 0, assignees: input.assignees ?? [], start: input.start ?? null, due: input.due ?? null,
+      priority: input.priority ?? 0, assignees: this.withOwners(input.assignees ?? []), start: input.start ?? null, due: input.due ?? null,
       estimate: input.estimate ?? null, tags: input.tags ?? [], sprint: input.sprint ?? null,
       sort: input.sort ?? (max.s as number) + 1, recur: input.recur ?? null, fields: input.fields ?? {},
       createdBy: actor, created: t, updated: t, deps: input.deps ?? [],
@@ -307,6 +356,7 @@ export class Tasks {
     if (item.parentId) this.item(item.parentId);
     if (item.sprint) this.sprint(item.sprint);
     for (const d of item.deps) this.item(d);
+    if (!opts.system) this.checkAutoJob(item.tags, item.assignees);
     this.db.prepare(`insert into items (id,project_id,parent_id,number,type,title,body,status,priority,assignees,start,due,estimate,tags,sprint,sort,recur,fields,created_by,created,updated,completed,deps)
       values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       item.id, item.projectId, item.parentId, item.number, item.type, item.title, item.body, item.status, item.priority,
@@ -316,6 +366,7 @@ export class Tasks {
     this.log('create', actor, item, null, item);
     this.fire({kind: 'created'}, item);
     for (const a of item.assignees) this.notify(a, actor, item.id, 'assigned', `assigned you ${p.key}-${item.number}: ${item.title}`);
+    this.assigned(item.assignees, actor, item);
     return item;
   }
 
@@ -331,6 +382,19 @@ export class Tasks {
     }, actor);
   }
 
+  /** A person can set when done work was finished (to fix work marked done late). Date-only values mean midday UTC. */
+  private checkCompleted(v: unknown, isDone: boolean, created: string, actor: string | null) {
+    if (this.isAi(actor)) throw new Invalid('AI agents cannot change when work was completed. A person does that.');
+    if (v === null) { if (isDone) throw new Invalid('Done work needs a completed date. Reopen it to clear the date.'); return null; }
+    if (!isDone) throw new Invalid('Only done work has a completed date. Mark it done first.');
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/.test(v)) throw new Invalid('Completed must be a date like 2026-11-30 or a time like 2026-11-30T15:00:00Z');
+    // A bare date means midday, or now when that date is today and midday has not come yet.
+    const t = v.length === 10 ? new Date(v === new Date().toISOString().slice(0, 10) ? Math.min(Date.parse(v + 'T12:00:00Z'), Date.now()) : Date.parse(v + 'T12:00:00Z')) : new Date(v);
+    if (Number.isNaN(t.getTime())) throw new Invalid('Completed must be a real date');
+    if (t.getTime() > Date.now() + 60_000) throw new Invalid('Completed cannot be in the future');
+    if (t.toISOString().slice(0, 10) < created.slice(0, 10)) throw new Invalid('Completed cannot be before the item was created');
+    return t.toISOString();
+  }
   private isAi(actor: string | null) { return !!actor && (this.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai'; }
   /** opts.system: the review tools changing review state. opts.keep: change dates without moving followers. */
   updateItem(iid: string, patch: ItemPatch, actor: string | null = null, opts: {system?: boolean; keep?: boolean} = {}): Item {
@@ -352,6 +416,8 @@ export class Tasks {
     validatePatch(patch, new Set(this.listPeople().map(x => x.id)), p.types);
     if (patch.fields) checkFieldValues(patch.fields, p.fields, iid);
     next.assignees = [...new Set(next.assignees)];
+    if (patch.assignees !== undefined) next.assignees = this.withOwners(next.assignees);
+    if (patch.assignees !== undefined || patch.tags !== undefined) this.checkAutoJob(next.tags, next.assignees);
     if ((patch.start !== undefined || patch.due !== undefined) && next.start && next.due && next.start > next.due) throw new Invalid('Start must be on or before due');
     const wasDone = before.completed !== null;
     const isDone = p.statuses.find(s => s.id === next.status)?.category === 'done';
@@ -359,6 +425,7 @@ export class Tasks {
     if (isDone && !wasDone && actor && !p.settings.aiMayComplete && (this.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai')
       throw new Invalid('AI agents cannot mark work done here. Submit it for review (submit_work) and a person will approve it.');
     next.completed = isDone ? (before.completed ?? now()) : null;
+    if (patch.completed !== undefined) next.completed = this.checkCompleted(patch.completed, isDone, next.created, actor);
     // Per-person hours follow the assignees (removed people drop out) and set the estimate.
     Object.assign(next, syncHours(next));
 
@@ -376,9 +443,11 @@ export class Tasks {
     const ref = `${p.key}-${next.number}`;
     for (const a of next.assignees.filter(a => !before.assignees.includes(a)))
       this.notify(a, actor, iid, 'assigned', `assigned you ${ref}: ${next.title}`);
+    this.assigned(next.assignees.filter(a => !before.assignees.includes(a)), actor, next);
     if (!wasDone && isDone) {
       for (const who of this.watchers(next)) this.notify(who, actor, iid, 'completed', `completed ${ref}: ${next.title}`);
       this.spawnRecurrence(next, p, actor);
+      this.releaseWaiting(iid, actor);
     }
     if (before.status !== next.status) this.fire({kind: 'status', to: next.status}, this.item(iid));
     if (!wasDone && isDone) this.fire({kind: 'completed'}, this.item(iid));
@@ -487,13 +556,14 @@ export class Tasks {
   private spawnRecurrence(done: Item, p: Project, actor: string | null) {
     const r = done.recur;
     if (!r || r.spawned) return;
-    const base = r.mode === 'completion' || !done.due ? this.today() : done.due;
-    const due = nextOccurrence(r, base, done.due ?? base);
+    const sched = r.slot ?? done.due;
+    const base = r.mode === 'completion' || !sched ? this.today() : sched;
+    const due = nextOccurrence(r, base, sched ?? base);
     if (r.until && due > r.until) return;
     if (r.count != null && r.count <= 0) return;
     const start = done.start && done.due ? addUnit(done.start, daysBetween(done.due, due), 'day') : null;
-    const {spawned: _s, ...rule} = r;
-    void _s;
+    const {spawned: _s, slot: _sl, waiting: _w, ...rule} = r;
+    void _s; void _sl; void _w;
     const nextRule: Recur | null = r.count != null ? (r.count - 1 > 0 ? {...rule, count: r.count - 1} : null) : rule;
     const todo = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
     if (r.reopen) {
@@ -507,11 +577,95 @@ export class Tasks {
       projectId: p.id, parentId: done.parentId, type: done.type, title: done.title, body: done.body,
       priority: done.priority, assignees: done.assignees, tags: done.tags, estimate: done.estimate,
       fields: cleanFields(done.fields), sprint: done.sprint, due, start, recur: nextRule,
-    }, actor);
+    }, actor, {system: true});
     if (r.copySubitems) for (const c of this.listItems({parentId: done.id}))
-      this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor);
+      this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor, {system: true});
     this.db.prepare('update items set recur = ? where id = ?').run(JSON.stringify({...r, spawned: next.id}), done.id);
     this.emit({kind: 'item', item: this.item(done.id)});
+  }
+
+  /** Routines: open items that repeat, paused ones included. One live copy each; the next is made when it is finished. */
+  listRoutines(): Item[] {
+    return this.listItems({}).filter(i => i.recur && !i.recur.spawned && !i.completed);
+  }
+  /**
+   * Turn a routine on or off without losing its history.
+   * skip: move this copy to the next date. pause: hide it from views, sprints and plans. resume: show it again on
+   * its next date from today. end: stop repeating; this copy stays as a normal task.
+   */
+  routine(ref: string, action: 'skip' | 'pause' | 'resume' | 'end' | 'delay' | 'wait', actor: string | null = null, opts: {to?: string; on?: string[]} = {}): Item {
+    const it = this.findItem(ref), r = it.recur;
+    if (!r || r.spawned || it.completed) throw new Invalid(`${it.title} is not an open repeating item`);
+    const shift = (due: string) => it.start && it.due ? addUnit(it.start, daysBetween(it.due, due), 'day') : it.start;
+    const anchor = it.due ?? this.today();
+    if (action === 'pause') return this.updateItem(it.id, {recur: {...r, paused: true}, sprint: null}, actor);
+    if (action === 'delay') {
+      // Push only this copy. The next one is still counted from the date this one was scheduled for.
+      if (!opts.to || !/^\d{4}-\d{2}-\d{2}$/.test(opts.to)) throw new Invalid('Delay needs a date like 2026-12-04');
+      const slot = r.slot ?? it.due;
+      return this.updateItem(it.id, {due: opts.to, start: shift(opts.to), recur: {...r, slot: opts.to === slot ? null : slot}}, actor, {keep: true});
+    }
+    if (action === 'wait') {
+      // Start only after other work is done (a hire, a W-2 setup). Hidden until then; starts by itself.
+      const on = (opts.on ?? []).map(x => this.findItem(x).id);
+      if (!on.length) throw new Invalid('Wait needs the items it waits on');
+      const open = on.filter(d => !this.item(d).completed);
+      const deps = [...new Set([...it.deps, ...on])];
+      return this.updateItem(it.id, {deps, recur: open.length ? {...r, waiting: true} : {...r, waiting: false}, sprint: open.length ? null : it.sprint}, actor, {keep: true});
+    }
+    if (action === 'end') return this.updateItem(it.id, {recur: null}, actor);
+    if (action === 'resume') {
+      const {paused: _p, waiting: _w, slot: _sl, ...rule} = r; void _p; void _w; void _sl;
+      let due = it.due;
+      for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, anchor);
+      if (due && rule.until && due > rule.until) return this.updateItem(it.id, {recur: null, due}, actor);
+      return this.updateItem(it.id, {recur: rule, due, start: due ? shift(due) : it.start}, actor);
+    }
+    if (action !== 'skip') throw new Invalid('Action must be skip, pause, resume or end');
+    const sched = r.slot ?? anchor;
+    let due = nextOccurrence(r, sched, sched);
+    for (let n = 0; due <= anchor && n < 500; n++) due = nextOccurrence(r, due, sched);
+    if (r.until && due > r.until) throw new Invalid('That was the last one. End the routine instead.');
+    if (r.count != null && r.count <= 1) throw new Invalid('That was the last one. End the routine instead.');
+    const {slot: _sl, ...kept} = r; void _sl;
+    return this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...kept, count: r.count - 1} : kept}, actor);
+  }
+  /** When work finishes, start the routines that were waiting only on it. Their first date is the next one from today. */
+  private releaseWaiting(doneId: string, actor: string | null) {
+    const waiting = this.db.prepare("select id from items where completed is null and json_extract(recur, '$.waiting') = 1 and exists (select 1 from json_each(deps) where value = ?)").all(doneId) as {id: string}[];
+    for (const {id: wid} of waiting) {
+      const w = this.item(wid);
+      if (w.deps.some(d => { try { return !this.item(d).completed; } catch { return false; } })) continue;
+      const {waiting: _w, ...rule} = w.recur!; void _w;
+      let due = w.due;
+      for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, w.due!);
+      this.updateItem(wid, {recur: rule, due: due ?? this.today()}, actor, {system: true, keep: true});
+      for (const a of w.assignees) this.notify(a, actor, wid, 'assigned', `routine started (what it waited on is done): ${w.title}`);
+    }
+  }
+
+  // Archive and snooze: park ideas and rejected work out of every list without deleting it.
+  archiveItem(ref: string, opts: {reason?: string; kind?: 'parked' | 'rejected' | 'idea'} = {}, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    const archived = {on: this.today(), by: actor, kind: opts.kind ?? 'parked', reason: (opts.reason ?? '').slice(0, 1000)};
+    return this.updateItem(it.id, {fields: {...it.fields, archived}, sprint: null}, actor, {keep: true});
+  }
+  restoreItem(ref: string, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    const {archived: _a, snooze: _s, ...fields} = it.fields; void _a; void _s;
+    return this.updateItem(it.id, {fields}, actor, {keep: true});
+  }
+  /** Hide until a date, then it comes back to its list. Null brings it back now. */
+  snoozeItem(ref: string, until: string | null, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    if (until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Invalid('Snooze needs a date like 2027-03-01');
+    const {snooze: _s, ...rest} = it.fields; void _s;
+    return this.updateItem(it.id, {fields: until ? {...rest, snooze: until} : rest, sprint: until ? null : it.sprint}, actor, {keep: true});
+  }
+  /** Archived and snoozed items, newest first. */
+  listParked(): Item[] {
+    return this.listItems({}).filter(i => i.fields.archived || (typeof i.fields.snooze === 'string' && i.fields.snooze > this.today()))
+      .sort((a, b) => String((b.fields.archived as {on?: string})?.on ?? b.fields.snooze).localeCompare(String((a.fields.archived as {on?: string})?.on ?? a.fields.snooze)));
   }
 
   // Comments, with @mentions by first name.
@@ -653,6 +807,10 @@ export class Tasks {
   }
 
   // Notifications
+  private assignListeners = new Set<(a: {person: string; actor: string | null; item: Item}) => void>();
+  /** Every time someone is added to an item's assignees, including when they assign themselves. */
+  onAssign(fn: (a: {person: string; actor: string | null; item: Item}) => void) { this.assignListeners.add(fn); return () => this.assignListeners.delete(fn); }
+  private assigned(people: string[], actor: string | null, item: Item) { for (const person of people) for (const fn of this.assignListeners) { try { fn({person, actor, item}); } catch (e) { console.error('Assign hook failed', e); } } }
   private notifyListeners = new Set<(n: {person: string; actor: string | null; itemId: string | null; kind: string; text: string}) => void>();
   onNotify(fn: (n: {person: string; actor: string | null; itemId: string | null; kind: string; text: string}) => void) { this.notifyListeners.add(fn); return () => this.notifyListeners.delete(fn); }
   private notify(person: string, actor: string | null, itemId: string | null, kind: string, text: string) {
@@ -1094,7 +1252,8 @@ export class Tasks {
     const out: BurnPoint[] = [];
     for (let n = 0; n <= days; n++) {
       const date = addUnit(s.start, n, 'day');
-      const doneBy = items.filter(i => i.completed && iso(new Date(i.completed)) <= date);
+      // A completion stamped after "today" (clock or time-zone skew) counts as today.
+      const doneBy = items.filter(i => i.completed && [iso(new Date(i.completed)), today].sort()[0] <= date);
       const future = date > today;
       out.push({
         date, done: doneBy.length,
@@ -1283,7 +1442,7 @@ export class Tasks {
     const state = new Map<string, string>(); // item -> status id
     let k = 0;
     for (let d = start; d <= today; d = addUnit(d, 1, 'day')) {
-      for (; k < acts.length && acts[k].at <= d; k++) {
+      for (; k < acts.length && (acts[k].at <= d || d === today); k++) {
         const a = acts[k];
         if (a.kind === 'create' && a.after) state.set(a.item, a.after.status as string);
         else if (a.kind === 'update' && a.after && 'status' in a.after) state.set(a.item, a.after.status as string);

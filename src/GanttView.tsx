@@ -6,8 +6,10 @@ import {ChevronDown, ChevronRight, Maximize2} from 'lucide-react';
 import type {Item} from './types.ts';
 import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {criticalPath} from './critical.ts';
+import {upcoming} from './recur.ts';
 import {InlineText, PeoplePicker, TypeBadge} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {sortItems, sortsOf} from './Sorting.tsx';
 
 const PX = {day: 36, week: 16, month: 5} as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -41,7 +43,9 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
       const parent = i.parentId && shown.has(i.parentId) ? i.parentId : null;
       kids.set(parent, [...(kids.get(parent) ?? []), i]);
     }
-    for (const l of kids.values()) l.sort((a, b) => a.sort - b.sort);
+    // Sort picks the order of rows within each level (priority, due, status...); otherwise your manual order.
+    const rules = sortsOf(config);
+    for (const [k, l] of kids) kids.set(k, rules.length ? sortItems(l, rules, project, store) : l.sort((a, b) => a.sort - b.sort));
     const out: {item: Item; depth: number; hasKids: boolean}[] = [];
     const walk = (p: string | null, depth: number) => (kids.get(p) ?? []).forEach(i => {
       out.push({item: i, depth, hasKids: kids.has(i.id)});
@@ -49,7 +53,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
     });
     walk(null, 0);
     return {list: out, kids};
-  }, [items, allItems, collapsed]);
+  }, [items, allItems, collapsed, JSON.stringify(sortsOf(config))]);
 
   // Effective dates, including live drag preview.
   const span = (i: Item): [string, string] | null => {
@@ -90,6 +94,13 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
     return addDays(range.start, Math.floor((clientX - r.left) / px));
   };
   const width = range.days * px;
+  // Routines: faded copies on their next dates. Only the live copy is a real item; these are previews.
+  const ghosts = (i: Item, s: [string, string]) => {
+    const r = i.recur;
+    if (!r || r.paused || r.waiting || r.spawned || i.completed || !i.due) return [];
+    const end = addDays(range.start, range.days), len = daysBetween(s[0], s[1]);
+    return upcoming(r, i.due, 120).filter(d => d <= end).map(d => [addDays(d, -len), d] as [string, string]);
+  };
 
   useLayoutEffect(() => {
     const lane = lanes.current?.querySelector('.g-lane');
@@ -302,6 +313,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
                       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); setDrag({mode: 'link', id: i.id, x: e.clientX, y: e.clientY, target: null}); }} />
                   </div>
                 )}
+                {s && !draggingThis && ghosts(i, s).map(([g0, g1]) => <div key={g1} className={'bar gantt-ghost' + (!i.start ? ' milestone' : '')} style={{left: x(g0), width: Math.max(px, x(addDays(g1, 1)) - x(g0)), '--c': color(i)} as React.CSSProperties} />)}
                 {/* A parent's own dates are its plan. When subitems run outside it, show the overrun instead of hiding it; click to stretch the plan. */}
                 {s && sum && !draggingThis && sum[1] > s[1] && <div className="overrun" style={{left: x(addDays(s[1], 1)), width: x(addDays(sum[1], 1)) - x(addDays(s[1], 1))}}
                   title={`Subitems run ${daysBetween(s[1], sum[1])} day(s) past this ${i.type}'s due date (${fmt(s[1])}). Click to move the due date to ${fmt(sum[1])}.`}

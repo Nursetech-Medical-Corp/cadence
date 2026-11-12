@@ -3,7 +3,8 @@ import {useState} from 'react';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {CardCover} from './FilesCell.tsx';
-import {GripVertical, Link2, Repeat} from 'lucide-react';
+import {GripVertical, Link2} from 'lucide-react';
+import {RoutineMark} from './RoutineControls.tsx';
 import type {Item, ItemPatch, Sprint} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {between, type Store} from './store.ts';
@@ -122,7 +123,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                     {groupBy !== 'status' && <StatusIcon status={project.statuses.find(s => s.id === i.status)} />}
                     {i.due && <span className={'small' + (i.due < store.today && !i.completed ? ' overdue' : ' muted')}>{i.due.slice(5).replace('-', '/')}</span>}
                     <span className="small"><EstimateText item={i} items={store.items} /></span>
-                    {i.recur && <Repeat size={12} className="muted" />}
+                    <RoutineMark item={i} />
                     {blocked && <span className="small overdue" title="Blocked by unfinished work"><Link2 size={12} /> blocked</span>}
                     {i.tags.map(t => <span key={t} className="tag">{t}</span>)}
                     <span className="spacer" />

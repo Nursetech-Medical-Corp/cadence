@@ -1,10 +1,14 @@
 // MCP server over stdio. Shares the SQLite file with the web app; the UI updates live.
 import {monday} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
+import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, listEvents, timeblockItem, updateEvent} from './events.ts';
+import {allBusy, flushGoogle} from './gcal.ts';
+import {agentInbox, applySuggestion, approvedSop, listProposals, needsReview, propose} from './agents.ts';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
 import {openDb} from './db.ts';
+import {listSopLinks, setSopLinks} from './sops.ts';
 import {personalAccess} from './auth.ts';
 import {Tasks} from './service.ts';
 import {readFileSync} from 'node:fs';
@@ -46,6 +50,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     fields: z.record(z.string(), z.unknown()).optional().describe('Custom field values by field id'),
     sprint: z.string().nullable().optional().describe('Sprint id or name, null for backlog'),
     blockedBy: z.array(z.string()).optional().describe('Item ids or keys that must finish first. Replaces the list.'),
+    completed: z.string().optional().describe('When done work was finished (YYYY-MM-DD or ISO time). People only, done items only.'),
   };
   const toPatch = (i: any) => {
     const {parent, assignees, sprint, blockedBy, ...rest} = i;
@@ -97,7 +102,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     + 'groupBy status|priority|assignee|type|sprint, swimlane, hidden [column ids], columns [{id, width}], calcs {columnId: sum|avg|count|min|max}, '
     + 'colors [{rule, color: #rrggbb}], hideDone, types [type names], text (search), zoom day|week|month, covers, locked, privateTo (your person id).';
   tool('list_views', 'List the views (tabs) of a project with their settings.', {project: z.string()}, true, i => tasks.listViews(projectId(i.project), actor));
-  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files']),
+  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files', 'routines']).describe('routines: the routine manager view; makes sense in the built-in Routines space'),
     config: z.record(z.string(), z.any()).optional()}, false, i => tasks.createView({projectId: projectId(i.project), name: i.name, kind: i.kind, config: i.config ?? {}}));
   tool('update_view', 'Change a view: rename it, or change its settings (merged into the current ones unless replace is true). Locked views must be unlocked first (config.locked false). ' + VIEW_CONFIG_DOC,
     {view: z.string().describe('View id'), name: z.string().optional(), config: z.record(z.string(), z.any()).optional(), replace: z.boolean().optional()}, false, i => {
@@ -141,14 +146,106 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
   tool('create_project', 'Create a space (project) with default statuses. personal: true makes it private to you until you share it (anyone can do this; shared spaces need an admin).', {name: z.string(), key: z.string().optional(), personal: z.boolean().optional()}, false,
     i => tasks.createProject({name: i.name, key: i.key, ...(i.personal && actor ? {settings: {access: personalAccess(actor)}} : {})}));
-  tool('update_project', 'Change project name, statuses, types or custom fields.', {
-    project: z.string(), name: z.string().optional(),
+  tool('update_project', 'Change project name, key (the item prefix, like GEN in GEN-12; old keys stop working), statuses, types or custom fields.', {
+    project: z.string(), name: z.string().optional(), key: z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/).optional(),
     statuses: z.array(z.object({id: z.string(), name: z.string(), category: z.enum(['todo', 'doing', 'done']), color: z.string()})).optional(),
     types: z.array(z.string()).optional(),
     fields: z.array(z.object({id: z.string(), name: z.string(), kind: z.enum(['text', 'number', 'select', 'multi', 'date', 'checkbox', 'person', 'url']), options: z.array(z.string()).optional()})).optional(),
   }, false, i => { const {project, ...rest} = i; return tasks.updateProject(projectId(project), rest); });
   tool('calendar_events', 'Events from the Google calendars this person connected (Team page, Google connections), between two dates. Use it to plan around meetings.', {from: z.string(), to: z.string()}, true,
     async i => { if (!actor) throw new Error('Run as a person to read their calendar'); return events(tasks.db, actor, i.from, i.to); });
+  // ---- Meetings and calendar events (synced with Google Calendar when the organizer connected one) ----
+  const seesProject = (pid: string) => { try { tasks.project(pid); return true; } catch { return false; } };
+  const isAiActor = () => !!actor && (tasks.db.prepare('select kind from people where id = ?').get(actor) as {kind?: string} | undefined)?.kind === 'ai';
+  const synced = async <T extends object>(x: T) => ({...x, google: await flushGoogle(tasks)});
+  const eventShape = {
+    title: z.string().optional(), start: z.string().optional().describe('ISO time with offset, like 2026-11-16T10:00:00-07:00; a date like 2026-11-16 for all-day'),
+    end: z.string().optional(), duration: z.number().optional().describe('Minutes; used when end is left out'), allDay: z.boolean().optional(),
+    tz: z.string().optional().describe('IANA time zone, like America/Denver'), attendees: z.array(z.string()).optional().describe('Person names, ids or emails'),
+    meet: z.boolean().optional().describe('Add a Google Meet link'), location: z.string().optional(), body: z.string().optional().describe('Notes or agenda'),
+    project: z.string().optional(), item: z.string().optional().describe('Linked item (prep task)'), rrule: z.string().nullable().optional().describe('Repeat rule, like RRULE:FREQ=WEEKLY;BYDAY=MO'),
+    visibility: z.enum(['space', 'attendees', 'private']).optional(),
+  };
+  const toEvent = (i: any) => {
+    const {project, item, ...rest} = i;
+    if (isAiActor() && (rest.attendees ?? []).some((a: string) => /@/.test(a) && !people().some(p => p.email?.toLowerCase() === a.toLowerCase())))
+      throw new Error('AI agents do not invite people outside the workspace. Ask your owner to send this invitation.');
+    return {...rest, ...(project ? {projectId: projectId(project)} : {}), ...(item ? {itemId: tasks.findItem(item).id} : {})};
+  };
+  const keyOf = (x: {projectId: string; number: number}) => `${tasks.project(x.projectId).key}-${x.number}`;
+  tool('list_routines', 'Repeating work (routines): one live copy each, the next is made when it is finished. Shows paused ones too. Filter by tag, like an SOP code "SOP-07.2" or a mode "auto-job", "hybrid", "manual".',
+    {tag: z.string().optional(), paused: z.boolean().optional()}, true,
+    i => tasks.listRoutines().filter(r => (!i.tag || r.tags.includes(i.tag)) && (i.paused === undefined || !!r.recur?.paused === i.paused))
+      .map(r => ({key: keyOf(r), title: r.title, due: r.due, estimate: r.estimate, tags: r.tags, assignees: r.assignees.map(a => people().find(p => p.id === a)?.name ?? a),
+        state: r.recur?.paused ? 'paused' : r.recur?.waiting ? 'waiting' : r.recur?.slot ? 'delayed' : 'on', waitingOn: r.recur?.waiting ? r.deps.map(d => { try { return keyOf(tasks.item(d)); } catch { return d; } }) : undefined, recur: r.recur})));
+  tool('set_routine', 'Manage routines. skip: this copy moves to its next date (done for this cycle without doing it). delay: push only this copy to "to"; the next one stays on schedule. pause: hide it from views, sprints and plans (history kept). resume: show it again from its next date. wait: start only after the items in "on" are done (a hire, a W-2 setup); hidden until then, starts by itself. end: stop repeating (the copy stays as a normal task). Pass items, or tag to act on every routine with that tag (a whole SOP).',
+    {items: z.array(z.string()).optional(), tag: z.string().optional(), action: z.enum(['skip', 'delay', 'pause', 'resume', 'wait', 'end']), to: z.string().optional().describe('delay: new date YYYY-MM-DD'), on: z.array(z.string()).optional().describe('wait: item keys it waits on')}, false,
+    i => {
+      const refs = i.items?.length ? i.items : i.tag ? tasks.listRoutines().filter(r => r.tags.includes(i.tag!)).map(r => r.id) : [];
+      if (!refs.length) throw new Error('No routines matched. Pass items or a tag.');
+      return refs.map(ref => { try { const r = tasks.routine(ref, i.action, actor, {to: i.to, on: i.on}) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title, due: r.due, paused: !!r.recur?.paused, repeating: !!r.recur}; } catch (e) { return {item: ref, error: e instanceof Error ? e.message : String(e)}; } });
+    });
+  tool('archive_item', 'Park an item out of every list without deleting it: kind "idea" (maybe later), "parked" (not now), or "rejected" (decided no). Find them again with list_parked; restore_item brings one back.',
+    {item: z.string(), kind: z.enum(['idea', 'parked', 'rejected']).optional(), reason: z.string().optional()}, false,
+    i => { const r = tasks.archiveItem(i.item, {kind: i.kind, reason: i.reason}, actor) as any; return r?.proposal ? r : {key: keyOf(r), archived: r.fields.archived}; });
+  tool('snooze_item', 'Hide an item until a date, then it comes back to its list (decide later). until null brings it back now.',
+    {item: z.string(), until: z.string().nullable()}, false,
+    i => { const r = tasks.snoozeItem(i.item, i.until, actor) as any; return r?.proposal ? r : {key: keyOf(r), snooze: r.fields.snooze ?? null}; });
+  tool('restore_item', 'Bring back an archived or snoozed item.', {item: z.string()}, false,
+    i => { const r = tasks.restoreItem(i.item, actor) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title}; });
+  tool('list_parked', 'Archived ideas and rejected items, and items snoozed until a later date.', {}, true,
+    () => tasks.listParked().map(r => ({key: keyOf(r), title: r.title, archived: r.fields.archived ?? null, snoozeUntil: r.fields.snooze ?? null})));
+  const rawTasks = ((tasks as any)[Symbol.for('cadence.raw')] ?? tasks) as Tasks;
+  tool('list_sop_links', 'SOP codes (the SOP-xx.x tags) and the document each one opens. Code * is the fallback, such as the SOP master list.', {}, true, () => listSopLinks(rawTasks));
+  tool('set_sop_links', 'Admins: link SOP codes to their documents so every item tagged with that code opens it. Empty url removes a link.',
+    {links: z.array(z.object({code: z.string(), url: z.string().nullable().optional(), title: z.string().optional()}))}, false,
+    i => {
+      const admin = actor && (rawTasks.db.prepare('select admin from people where id = ?').get(actor) as {admin?: number} | undefined)?.admin;
+      if (rawTasks !== tasks && !admin) throw new Error('Only workspace admins change SOP links');
+      return setSopLinks(rawTasks, i.links as {code: string; url: string}[]);
+    });
+  tool('list_events', 'Meetings and calendar events between two dates (Cadence events plus synced Google events), repeating ones expanded. mine: only where you organize or attend.',
+    {from: z.string(), to: z.string(), project: z.string().optional(), mine: z.boolean().optional()}, true,
+    i => listEvents(tasks, {from: i.from, to: i.to, person: actor, projectId: i.project ? projectId(i.project) : undefined, mine: i.mine}, seesProject));
+  // AI agents on "review" draft calendar changes for their owner, who approves them on the AI work page.
+  const held = () => !!actor && needsReview(tasks, actor);
+  tool('create_event', 'Schedule a meeting or other event. Attendees get invitations (through Google Calendar when the organizer connected one). Weekly meetings belong here, not as tasks. AI agents: held for your owner to approve.',
+    {...eventShape, title: z.string(), start: z.string()}, false, async i => { if (!actor) throw new Error('Run as a person (the organizer)'); const ev = toEvent(i); return held() ? propose(tasks, actor, 'event.create', [ev]) : synced(createEvent(tasks, ev, actor)); });
+  tool('update_event', 'Change an event. For a repeating event, scope "one" with occurrence (that occurrence\'s original start) changes only that one. Attendees can send response to answer.',
+    {event: z.string(), ...eventShape, scope: z.enum(['all', 'one']).optional(), occurrence: z.string().optional(), response: z.enum(['accepted', 'declined', 'tentative']).optional()}, false,
+    async i => { const {event, scope, occurrence, ...rest} = i; const ev = toEvent(rest); return held() && !rest.response ? propose(tasks, actor!, 'event.update', [event, ev, {scope, occurrence}]) : synced(updateEvent(tasks, event, ev, actor, {scope, occurrence})); });
+  tool('delete_event', 'Cancel an event (attendees are told). scope "one" with occurrence cancels one occurrence of a repeating event.',
+    {event: z.string(), scope: z.enum(['all', 'one']).optional(), occurrence: z.string().optional()}, false,
+    async i => held() ? propose(tasks, actor!, 'event.delete', [i.event, {scope: i.scope, occurrence: i.occurrence}]) : synced(deleteEvent(tasks, i.event, actor, {scope: i.scope, occurrence: i.occurrence})));
+
+  // ---- AI agents: what to look at, suggesting work, proposals ----
+  const meAgent = () => { const a = me(); if ((tasks.db.prepare('select kind from people where id = ?').get(a) as {kind?: string} | undefined)?.kind !== 'ai') throw new Error('This tool is for AI agent accounts'); return a; };
+  tool('agent_inbox', 'Start every run here (AI agents). New tasks assigned to your owner, work you may claim (within your settings), work sent back to you, and decisions on your proposals since the time you pass (default: last 24 hours). Store now and pass it as since next time.',
+    {since: z.string().optional()}, true, i => agentInbox(tasks, meAgent(), i.since));
+  tool('suggest_work', 'Suggest a task for a person and their agent: a new task (project and title) or an existing item. Your owner approves it; then the task is assigned to the person and the agent, already accepted. Tag sop with an approved AI SOP id to skip approval.',
+    {title: z.string().optional(), item: z.string().optional(), project: z.string().optional(), for_person: z.string().describe('Who the work is for (name or id); usually your owner'),
+     reason: z.string().describe('Why this is worth doing and how you would do it'), sop: z.string().optional(), estimate: z.number().optional().describe('Hours'), due: z.string().optional()}, false,
+    i => {
+      const agent = meAgent();
+      if (!i.item && (!i.project || !i.title)) throw new Error('Pass item, or project and title');
+      const sug = {title: i.title, item: i.item ? tasks.findItem(i.item).id : undefined, projectId: i.project ? projectId(i.project) : undefined, forPerson: personId(i.for_person), reason: i.reason, sop: i.sop, estimate: i.estimate, due: i.due, agent};
+      const sop = i.sop && approvedSop(tasks, agent, 'createItem', [{tags: [i.sop]}]);
+      return sop ? applySuggestion(tasks, sug, agent) : propose(tasks, agent, 'suggestWork', [sug], i.reason);
+    });
+  tool('my_proposals', 'Your proposals and their state (pending, approved, rejected, failed) with the approver\'s note.', {state: z.enum(['pending', 'approved', 'rejected', 'failed']).optional()}, true,
+    i => listProposals(tasks, {agent: meAgent(), state: i.state}).map(p => ({id: p.id, summary: p.summary, state: p.state, note: p.note, created: p.created, decidedAt: p.decidedAt})));
+  tool('find_free_time', 'First open slots when you and the listed people are all free, inside your work hours (Calendar settings). Uses Cadence events and connected Google calendars.',
+    {attendees: z.array(z.string()), duration: z.number().describe('Minutes'), from: z.string().describe('YYYY-MM-DD'), to: z.string().describe('YYYY-MM-DD'), max: z.number().optional()}, true,
+    async i => {
+      if (!actor) throw new Error('Run as a person');
+      const ids = [actor], emails: string[] = [];
+      for (const a of i.attendees) { const p = people().find(x => x.id === a || x.name.toLowerCase() === a.toLowerCase() || x.email?.toLowerCase() === a.toLowerCase()); if (p) ids.push(p.id); else if (/@/.test(a)) emails.push(a.toLowerCase()); }
+      const s = calendarSettings(tasks, actor);
+      return {tz: s.tz, slots: freeSlots(await allBusy(tasks, [...new Set(ids)], emails, actor, i.from, i.to), {from: i.from, to: i.to, durationMin: i.duration, tz: s.tz, workStart: s.workStart, workEnd: s.workEnd, max: i.max ?? 5})};
+    });
+  tool('timeblock_item', 'Put a task on your calendar for a time slot (a time-block linked to the task). Warns when the block ends after the task is due.',
+    {item: z.string(), start: z.string(), end: z.string()}, false,
+    async i => { if (!actor) throw new Error('Run as a person'); const r = timeblockItem(tasks, tasks.findItem(i.item).id, i.start, i.end, actor); return {...r, google: await flushGoogle(tasks)}; });
   tool('gmail_search', 'Search the Gmail of an account this person connected with Gmail access. Returns subject, sender, date, snippet and a link. Query uses Gmail search syntax, like "from:vendor newer_than:7d".', {q: z.string(), account: z.string().optional().describe('Email of the connected account; first one with Gmail if left out'), max: z.number().optional()}, true,
     async i => {
       if (!actor) throw new Error('Run as a person to read their mail');
@@ -261,7 +358,13 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     const s = i.sprint ? tasks.listSprints(pid).find(s => s.id === i.sprint || s.name.toLowerCase() === i.sprint!.toLowerCase()) : tasks.currentSprint(pid);
     if (!s) throw new Error('No sprint found');
     const items = tasks.listItems({projectId: pid}).filter(x => x.sprint === s.id);
-    const load = Object.fromEntries(people().map(pp => [pp.name, {estimateHours: items.filter(x => x.assignees.includes(pp.id) && !x.completed).reduce((a, x) => a + (x.estimate ?? 0), 0), capacityHours: s.capacity[pp.id] ?? null}]));
+    let meet = new Map<string, Map<string, number>>();
+    try { meet = busyHours(tasks, s.start, s.end); } catch { /* no events */ }
+    const load = Object.fromEntries(people().map(pp => {
+      const meetingHours = Math.round([...(meet.get(pp.id)?.values() ?? [])].reduce((a, b) => a + b, 0) * 10) / 10;
+      const cap = s.capacity[pp.id] ?? null;
+      return [pp.name, {estimateHours: items.filter(x => x.assignees.includes(pp.id) && !x.completed).reduce((a, x) => a + (x.estimate ?? 0), 0), capacityHours: cap, meetingHours, workHoursLeft: cap === null ? null : Math.max(0, cap - meetingHours)}];
+    }));
     return {sprint: s, total: items.length, done: items.filter(x => x.completed).length, burndown: tasks.burndown(s.id), load};
   });
   tool('project_summary', 'Counts by status, overdue items and per-person open load for a project.', {project: z.string()}, true, i => {
