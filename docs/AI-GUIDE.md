@@ -59,7 +59,7 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
 
 ## Built-in spaces
 
-- Every workspace has two built-in spaces, listed under "Built in" in the sidebar. They are rollups with `settings.rollup.scope`: `routines` (every live routine from every space, paused and waiting ones included) and `parked` (every archived or snoozed item). They have normal views, can be renamed, and cannot be deleted. Items are never created in them; they stay in their own space.
+- Every workspace has two built-in spaces, opened from the Workspace section of the sidebar (Routines, Archive and later). They are rollups with `settings.rollup.scope`: `routines` (every live routine from every space, paused and waiting ones included) and `parked` (every archived or snoozed item). They have normal views, can be renamed, and cannot be deleted. Items are never created in them; they stay in their own space.
 - View kind `routines` (only useful in the Routines space) is the routine manager: grouped by SOP, frequency, person, space or mode, with on/off switches, skip, delay, wait and end, and "Add a routine from your templates".
 - Sort (`update_view` with `sorts`) orders rows in tables, lists, boards, timelines, calendars (within a day) and workload lists.
 
@@ -75,7 +75,7 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
   - `end`: stop repeating. The copy stays as a normal task.
 - Paused, waiting, archived and snoozed items are left out of `search_items` with `openOnly`, My work, sprints and plans.
 - Conventions: tag every routine with its SOP code and one mode tag (`auto-job`: an AI job runs it and a person checks the output; `hybrid`: AI drafts, a person decides; `manual`: a person does it). The estimate is the human time per copy.
-- Rule: `auto-job` items must be assigned to an AI agent. The agent's owner is added automatically to review; any other person is refused (400). Switch the mode to `hybrid` or `manual` to give it to a person.
+- Rule: once the workspace has an AI agent, `auto-job` items must be assigned to one. The agent's owner is added automatically to review; any other person is refused (400). Switch the mode to `hybrid` or `manual` to give it to a person. With no agents, a person or no one may hold it.
 - Workload counts each routine on every date it comes back inside the window (unless the view hides repeats).
 - In the app: a task that repeats shows a "Routine" chip in its header (with its state). It opens the routine on the Routines page (`#/routines/<item id>`), where it can be switched off, skipped, delayed or set to wait. The Repeat row in the task also has Skip, Delay, Wait and Pause.
 

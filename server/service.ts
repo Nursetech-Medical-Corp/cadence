@@ -177,10 +177,12 @@ export class Tasks {
     const add = rows.map(r => r.owner).filter(o => !assignees.includes(o) && this.db.prepare('select 1 from people where id = ?').get(o));
     return add.length ? [...assignees, ...new Set(add)] : assignees;
   }
-  /** Auto-job routines are run by AI agents: every person on one must be the owner of an assigned agent (they review). */
+  /** Auto-job routines are run by AI agents: every person on one must be the owner of an assigned agent (they review).
+   *  A workspace with no AI agents cannot automate, so there anyone (or no one) may be assigned. */
   checkAutoJob(tags: string[], assignees: string[]) {
     if (!tags.includes('auto-job') || !assignees.length) return;
     const people = new Map(this.listPeople().map(p => [p.id, p]));
+    if (![...people.values()].some(p => p.kind === 'ai')) return;
     const agents = assignees.filter(a => people.get(a)?.kind === 'ai');
     const owners = new Set(agents.map(a => people.get(a)?.owner).filter(Boolean));
     const others = assignees.filter(a => people.get(a)?.kind !== 'ai' && !owners.has(a));

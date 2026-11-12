@@ -151,6 +151,8 @@ test('built-in spaces: Routines and Archive and later exist once, have views, an
 
 test('auto-job routines go to AI agents only; the agent owner may be on it to review; routine copies keep working', () => {
   const {t, david, p} = setup();
+  const early = t.createItem({projectId: p.id, title: 'No agents yet', assignees: [david.id], tags: ['auto-job'], recur: {every: 1, unit: 'week', mode: 'schedule'}, due: '2026-11-16'});
+  assert.deepEqual(early.assignees, [david.id], 'with no AI agents in the workspace, a person may run it');
   const bot = t.createPerson({name: 'Bot'});
   t.db.prepare("update people set kind = 'ai', owner = ? where id = ?").run(david.id, bot.id);
   const rule = {every: 1, unit: 'week' as const, mode: 'schedule' as const};
