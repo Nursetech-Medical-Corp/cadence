@@ -9,6 +9,7 @@ import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
 import {calendarFeed, startWebhooks} from './integrations.ts';
 import {backupDir, exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, restoreSnapshotFile, retention, saveSettings, snapFromName, snapshot} from './backup.ts';
+import {cleanPersonJobRoles, joinByDomain} from './jobroles.ts';
 import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
@@ -168,7 +169,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     const pid = eventProject(e), checkAccess = !!pid && getWorkspace(tasks.db).requireLogin;
     for (const [c, who] of clients) {
       if (checkAccess) {
-        try { if (!capsFor(tasks.db, who, (tasks.project(pid).settings as {access?: Access}).access).has('view')) continue; } catch { continue; }
+        try { if (!capsFor(tasks.db, who, (tasks.project(pid).settings as {access?: Access}).access, false, pid).has('view')) continue; } catch { continue; }
       }
       c.write(`data: ${JSON.stringify(e)}\n\n`);
     }
@@ -185,7 +186,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
 
   const isAdmin = (pid: string | null) => !!pid && !!(tasks.db.prepare('select admin from people where id = ?').get(pid) as {admin: number} | undefined)?.admin;
   const access = (p: Project) => (p.settings as {access?: Access}).access;
-  const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict);
+  const caps = (actor: string | null, projectId: string, strict = false) => capsFor(tasks.db, actor, access(tasks.project(projectId)), strict, projectId);
   // System mail (sign-in links, invites): SMTP, else the main workspace's connected Gmail sender. False when neither is set up.
   const mainDb = () => (all().find(w => w.id === 'main') ?? all()[0])?.tasks.db;
   const gmailReady = () => { const db = mainDb(); if (!db) return false; const g = getWorkspace(db).google; return !!(g.refreshToken && g.senderEmail); };
@@ -216,8 +217,13 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       const person = memberId(w.tasks, email)!;
       return [{id: w.id, name: w.name, email, person, personName: (w.tasks.db.prepare('select name from people where id = ?').get(person) as {name: string}).name}];
     })});
-  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, password is not null as has_password from people order by name').all()
-    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human'}));
+  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, job_roles, password is not null as has_password from people order by name').all()
+    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human',
+      jobRoles: (() => { try { return JSON.parse(String(r.job_roles ?? '[]')); } catch { return []; } })()}));
+  // Domain join: a Google-verified address on a listed company domain joins every workspace that lists it (jobroles.ts).
+  const joinDomains = (email: string) => {
+    if (joinByDomain(all().map(w => w.tasks), email, db => getWorkspace(db).domainJoin) && !accounts.has(email)) accounts.setHash(email, null);
+  };
 
   return async (req: IncomingMessage, res: ServerResponse, next: Next) => {
     const url = new URL(req.url ?? '/', 'http://local');
@@ -225,7 +231,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     if (url.pathname === '/auth/google/start' && req.method === 'GET') return googleSignInStart(req, res);
     if (url.pathname === '/auth/google/callback' && req.method === 'GET') {
       const secureCb = req.headers['x-forwarded-proto'] === 'https' || 'encrypted' in req.socket;
-      return googleSignInCallback(req, res, url, {hasAccount: e => accounts.has(e), log: (e, r) => logAttempt(req, e, 'google', r),
+      return googleSignInCallback(req, res, url, {hasAccount: e => { joinDomains(e); return accounts.has(e); }, log: (e, r) => logAttempt(req, e, 'google', r),
         signIn: e => accountCookie(accounts.startSession(e), secureCb)});
     }
     if (isOAuthPath(url.pathname)) return handleOAuth(req, res, url, oauthCtx());
@@ -280,7 +286,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         if (b === 'me' && m === 'GET') {
           const me = actor ? tasks.listPeople().find(p => p.id === actor) ?? null : null;
           return send(res, 200, {required: ws.requireLogin, forced: loginForced(), account, setup: ws.requireLogin && !accounts.count(),
-            signup: accounts.signup(), owner: !!account && accounts.owner() === account,
+            signup: accounts.signup(), memberWorkspaces: accounts.setting('memberWorkspaces') === 'off' ? 'off' : 'on', owner: !!account && accounts.owner() === account,
             linked: emails.slice(1), memberOf: account && !me ? memberships(emails) : undefined, person: me, admin: !ws.requireLogin || isAdmin(actor), googleReady: !!(ws.google.clientId && ws.google.clientSecret),
             signInGoogle: googleSignInReady(), signInLink: emailLinkReady(),
             caps: Object.fromEntries(tasks.listProjects().map(p => [p.id, [...caps(actor, p.id)]]))});
@@ -361,7 +367,8 @@ If you did not ask for it, ignore this email.`)
         if (b === 'server' && m === 'PUT') {
           if (!account || accounts.owner() !== account) throw new Denied('Only the server owner changes this');
           if (body.signup === 'open' || body.signup === 'invite') accounts.setSetting('signup', body.signup);
-          return send(res, 200, {signup: accounts.signup()});
+          if (body.memberWorkspaces === 'on' || body.memberWorkspaces === 'off') accounts.setSetting('memberWorkspaces', body.memberWorkspaces);
+          return send(res, 200, {signup: accounts.signup(), memberWorkspaces: accounts.setting('memberWorkspaces') === 'off' ? 'off' : 'on'});
         }
         if (b === 'login' && m === 'POST') {
           const email = String(body.email ?? '').trim().toLowerCase();
@@ -474,7 +481,7 @@ If you did not ask for it, ignore this email.`)
         needAdmin();
         if (!b && m === 'GET') return send(res, 200, listInvites(tasks.db));
         if (!b && m === 'POST') {
-          const {invite, secret} = createInvite(tasks.db, body, actor, ws.roles.map(r => r.id));
+          const {invite, secret} = createInvite(tasks.db, body, actor, ws.roles.map(r => r.id), ws.jobRoles.map(j => j.id));
           // Emailed links start with PUBLIC_URL, never the request's Host or Origin. Without PUBLIC_URL the invite is not
           // emailed; the admin copies the link (built from the address they are using) and sends it themselves.
           const base = publicUrl();
@@ -584,12 +591,17 @@ If you did not ask for it, ignore this email.`)
           return send(res, 200, {current: info.id, list: listWorkspaces().filter(w => !mine || mine.has(w.id)).map(publicInfo)});
         }
         if (!b && m === 'POST') {
-          needAdmin();
+          // Admins add workspaces; any signed-in member may add one of their own (unless the server owner turned that off).
+          // Either way the creator is its only member, so admins elsewhere never see into it.
+          if (!isAdmin(actor)) {
+            if (!ws.requireLogin || !account) needAdmin();
+            if (accounts.setting('memberWorkspaces') === 'off') throw new Denied('On this server only admins add workspaces');
+          }
           const w = createWorkspace(body);
           // The creator joins the new workspace as its admin, with a first project to start in.
           const t = openTasks(w);
           const me = actor ? tasks.listPeople().find(p => p.id === actor) : null;
-          const p = t.createPerson({name: me?.name ?? (String(body.ownerName ?? '').trim() || 'Me'), email: me?.email ?? undefined});
+          const p = t.createPerson({name: me?.name ?? (String(body.ownerName ?? '').trim() || 'Me'), email: me?.email || account || undefined});
           t.db.prepare('update people set admin = 1 where id = ?').run(p.id);
           t.createProject({name: String(body.firstProject ?? '').trim() || 'General'});
           return send(res, 201, {...publicInfo(w), me: p.id});
@@ -627,13 +639,13 @@ If you did not ask for it, ignore this email.`)
       if (a === 'team') {
         if (!b && m === 'GET') {
           // Non-admins get only their own row and role names; the permission setup stays with admins.
-          if ((ws.requireLogin || bearer) && !isAdmin(actor)) return send(res, 200, {people: team().filter(p => p.id === actor), roles: ws.roles.map(r => ({id: r.id, name: r.name})), caps: []});
-          return send(res, 200, {people: team(), roles: ws.roles, caps: CAPS.map(id => ({id, label: CAP_LABELS[id]}))});
+          if ((ws.requireLogin || bearer) && !isAdmin(actor)) return send(res, 200, {people: team().filter(p => p.id === actor), roles: ws.roles.map(r => ({id: r.id, name: r.name})), caps: [], jobRoles: ws.jobRoles.map(j => ({id: j.id, name: j.name}))});
+          return send(res, 200, {people: team(), roles: ws.roles, caps: CAPS.map(id => ({id, label: CAP_LABELS[id]})), jobRoles: ws.jobRoles, domainJoin: ws.domainJoin});
         }
         if (b && m === 'PATCH') {
           const self = b === actor;
           // People may change their own password and email preferences; everything else needs an admin.
-          if (!self || body.role !== undefined || body.admin !== undefined || body.active !== undefined) needAdmin();
+          if (!self || body.role !== undefined || body.admin !== undefined || body.active !== undefined || body.jobRoles !== undefined) needAdmin();
           if (body.admin === false && b === actor && ws.requireLogin) throw new Invalid('You cannot remove your own admin rights');
           if (body.email !== undefined) {
             const email = String(body.email).trim().toLowerCase();
@@ -648,6 +660,7 @@ If you did not ask for it, ignore this email.`)
             if (name) tasks.db.prepare('update people set name = ? where id = ?').run(name, b);
           }
           if (body.role !== undefined) tasks.db.prepare('update people set role = ? where id = ?').run(body.role, b);
+          if (body.jobRoles !== undefined) tasks.db.prepare('update people set job_roles = ? where id = ?').run(JSON.stringify(cleanPersonJobRoles(body.jobRoles, ws.jobRoles)), b);
           if (body.admin !== undefined) tasks.db.prepare('update people set admin = ? where id = ?').run(body.admin ? 1 : 0, b);
           if (body.active !== undefined) tasks.db.prepare('update people set active = ? where id = ?').run(body.active ? 1 : 0, b);
           // Apps they connected by signing in stop working once they are deactivated (or, above, their email changes).
@@ -683,6 +696,8 @@ If you did not ask for it, ignore this email.`)
           const patch: Record<string, unknown> = {};
           if (body.requireLogin !== undefined) patch.requireLogin = !!body.requireLogin;
           if (body.roles) patch.roles = body.roles;
+          if (body.jobRoles !== undefined) patch.jobRoles = body.jobRoles;
+          if (body.domainJoin !== undefined) patch.domainJoin = body.domainJoin;
           if (body.custom) patch.custom = body.custom;
           if (body.features) patch.features = body.features;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
@@ -776,7 +791,7 @@ If you did not ask for it, ignore this email.`)
       if (a === 'export' && m === 'GET') {
         needAdmin();
         res.setHeader('content-disposition', `attachment; filename="tasks-export-${new Date().toISOString().slice(0, 10)}.json"`);
-        return send(res, 200, exportAll(tasks.db));
+        return send(res, 200, exportAll(tasks.db, {skipPrivate: true}));
       }
       if (a === 'import' && m === 'POST') { if (bearer) throw new Denied('Restores are done by an admin in the app, not with a token'); needAdmin(); const r = importAll(tasks.db, body, bdir); migrate(tasks.db); tasks.emit({kind: 'refresh'}); void uploadSnapshot(info.id, r.snapshotBefore, getSettings(bdir)); return send(res, 200, r); }
       if (a === 'backup-settings') {

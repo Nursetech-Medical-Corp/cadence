@@ -11,6 +11,7 @@ import {randomBytes, scryptSync, timingSafeEqual} from 'node:crypto';
 import type {Db} from './db.ts';
 import {DEFAULT_CUSTOM, DEFAULT_FEATURES, POLICY_IDS, type Area, type Customization, type Features} from '../src/types.ts';
 import {Invalid} from './errors.ts';
+import {cleanDomainJoin, cleanJobRoles, jobRoleGrant, migrateJobRoles, NO_DOMAIN_JOIN, personJobRoles, type DomainJoin, type JobRole} from './jobroles.ts';
 
 export const CAPS = ['view', 'comment', 'create', 'edit', 'delete', 'sprints', 'views', 'templates', 'settings', 'export'] as const;
 export type Cap = typeof CAPS[number];
@@ -27,7 +28,7 @@ export const DEFAULT_ROLES: Role[] = [
   {id: 'commenter', name: 'Commenter', caps: ['view', 'comment']},
   {id: 'viewer', name: 'Viewer', caps: ['view']},
 ];
-export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}; custom: Customization; features: Features};
+export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId: string; clientSecret: string; senderEmail?: string; refreshToken?: string}; custom: Customization; features: Features; jobRoles: JobRole[]; domainJoin: DomainJoin};
 export type Access = {default: string; members: Record<string, string>; private?: boolean}; // role ids, or 'none'
 /** A personal space: only its owner until they share it. Workspace admins get no automatic access. */
 export const personalAccess = (owner: string): Access => ({default: 'none', members: {[owner]: 'admin'}, private: true});
@@ -58,6 +59,7 @@ export function migrate(db: Db) {
   if (!cols.includes('active')) db.exec('alter table people add column active integer not null default 1');
   if (!cols.includes('notify_email')) db.exec('alter table people add column notify_email integer not null default 0');
   // The first person is the workspace admin until someone says otherwise.
+  migrateJobRoles(db);
   if (!(db.prepare('select 1 from people where admin = 1').get())) db.exec('update people set admin = 1 where rowid = (select min(rowid) from people)');
 }
 
@@ -68,7 +70,8 @@ const stored = (db: Db) => { const r = db.prepare("select value from workspace w
 export function getWorkspace(db: Db): Workspace {
   const w = stored(db);
   return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google},
-    custom: {...DEFAULT_CUSTOM, ...w.custom}, features: {...DEFAULT_FEATURES, ...w.features}};
+    custom: {...DEFAULT_CUSTOM, ...w.custom}, features: {...DEFAULT_FEATURES, ...w.features},
+    jobRoles: Array.isArray(w.jobRoles) ? w.jobRoles : [], domainJoin: {...NO_DOMAIN_JOIN, ...w.domainJoin}};
 }
 /** Whether a view config change touches its settings, not just its lock or privacy. */
 export const settingsChanged = (before: object, after: object) => {
@@ -89,6 +92,9 @@ export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
     const n = (patch.features as Record<string, unknown>)[k];
     return [k, typeof n === 'boolean' ? n : v];
   })) as Features};
+  const levels = (patch.roles ?? cur.roles).map(r => r.id);
+  if (patch.jobRoles !== undefined) patch = {...patch, jobRoles: cleanJobRoles(patch.jobRoles, levels)};
+  if (patch.domainJoin !== undefined) patch = {...patch, domainJoin: cleanDomainJoin(patch.domainJoin, levels, patch.jobRoles ?? cur.jobRoles)};
   const w = {...cur, requireLogin: !!stored(db).requireLogin, ...patch};
   if (!w.roles.some(r => r.id === 'admin')) throw new Error('The Admin role cannot be removed');
   w.roles = w.roles.map(r => r.id === 'admin' ? {...r, caps: [...CAPS]} : r);
@@ -110,14 +116,22 @@ export function checkPassword(pw: string, stored: string | null) {
 }
 
 /** Capabilities a person has in a project. Workspace admins always have everything. */
-export function capsFor(db: Db, personId: string | null, projectAccess: Access | undefined, strict = false): Set<Cap> {
+/** What a person may do in one space. Order: per-person entry, job roles, the space's default, the person's level (see jobroles.ts). */
+export function capsFor(db: Db, personId: string | null, projectAccess: Access | undefined, strict = false, projectId?: string): Set<Cap> {
   const w = getWorkspace(db);
   if (!w.requireLogin && !strict) return new Set(CAPS); // open mode (tokens pass strict and always get their role)
   if (!personId) return new Set();
   const p = db.prepare('select role, admin, active from people where id = ?').get(personId) as {role: string; admin: number; active: number} | undefined;
   if (!p || !p.active) return new Set();
   if (p.admin && !projectAccess?.private) return new Set(CAPS);
-  const roleId = projectAccess?.members[personId] ?? (projectAccess && projectAccess.default !== 'inherit' ? projectAccess.default : p.role);
+  const levelCaps = (id: string) => w.roles.find(r => r.id === id)?.caps ?? [];
+  const member = projectAccess?.members[personId];
+  if (member === undefined && projectId && !projectAccess?.private && w.jobRoles.length) {
+    const g = jobRoleGrant(w.jobRoles, personJobRoles(db, personId), projectId);
+    if (g === 'none') return new Set();
+    if (g) return new Set(g.flatMap(levelCaps));
+  }
+  const roleId = member ?? (projectAccess && projectAccess.default !== 'inherit' ? projectAccess.default : p.role);
   if (roleId === 'none') return new Set();
-  return new Set(w.roles.find(r => r.id === roleId)?.caps ?? []);
+  return new Set(levelCaps(roleId));
 }

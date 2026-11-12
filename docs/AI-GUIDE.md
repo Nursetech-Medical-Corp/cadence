@@ -54,8 +54,10 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
 | Approvals | Approvals page | `request_approval`, `list_approvals` |
+| Job roles and access | Team page: Job roles matrix (company roles by space), People (job roles per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
+| Personal workspaces | Workspace switcher: New workspace (any signed-in member, unless the server owner turns it off) | none (app only) |
 
-UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; each person's own layout and new-item defaults; feature switches.
+UI-only settings (no tool, by design): sign-in, permission levels, job roles and who has them, company domain, access rules and tokens; each person's own layout and new-item defaults; feature switches.
 
 ## Built-in spaces
 
@@ -94,7 +96,11 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
 ## Spaces, keys and sharing
 
 - `update_project` with `key` renames a space's key (2 to 10 letters or digits, starting with a letter). Old keys keep working: `NT-12` still finds the item now called `GEN-12` (kept in `settings.oldKeys`).
-- Shared spaces: everyone in the workspace sees them with the default role. Private spaces are seen only by the people they are shared with and appear under "Private to me". A workspace invite never includes private spaces. Access rules are changed only by admins in the app.
+- Shared spaces: who sees them and at which permission level is decided in this order: a per-person entry on the space, then the person's job roles (the strongest level any of them grants; "no access" only when all of them say so), then the space's "everyone else" setting, then the person's default level. Admins see every shared space.
+- Job roles are the company's roles (Executive, Sales rep, Clinical rep, R&D engineer, Quality, VA, Logistics). An admin sets once, on the Team page, which spaces each opens and at which level ("Other spaces" covers new spaces), then gives people job roles or picks them when inviting. `list_job_roles` shows the setup; agents never change it.
+- Private (personal) spaces are seen only by the people they are shared with and appear under "Private to me". Job roles, invites and admin rights never open them. Admin exports (`GET /api/export`, `export_workspace`) leave them out, and restoring such a file keeps them.
+- Company email domain: people who sign in with Google on a listed domain join the workspace without an invite, with a starting level and job roles. People an admin turned off stay off.
+- Personal workspaces: any signed-in member can add a workspace of their own from the workspace switcher; they are its only member until they invite someone, so admins elsewhere cannot see into it. The server owner can turn this off.
 
 ## New items in the app
 
@@ -129,5 +135,7 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
 - `GET /api/parked`; `POST /api/park/:id` `{action: archive|restore|snooze, kind?, reason?, until?}`
 - `GET /api/sops`; `PUT /api/sops` `{links: [{code, url, title}]}` (admins)
 - `PATCH /api/projects/:id` `{name?, key?, statuses?, types?, fields?}`
-- `GET /api/calendar.ics?person=|project=` calendar feed; `GET /api/export` full JSON (admins)
+- `GET /api/calendar.ics?person=|project=` calendar feed; `GET /api/export` full JSON without personal spaces (admins)
+- `GET /api/team` people (with `jobRoles`), levels, `jobRoles`, `domainJoin` (admins; others get names); `PUT /api/workspace` `{jobRoles: [{id?, name, spaces: {spaceId: levelId|none}, others}], domainJoin: {domains, level, jobRoles}}` (admins); `PATCH /api/team/:id` `{jobRoles: [ids]}` (admins); `POST /api/invites` `{email, role, jobRoles?}`
+- `POST /api/workspaces` `{name}` a new workspace you alone are in (admins, or any signed-in member); `PUT /api/auth/server` `{memberWorkspaces: on|off}` (server owner)
 - Errors: 400 bad input (message says what), 401 sign in or bad token, 403 role does not allow it, 404 not found.

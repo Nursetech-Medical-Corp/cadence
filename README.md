@@ -138,7 +138,7 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Planning helpers: estimate missing hours from similar finished work, replan schedules against capacity (proposed, then approved), and a hiring and budget forecast.
 
 ### Teams, security and approvals
-- One account per person across every workspace on the server, first-run owner setup, passwordless sign-in with Google or emailed links (password as a fallback), create account (when the owner allows it), linked work and personal accounts, email invites with one-time links, roles with fine-grained permissions and per-space access.
+- One account per person across every workspace on the server, first-run owner setup, passwordless sign-in with Google or emailed links (password as a fallback), create account (when the owner allows it), linked work and personal accounts, email invites with one-time links (with job roles), job roles that open spaces at a permission level (set once per role, not per space), company email domain join with Google, members' own workspaces that admins cannot see into, permission levels with fine-grained capabilities and per-space overrides.
 - Notifications in the Inbox, by email, and as push on phones and desktops: assignments, mentions, comments, approvals, AI requests, due today and tomorrow, overdue, and timers left running.
 - Approvals and e-signatures: request a review or approval, sign with a password re-check, and keep a fingerprint of what was signed. Workflow rules per item type (allowed moves, required fields, approval before done).
 - Protections: CSRF and origin checks, rate-limited sign-in, hashed tokens and passwords, safe webhooks, CSV formula injection guards.
@@ -161,7 +161,7 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - **Client:** React 19 and TypeScript, no UI framework. State loads once, edits apply instantly (optimistic) and sync through Server-Sent Events, with undo and redo.
 - **Server:** Node with the built-in `node:sqlite` (WAL mode), mounted as Vite middleware. One `Tasks` service class holds the rules; the REST API, the MCP server over stdio and the MCP server over HTTP all call it, so every path gets the same validation and permission checks.
 - **Workspaces:** a small registry (`data/workspaces.json`) and one database per workspace. The client picks a workspace with a header, a query parameter or a cookie.
-- **Permissions:** roles map to capabilities (view, comment, create, edit, delete, sprints, views, templates, settings, export). Tokens act as a person and pass through a guard on every service call.
+- **Permissions:** a person's level in a space comes from a per-person entry on the space, else their job roles, else the space default, else their default level. Levels map to capabilities (view, comment, create, edit, delete, sprints, views, templates, settings, export). Tokens act as a person and pass through a guard on every service call.
 - **Tests:** `node:test` with in-memory databases, covering the service rules, sign-in and permissions through the API, invites, templates and dynamic dates, formulas, files as tasks, the dashboard grid and the critical path.
 
 Key files: `server/service.ts` (rules), `server/api.ts` (REST), `server/mcp.ts` (MCP tools), `src/App.tsx` (shell and routing), `src/*View.tsx` (views).

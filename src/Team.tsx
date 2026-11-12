@@ -6,11 +6,12 @@ import {FEATURE_LABELS, type Customization, type Features, type Project} from '.
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 import {ConnectedAppsCard, pendingConnect} from './ConnectedApps.tsx';
+import {DomainJoinCard, JobRolePicker, JobRolesCard, type DomainJoin, type JobRole} from './JobRoles.tsx';
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
-type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'};
-export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
+type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'; jobRoles: string[]};
+export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; memberWorkspaces?: 'on' | 'off'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
   person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; signInGoogle?: boolean; signInLink?: boolean; caps: Record<string, string[]>};
 
 /** The card every sign-in screen sits in: the Nursetech logo, the form, and a short footer. */
@@ -186,14 +187,16 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
   const [people, setPeople] = useState<Member[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [caps, setCaps] = useState<{id: string; label: string}[]>([]);
+  const [jobRoles, setJobRoles] = useState<JobRole[] | null>(null);
+  const [domainJoin, setDomainJoin] = useState<DomainJoin | null>(null);
   const [ws, setWs] = useState<{requireLogin: boolean; forced?: boolean; custom: Customization; features: Features; google: {clientId: string; hasSecret: boolean; senderEmail: string | null; connected: boolean}} | null>(null);
   const [msg, setMsg] = useState(new URLSearchParams(location.hash.split('?')[1] ?? '').get('error') ?? (location.hash.includes('connected=1') ? 'Gmail sender connected.' : location.hash.includes('linked=') ? `Google account connected: ${decodeURIComponent(location.hash.split('linked=')[1] ?? '')}` : ''));
   const [newName, setNewName] = useState('');
   const [secret, setSecret] = useState('');
   const [clientId, setClientId] = useState('');
   const load = async () => {
-    const t = await api<{people: Member[]; roles: Role[]; caps: {id: string; label: string}[]}>('/team');
-    setPeople(t.people); setRoles(t.roles); setCaps(t.caps);
+    const t = await api<{people: Member[]; roles: Role[]; caps: {id: string; label: string}[]; jobRoles?: JobRole[]; domainJoin?: DomainJoin}>('/team');
+    setPeople(t.people); setRoles(t.roles); setCaps(t.caps); setJobRoles(t.jobRoles ?? []); if (t.domainJoin) setDomainJoin(t.domainJoin);
     if (!me.admin) return;
     const w = await api<typeof ws>('/workspace'); setWs(w); setClientId(w!.google.clientId);
   };
@@ -247,12 +250,16 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
             <option value="invite">Only people invited to a workspace</option>
             <option value="open">Anyone (they get their own workspace)</option>
           </select></div>
+        <div className="set-item"><span className="grow">Members can add their own workspaces <span className="muted small">Only they are in it until they invite people. Admins of other workspaces cannot see into it.</span></span>
+          <select className="plain-select" defaultValue={me.memberWorkspaces ?? 'on'} onChange={async e => { try { await api('/auth/server', {method: 'PUT', body: {memberWorkspaces: e.target.value}}); setMsg('Saved.'); } catch (err) { setMsg(String(err instanceof Error ? err.message : err)); } }}>
+            <option value="on">Yes</option><option value="off">No, admins only</option>
+          </select></div>
         <div className="muted small">Sign-in links and invites are emailed over SMTP when the server has it (SMTP_HOST), else through the Gmail sender connected below. Without either, sign-in links are printed in the server log.</div>
       </section>}
 
-      {isAdmin && <InvitesCard roles={roles} signInOn={!!ws?.requireLogin} />}
+      {isAdmin && <InvitesCard roles={roles} jobRoles={jobRoles ?? []} signInOn={!!ws?.requireLogin} />}
       <section className="set-card">
-        <div className="set-card-head"><h3>People</h3><span className="muted small">Default role applies in every space unless the space sets its own. Admins can do everything.</span></div>
+        <div className="set-card-head"><h3>People</h3><span className="muted small">Job roles decide which spaces each person sees (Job roles, below). The default level applies where no job role or space setting says otherwise. Admins can do everything in shared spaces.</span></div>
         {people.map(p => (
           <div key={p.id} className={'set-item team-row' + (p.active ? '' : ' off')}>
             <Avatar person={{id: p.id, name: p.name, email: p.email, color: p.color}} size={26} />
@@ -261,7 +268,8 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
               <input className="inline small" placeholder="email for sign-in" defaultValue={p.email} disabled={!isAdmin && p.id !== me.person?.id} onBlur={e => e.target.value !== p.email && patch(p.id, {email: e.target.value})} />
             </div>
             <select className="plain-select" value={p.kind} disabled={!isAdmin} onChange={e => patch(p.id, {kind: e.target.value})} title="Human or AI worker"><option value="human">Human</option><option value="ai">AI agent</option></select>
-            <select className="plain-select" value={p.role} disabled={!isAdmin} onChange={e => patch(p.id, {role: e.target.value})} title="Default role">
+            <JobRolePicker all={jobRoles ?? []} value={p.jobRoles ?? []} disabled={!isAdmin} onChange={ids => patch(p.id, {jobRoles: ids})} />
+            <select className="plain-select" value={p.role} disabled={!isAdmin} onChange={e => patch(p.id, {role: e.target.value})} title="Default permission level">
               {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
             <label className="small" title="Workspace admin"><input type="checkbox" checked={p.admin} disabled={!isAdmin} onChange={e => patch(p.id, {admin: e.target.checked})} /> Admin</label>
@@ -274,8 +282,12 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           onKeyDown={async e => { if (e.key === 'Enter' && newName.trim()) { await store.createPerson(newName); setNewName(''); load(); } }} /></div>}
       </section>
 
+      {jobRoles && <JobRolesCard jobRoles={jobRoles} levels={roles} projects={store.projects} counts={Object.fromEntries(jobRoles.map(j => [j.id, people.filter(p => p.jobRoles?.includes(j.id)).length]))}
+        onSave={async j => { try { await api('/workspace', {method: 'PUT', body: {jobRoles: j}}); const t = await api<{jobRoles: JobRole[]}>('/team'); setJobRoles(t.jobRoles); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }} />}
+      {domainJoin && jobRoles && <DomainJoinCard value={domainJoin} levels={roles} jobRoles={jobRoles} googleOn={!!me.signInGoogle} onSaved={setMsg} />}
+
       <section className="set-card">
-        <div className="set-card-head"><h3>Roles and what they can do</h3><span className="muted small">Tick what each role may do. Spaces can give a person a different role there.</span></div>
+        <div className="set-card-head"><h3>Permission levels and what they can do</h3><span className="muted small">Tick what each level may do. Job roles and spaces pick a level per space.</span></div>
         <div className="role-grid" style={{gridTemplateColumns: `200px repeat(${roles.length}, minmax(90px, 1fr)) 30px`}}>
           <div />
           {roles.map(r => <div key={r.id} className="role-head">
@@ -285,7 +297,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           <div />
           {caps.map(c => <RoleRow key={c.id} cap={c} roles={roles} disabled={!isAdmin} onToggle={(rid, on) => saveRoles(roles.map(r => r.id === rid ? {...r, caps: on ? [...r.caps, c.id] : r.caps.filter(x => x !== c.id)} : r))} />)}
         </div>
-        {isAdmin && <button className="btn" style={{marginTop: 8}} onClick={() => saveRoles([...roles, {id: 'role-' + Math.random().toString(36).slice(2, 7), name: 'New role', caps: ['view', 'comment']}])}><Plus size={14} /> New role</button>}
+        {isAdmin && <button className="btn" style={{marginTop: 8}} onClick={() => saveRoles([...roles, {id: 'role-' + Math.random().toString(36).slice(2, 7), name: 'New level', caps: ['view', 'comment']}])}><Plus size={14} /> New level</button>}
       </section>
 
       {ws && <section className="set-card">
@@ -374,7 +386,8 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
   const [admin, setAdmin] = useState(false);
   const [mine, setMine] = useState(false);
   const [me, setMe] = useState<string | null>(null);
-  useEffect(() => { api<{roles: Role[]}>('/team').then(t => setRoles(t.roles)).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
+  const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
+  useEffect(() => { api<{roles: Role[]; jobRoles?: JobRole[]}>('/team').then(t => { setRoles(t.roles); setJobRoles(t.jobRoles ?? []); }).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
   const access = project.settings.access ?? {default: 'inherit', members: {}};
   const personal = !!access.private;
   const canEdit = personal ? mine || (admin && !!me && !!access.members[me]) : admin;
@@ -384,9 +397,10 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
     <section className="set-card">
       <div className="set-card-head"><h3><Shield size={15} /> {personal ? 'Sharing' : 'Access'}</h3><span className="muted small">{personal
         ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
-        : 'Shared space: everyone in the workspace sees it with their default role (set on the Team page) unless you change it below. Inviting someone to the workspace gives them every shared space, never your private ones.'}</span></div>
+        : 'Shared space: people see it as their job roles say (Team page), else as set below, else with their default level. Inviting someone never gives them anyone\'s personal spaces.'}</span></div>
       {!personal && canEdit && me && <div className="set-item"><span className="grow muted small">Keep this space to yourself and the people you pick, like a private Google Doc.</span>
         <button className="btn small" onClick={() => { if (confirm('Make this space private? Only you and people you give a role below will see it.')) save({default: 'none', members: {...access.members, [me]: 'admin'}, private: true}); }}>Make private</button></div>}
+      {!personal && jobRoles.some(j => j.spaces && (j.spaces[project.id] ?? j.others ?? 'inherit') !== 'inherit') && <div className="set-item"><span className="grow small"><b>Job roles here:</b> {jobRoles.filter(j => j.spaces && (j.spaces[project.id] ?? j.others ?? 'inherit') !== 'inherit').map(j => { const l = j.spaces[project.id] ?? j.others; return `${j.name} ${l === 'none' ? 'no access' : roles.find(r => r.id === l)?.name ?? l}`; }).join(', ')}. <span className="muted">Change on the Team page. A person set below overrides their job role.</span></span></div>}
       <div className="set-item">
         <span className="grow">Everyone else in the workspace</span>
         <select className="plain-select" value={access.default} disabled={!canEdit} onChange={e => save({...access, default: e.target.value})}>
@@ -442,19 +456,20 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
   );
 }
 
-type Invite = {id: string; email: string; role: string; created: string; expires: string; link?: string; emailed?: boolean};
+type Invite = {id: string; email: string; role: string; jobRoles?: string[]; created: string; expires: string; link?: string; emailed?: boolean};
 /** Invite people by email into this workspace. The link works once and for 7 days. */
-function InvitesCard({roles, signInOn}: {roles: Role[]; signInOn: boolean}) {
+function InvitesCard({roles, jobRoles, signInOn}: {roles: Role[]; jobRoles: JobRole[]; signInOn: boolean}) {
   const [list, setList] = useState<Invite[]>([]);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('editor');
+  const [jr, setJr] = useState<string[]>([]);
   const [last, setLast] = useState<Invite | null>(null);
   const [err, setErr] = useState('');
   const load = () => api<Invite[]>('/invites').then(setList).catch(() => {});
   useEffect(() => { load(); }, []);
   const send = async () => {
     setErr('');
-    try { const inv = await api<Invite>('/invites', {method: 'POST', body: {email, role}}); setLast(inv); setEmail(''); load(); }
+    try { const inv = await api<Invite>('/invites', {method: 'POST', body: {email, role, jobRoles: jr}}); setLast(inv); setEmail(''); setJr([]); load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
   return (
@@ -463,7 +478,8 @@ function InvitesCard({roles, signInOn}: {roles: Role[]; signInOn: boolean}) {
         {!signInOn && ' Sign-in is off right now, so passwords take effect once you turn it on.'}</span></div>
       <div className="time-row">
         <input className="inline" style={{flex: 1}} placeholder="name@company.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && email.trim() && send()} />
-        <select className="plain-select" value={role} onChange={e => setRole(e.target.value)}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+        <JobRolePicker all={jobRoles} value={jr} onChange={setJr} />
+        <select className="plain-select" value={role} onChange={e => setRole(e.target.value)} title="Default permission level">{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
         <button className="btn primary" disabled={!email.trim()} onClick={send}><Plus size={14} /> Invite</button>
       </div>
       {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
@@ -473,7 +489,7 @@ function InvitesCard({roles, signInOn}: {roles: Role[]; signInOn: boolean}) {
         <button className="btn small" onClick={() => navigator.clipboard.writeText(last.link!)}>Copy</button>
       </div>}
       {list.length > 0 && <><div className="pop-label">Waiting to join</div>
-        {list.map(i => <div key={i.id} className="set-item"><span className="grow">{i.email}</span><span className="muted small">{roles.find(r => r.id === i.role)?.name ?? i.role}, expires {new Date(i.expires).toLocaleDateString()}</span>
+        {list.map(i => <div key={i.id} className="set-item"><span className="grow">{i.email}</span><span className="muted small">{[...(i.jobRoles ?? []).map(id => jobRoles.find(j => j.id === id)?.name ?? id), roles.find(r => r.id === i.role)?.name ?? i.role].join(', ')}, expires {new Date(i.expires).toLocaleDateString()}</span>
           <button className="btn ghost small" onClick={async () => { await api(`/invites/${i.id}`, {method: 'DELETE'}); load(); }}>Revoke</button></div>)}</>}
     </section>
   );
