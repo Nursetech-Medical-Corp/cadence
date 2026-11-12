@@ -177,6 +177,15 @@ export class Tasks {
     const add = rows.map(r => r.owner).filter(o => !assignees.includes(o) && this.db.prepare('select 1 from people where id = ?').get(o));
     return add.length ? [...assignees, ...new Set(add)] : assignees;
   }
+  /** Auto-job routines are run by AI agents: every person on one must be the owner of an assigned agent (they review). */
+  checkAutoJob(tags: string[], assignees: string[]) {
+    if (!tags.includes('auto-job') || !assignees.length) return;
+    const people = new Map(this.listPeople().map(p => [p.id, p]));
+    const agents = assignees.filter(a => people.get(a)?.kind === 'ai');
+    const owners = new Set(agents.map(a => people.get(a)?.owner).filter(Boolean));
+    const others = assignees.filter(a => people.get(a)?.kind !== 'ai' && !owners.has(a));
+    if (!agents.length || others.length) throw new Invalid('Auto-job routines are run by an AI agent. Assign an AI agent (its owner is added to review), or change the mode to hybrid or manual to give it to a person.');
+  }
   /** Puts people in the given order (pickers and sorting by assignee follow it). */
   reorderPeople(ids: string[]) {
     const set = this.db.prepare('update people set sort = ? where id = ?');
@@ -234,6 +243,25 @@ export class Tasks {
       .forEach(([n, k], i) => this.createView({projectId: p.id, name: n, kind: k, config: k === 'gantt' ? {zoom: 'week'} : {}, sort: i}));
     return this.updateProject(p.id, {sort: min - 1});
   }
+  /** Built-in spaces every workspace has: Routines (every repeating item) and Archive and later (parked and snoozed items).
+   *  They work like rollups with the usual views, plus a Routines view. Made once; renaming is fine, deleting is not. */
+  ensureSystemSpaces() {
+    const made: Project[] = [];
+    const spaces: [NonNullable<NonNullable<ProjectSettings['rollup']>['scope']>, string, string, string, [string, ViewKind, ViewConfig?][]][] = [
+      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}]]],
+      ['parked', 'Archive and later', 'ARC', 'lucide:Archive', [['Table', 'table'], ['List', 'list'], ['Board', 'board', {groupBy: 'assignee'}]]],
+    ];
+    for (const [scope, name, key0, icon, views] of spaces) {
+      if (this.listProjects().some(p => p.settings.rollup?.scope === scope)) continue;
+      const used = new Set(this.listProjects().flatMap(p => [p.key.toUpperCase(), ...(p.settings.oldKeys ?? [])]));
+      let key = key0; for (let n = 2; used.has(key); n++) key = key0 + n;
+      const max = Math.max(0, ...this.listProjects().map(p => p.sort));
+      const p = this.createProject({name, key, settings: {rollup: {include: null, scope}, icon}, noViews: true});
+      views.forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config: config ?? {}, sort: i}));
+      made.push(this.updateProject(p.id, {sort: max + 1}));
+    }
+    return made;
+  }
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
@@ -259,7 +287,7 @@ export class Tasks {
     return p;
   }
   deleteProject(pid: string) {
-    this.project(pid);
+    if (this.project(pid).settings.rollup?.scope) throw new Invalid('Routines and Archive and later are built in and always there. Rename them if you like.');
     this.db.prepare('delete from projects where id = ?').run(pid);
     this.emit({kind: 'project-deleted', id: pid});
   }
@@ -298,7 +326,7 @@ export class Tasks {
     return this.item(ref);
   }
 
-  createItem(input: ItemPatch & {projectId: string; title: string}, actor: string | null = null): Item {
+  createItem(input: ItemPatch & {projectId: string; title: string}, actor: string | null = null, opts: {system?: boolean} = {}): Item {
     const p = this.project(input.projectId);
     validatePatch(input, new Set(this.listPeople().map(x => x.id)), p.types);
     if (input.start && input.due && input.start > input.due) throw new Invalid('Start must be on or before due');
@@ -328,6 +356,7 @@ export class Tasks {
     if (item.parentId) this.item(item.parentId);
     if (item.sprint) this.sprint(item.sprint);
     for (const d of item.deps) this.item(d);
+    if (!opts.system) this.checkAutoJob(item.tags, item.assignees);
     this.db.prepare(`insert into items (id,project_id,parent_id,number,type,title,body,status,priority,assignees,start,due,estimate,tags,sprint,sort,recur,fields,created_by,created,updated,completed,deps)
       values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       item.id, item.projectId, item.parentId, item.number, item.type, item.title, item.body, item.status, item.priority,
@@ -388,6 +417,7 @@ export class Tasks {
     if (patch.fields) checkFieldValues(patch.fields, p.fields, iid);
     next.assignees = [...new Set(next.assignees)];
     if (patch.assignees !== undefined) next.assignees = this.withOwners(next.assignees);
+    if (patch.assignees !== undefined || patch.tags !== undefined) this.checkAutoJob(next.tags, next.assignees);
     if ((patch.start !== undefined || patch.due !== undefined) && next.start && next.due && next.start > next.due) throw new Invalid('Start must be on or before due');
     const wasDone = before.completed !== null;
     const isDone = p.statuses.find(s => s.id === next.status)?.category === 'done';
@@ -547,9 +577,9 @@ export class Tasks {
       projectId: p.id, parentId: done.parentId, type: done.type, title: done.title, body: done.body,
       priority: done.priority, assignees: done.assignees, tags: done.tags, estimate: done.estimate,
       fields: cleanFields(done.fields), sprint: done.sprint, due, start, recur: nextRule,
-    }, actor);
+    }, actor, {system: true});
     if (r.copySubitems) for (const c of this.listItems({parentId: done.id}))
-      this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor);
+      this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor, {system: true});
     this.db.prepare('update items set recur = ? where id = ?').run(JSON.stringify({...r, spawned: next.id}), done.id);
     this.emit({kind: 'item', item: this.item(done.id)});
   }

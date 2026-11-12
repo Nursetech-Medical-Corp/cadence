@@ -47,7 +47,7 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
         <label className="key-field">Key<InlineText value={project.key} onSave={key => save({key: key.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || project.key})} /></label>
       </div>
 
-      {project.settings.rollup && <RollupCard store={store} project={project} />}
+      {project.settings.rollup && !project.settings.rollup.scope && <RollupCard store={store} project={project} />}
       <section className="set-card">
         <div className="set-card-head"><h3>When dates move</h3><span className="muted small">For subitems set to move with their parent and steps that follow the step before.</span></div>
         <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!!project.settings.dates?.skipWeekends} onChange={e => save({settings: {...project.settings, dates: {...project.settings.dates, skipWeekends: e.target.checked}}})} /> Skip weekends (a date that lands on Saturday or Sunday moves to Monday)</label>
@@ -133,8 +133,9 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
       <IntegrationsCard store={store} project={project} />
 
       <section className="set-card danger-card">
+        {project.settings.rollup?.scope ? <div className="muted small">Built in: always here, so it cannot be deleted. You can rename it.</div> : <>
         <div className="set-card-head"><h3>Delete space</h3><span className="muted small">Removes the project, its items, sprints and views. A backup snapshot is kept in Data and backups.</span></div>
-        <button className="btn danger" onClick={() => { if (confirm(`Delete space "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`)) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete space</button>
+        <button className="btn danger" onClick={() => { if (confirm(`Delete space "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`)) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete space</button></>}
       </section>
     </div>
   );

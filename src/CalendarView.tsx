@@ -7,6 +7,7 @@ import {perWeek, upcoming} from './recur.ts';
 import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {Avatars, PriorityIcon, StatusIcon} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {sortItems, sortsOf} from './Sorting.tsx';
 import {EventEditor, TimeGrid} from './Meetings.tsx';
 import {api} from './store.ts';
 
@@ -46,7 +47,10 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
   }
   const segment = (i: Item, d: string) => config.dueOnly || !i.start || i.start >= i.due! ? '' : d === i.start ? ' seg-start' : d === i.due ? ' seg-end' : ' seg-mid';
   // Keep multi-day items in the same row order on every day so bars line up.
-  const order = (a: Item, b: Item) => Number(!!a.completed) - Number(!!b.completed) || (a.start ?? a.due!).localeCompare(b.start ?? b.due!) || a.sort - b.sort;
+  // With a Sort chosen (priority, status...), items in a day follow it; otherwise by start date.
+  const rules = sortsOf(config);
+  const rank = new Map((rules.length ? sortItems(items, rules, project, store) : []).map((i, n) => [i.id, n]));
+  const order = (a: Item, b: Item) => Number(!!a.completed) - Number(!!b.completed) || (rules.length ? (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0) : 0) || (a.start ?? a.due!).localeCompare(b.start ?? b.due!) || a.sort - b.sort;
   const undated = items.filter(i => !i.due && !i.completed);
 
   const moveTo = (id: string, day: string) => {

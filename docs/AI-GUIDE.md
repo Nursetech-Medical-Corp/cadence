@@ -41,8 +41,8 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | --- | --- | --- |
 | Items, levels, fields | Every space view | `search_items`, `get_item`, `create_item`, `quick_add`, `update_item`, `apply_to_subitems`, `delete_item` |
 | Views (list, table, board, timeline, calendar, backlog, sprint, files) | Tabs under each space; double-click a tab name in the sidebar to rename it | `list_views`, `create_view`, `update_view` (name, filters, sorts, grouping, columns, color rules), `reorder_views`, `delete_view` |
-| Routines | Routines page (List, Timeline, Workload tabs); "Routine" chip in a task's header opens it there | `list_routines`, `set_routine` |
-| Archive and later | Archive and later page; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
+| Routines | Built-in Routines space: Routines view (by SOP, switches, skip, delay, wait), plus Table, Board, Timeline, Calendar and Workload. A "Routine" chip in a task's header and a repeat mark on its type open it there | `list_routines`, `set_routine` |
+| Archive and later | Built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
 | SOP links | SOP chips on tagged tasks; SOP column on Routines | `list_sop_links`, `set_sop_links` (admins) |
 | Spaces | Sidebar: shared spaces, then "Private to me" | `create_project`, `update_project` (name, key, statuses, types, fields), `create_rollup`, `delete_project` |
 | Sprints and planning | Sprint view, Plan and forecast | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report`, `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
@@ -57,6 +57,12 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 
 UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; each person's own layout and new-item defaults; feature switches.
 
+## Built-in spaces
+
+- Every workspace has two built-in spaces, listed under "Built in" in the sidebar. They are rollups with `settings.rollup.scope`: `routines` (every live routine from every space, paused and waiting ones included) and `parked` (every archived or snoozed item). They have normal views, can be renamed, and cannot be deleted. Items are never created in them; they stay in their own space.
+- View kind `routines` (only useful in the Routines space) is the routine manager: grouped by SOP, frequency, person, space or mode, with on/off switches, skip, delay, wait and end, and "Add a routine from your templates".
+- Sort (`update_view` with `sorts`) orders rows in tables, lists, boards, timelines, calendars (within a day) and workload lists.
+
 ## Routines (repeating work)
 
 - A routine is an item with a repeat rule (`recur`). It has one live copy; finishing it makes the next. Copies never pile up. Old finished copies have `recur.spawned`.
@@ -69,6 +75,8 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
   - `end`: stop repeating. The copy stays as a normal task.
 - Paused, waiting, archived and snoozed items are left out of `search_items` with `openOnly`, My work, sprints and plans.
 - Conventions: tag every routine with its SOP code and one mode tag (`auto-job`: an AI job runs it and a person checks the output; `hybrid`: AI drafts, a person decides; `manual`: a person does it). The estimate is the human time per copy.
+- Rule: `auto-job` items must be assigned to an AI agent. The agent's owner is added automatically to review; any other person is refused (400). Switch the mode to `hybrid` or `manual` to give it to a person.
+- Workload counts each routine on every date it comes back inside the window (unless the view hides repeats).
 - In the app: a task that repeats shows a "Routine" chip in its header (with its state). It opens the routine on the Routines page (`#/routines/<item id>`), where it can be switched off, skipped, delayed or set to wait. The Repeat row in the task also has Skip, Delay, Wait and Pause.
 
 ## Archive and later
@@ -90,7 +98,7 @@ UI-only settings (no tool, by design): sign-in, roles, access rules and tokens; 
 
 ## New items in the app
 
-- Quick add tokens (below) work in every add row, including the table's insert row; a one-line hint shows them. Ctrl+Space adds the person's defaults (for example `@me due:today !high`).
+- Quick add tokens (below) work in every add row, including the table's insert row; a one-line hint shows them. Ctrl+Space adds the person's defaults from the New line menu: assignee, due, priority, estimate, sprint and tags (for example `@me due:today !high ~30m sprint:now #ops`).
 - New items are tinted for a few minutes and the view jumps to them (each person can switch this off in the New menu). Filters can use "created in the last N minutes".
 
 ## Quick add syntax (quick_add, and the UI)

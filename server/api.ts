@@ -124,6 +124,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     if (!tasks.listProjects().some(p => p.settings.rollup)) tasks.createRollup();
     tasks.db.prepare("insert into workspace (key, value) values ('rollup-added', '1') on conflict(key) do nothing").run();
   }
+  // Built-in Routines and Archive and later spaces, in every workspace.
+  tasks.ensureSystemSpaces();
   // Scheduled snapshots: checked on start and every 10 minutes against the saved interval.
   const auto = () => { try { const f = maybeSnapshot(tasks.db, bdir); mirrorUploads(tasks.dataDir, bdir); if (f) void uploadSnapshot(info.id, f, getSettings(bdir)); } catch (e) { console.error('Snapshot failed', e); } };
   auto();
