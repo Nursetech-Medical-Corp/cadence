@@ -92,6 +92,11 @@ test('job roles over the API: admin sets them, people get them by edit or invite
     const team = (await call('/team', {cookie: o})).json;
     const ids = team.jobRoles.map((j: {id: string}) => j.id);
     assert.deepEqual(ids, ['sales-rep', 'finance']);
+    // The list keeps the order the admin drags it into.
+    const team0 = (await call('/team', {cookie: o})).json.jobRoles;
+    assert.equal((await call('/workspace', {method: 'PUT', body: {jobRoles: [...team0].reverse()}, cookie: o})).status, 200);
+    assert.deepEqual((await call('/team', {cookie: o})).json.jobRoles.map((j: {id: string}) => j.id), ['finance', 'sales-rep']);
+    assert.equal((await call('/workspace', {method: 'PUT', body: {jobRoles: team0}, cookie: o})).status, 200);
     assert.equal((await call(`/team/${rep.id}`, {method: 'PATCH', body: {jobRoles: ['nope']}, cookie: o})).status, 400);
     assert.equal((await call(`/team/${rep.id}`, {method: 'PATCH', body: {jobRoles: ['sales-rep'], password: 'rep password'}, cookie: o})).status, 200);
     const r = (await call('/auth/login', {method: 'POST', body: {email: 'rep@co.test', password: 'rep password'}})).cookie!;

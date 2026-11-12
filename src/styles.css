@@ -1406,3 +1406,7 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .jr-pick { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; }
 .jr-pick-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .page.settings > .set-card:has(.jr-table) { column-span: all; }
+.jr-grip { cursor: grab; color: var(--muted); width: 18px; }
+.jr-table tr.dragging { opacity: .4; }
+.jr-table tr.drop-here td { border-top: 2px solid var(--accent, #7c5cff); }
+.jr-names { color: var(--text2, inherit); padding: 1px 2px; }

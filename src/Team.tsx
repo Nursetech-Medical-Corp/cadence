@@ -6,7 +6,7 @@ import {FEATURE_LABELS, type Customization, type Features, type Project} from '.
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 import {ConnectedAppsCard, pendingConnect} from './ConnectedApps.tsx';
-import {DomainJoinCard, JobRolePicker, JobRolesCard, type DomainJoin, type JobRole} from './JobRoles.tsx';
+import {DomainJoinCard, JobRolePicker, JobRolesCard, jobRoleNames, type DomainJoin, type JobRole} from './JobRoles.tsx';
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
@@ -266,6 +266,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
             <div className="grow" style={{minWidth: 140}}>
               <input className="inline" defaultValue={p.name} disabled={!isAdmin} onBlur={e => e.target.value !== p.name && patch(p.id, {name: e.target.value})} />
               <input className="inline small" placeholder="email for sign-in" defaultValue={p.email} disabled={!isAdmin && p.id !== me.person?.id} onBlur={e => e.target.value !== p.email && patch(p.id, {email: e.target.value})} />
+              <div className="jr-names small">{jobRoleNames(jobRoles ?? [], p.jobRoles).join(', ') || <span className="muted">No job role</span>}</div>
             </div>
             <select className="plain-select" value={p.kind} disabled={!isAdmin} onChange={e => patch(p.id, {kind: e.target.value})} title="Human or AI worker"><option value="human">Human</option><option value="ai">AI agent</option></select>
             <JobRolePicker all={jobRoles ?? []} value={p.jobRoles ?? []} disabled={!isAdmin} onChange={ids => patch(p.id, {jobRoles: ids})} />
@@ -387,7 +388,8 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
   const [mine, setMine] = useState(false);
   const [me, setMe] = useState<string | null>(null);
   const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
-  useEffect(() => { api<{roles: Role[]; jobRoles?: JobRole[]}>('/team').then(t => { setRoles(t.roles); setJobRoles(t.jobRoles ?? []); }).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
+  const [held, setHeld] = useState<Record<string, string[]>>({});
+  useEffect(() => { api<{roles: Role[]; jobRoles?: JobRole[]; people?: Member[]}>('/team').then(t => { setRoles(t.roles); setJobRoles(t.jobRoles ?? []); setHeld(Object.fromEntries((t.people ?? []).map(p => [p.id, p.jobRoles ?? []]))); }).catch(() => {}); api<Me>('/auth/me').then(m => { setAdmin(m.admin); setMe(m.person?.id ?? null); setMine(!!m.caps?.[project.id]?.includes('settings')); }).catch(() => {}); }, [project.id]);
   const access = project.settings.access ?? {default: 'inherit', members: {}};
   const personal = !!access.private;
   const canEdit = personal ? mine || (admin && !!me && !!access.members[me]) : admin;
@@ -409,7 +411,7 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
       </div>
       {store.people.map(p => (
         <div key={p.id} className="set-item">
-          <Avatar person={p} size={22} /><span className="grow">{p.name}</span>
+          <Avatar person={p} size={22} /><span className="grow">{p.name}{jobRoleNames(jobRoles, held[p.id]).length > 0 && <span className="muted small"> · {jobRoleNames(jobRoles, held[p.id]).join(', ')}</span>}</span>
           <select className="plain-select" value={access.members[p.id] ?? ''} disabled={!canEdit || (personal && p.id === me && !admin)} onChange={e => { const m = {...access.members}; if (e.target.value) m[p.id] = e.target.value; else delete m[p.id]; save({...access, members: m}); }}>
             <option value="">Same as everyone else</option>{options}
           </select>
