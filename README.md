@@ -89,8 +89,8 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 
 ### Routines (repeating work)
 - One live copy per routine; finish it and the next appears, so nothing piles up.
-- A built-in Routines space, always in the sidebar: a Routines view (group by SOP, frequency, person, space or mode; switches; edit owner, estimate, date and mode inline) plus the usual Table, Board, Timeline, Calendar and Workload views, with Mode, On/off, Then and SOP columns. Workload counts every date a routine comes back.
-- Auto-job routines are assigned to AI agents only (the agent's owner reviews).
+- A built-in Routines space, opened from the Workspace section: a Routines view (group by SOP, frequency, person, space or mode; switches; edit owner, estimate, date and mode inline) plus the usual Table, Board, Timeline, Calendar and Workload views, with Mode, On/off, Then and SOP columns. Workload counts every date a routine comes back.
+- Auto-job routines are assigned to AI agents only once the workspace has one (the agent's owner reviews).
 - Per routine: switch off (pause), Skip this one, Delay only this copy (the next stays on schedule), Wait until other work is done (a hire, a setup), or End. Switch a whole SOP off at once.
 - Each task that repeats shows a Routine chip in its header and a repeat mark in lists, tables and boards; both open it on the Routines page.
 - SOP links: tag work with an SOP code (`SOP-07.2`) and it opens that SOP's document.

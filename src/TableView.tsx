@@ -361,7 +361,7 @@ function routineCols(project: Project, store: Store): Col[] {
   if (project.settings.rollup?.scope !== 'routines') return [];
   const modeOf = (i: Item) => MODES.find(([m]) => i.tags.includes(m))?.[0] ?? '';
   const setMode = (i: Item, m: string) => store.updateItem(i.id, {tags: [...i.tags.filter(t => !MODES.some(([x]) => x === t)), ...(m ? [m] : [])],
-    ...(m === 'auto-job' ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
+    ...(m === 'auto-job' && store.people.some(p => p.kind === 'ai') ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
   const next = (i: Item) => i.recur && i.due ? nextOccurrence(i.recur, i.recur.slot ?? i.due, i.recur.slot ?? i.due) : null;
   return [
     {id: 'r-mode', name: 'Mode', width: 120, sortVal: i => modeOf(i) || '~', raw: i => modeOf(i) || null, cell: i => (
