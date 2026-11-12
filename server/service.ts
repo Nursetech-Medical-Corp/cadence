@@ -2,6 +2,8 @@
 // so anything a person can do in the UI an agent can do too.
 import {syncHours} from '../src/hours.ts';
 import {exportAll} from './backup.ts';
+import {getWorkspace} from './auth.ts';
+import {personJobRoles} from './jobroles.ts';
 import {randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import type {Db} from './db.ts';
@@ -1326,7 +1328,19 @@ export class Tasks {
   }
 
   /** Everything in this workspace as one JSON file (the same as Data and backups, Export). Passwords are left out. */
-  exportWorkspace() { return exportAll(this.db); }
+  exportWorkspace() { return exportAll(this.db, {skipPrivate: true}); }
+  /** Job roles (company roles and the spaces each one opens), permission levels, and who holds which job roles. Read only; changes are made on the Team page. */
+  jobRoles() {
+    const w = getWorkspace(this.db), projects = this.listProjects();
+    const space = (pid: string) => projects.find(p => p.id === pid);
+    return {
+      levels: w.roles.map(r => ({id: r.id, name: r.name, caps: r.caps})),
+      jobRoles: w.jobRoles.map(j => ({id: j.id, name: j.name, others: j.others,
+        spaces: Object.entries(j.spaces).filter(([pid]) => space(pid)).map(([pid, level]) => ({space: space(pid)!.key, name: space(pid)!.name, level}))})),
+      people: this.listPeople().map(p => ({id: p.id, name: p.name, jobRoles: personJobRoles(this.db, p.id)})),
+      domainJoin: w.domainJoin,
+    };
+  }
 
   /** A project's items with readable values (names, not ids), as rows or CSV. */
   exportItems(projectId: string, format: 'json' | 'csv' = 'json') {

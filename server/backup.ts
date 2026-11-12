@@ -134,21 +134,42 @@ export function maybeSnapshot(db: Db, dir = DIR()) {
   return snapshot(db, 'auto', dir);
 }
 
-export function exportAll(db: Db) {
-  const data: Record<string, unknown[]> = {};
-  const has = new Set(db.prepare("select name from sqlite_master where type = 'table'").all().map(r => r.name as string));
-  for (const t of TABLES) if (has.has(t)) data[t] = db.prepare(`select * from ${t}`).all().map(r => t === 'people' ? {...r, password: null} : r);
-  // Workspace settings travel too (roles, customization, features); Google secrets and the sign-in switch do not.
-  const w = has.has('workspace') ? getWorkspace(db) : null;
-  return {app: 'cadence', version: 1, exported: new Date().toISOString(), ...(w ? {settings: {roles: w.roles, custom: w.custom, features: w.features}} : {}), tables: data};
+/** Rows that belong to personal (private) spaces: those spaces, their items, and anything keyed to either. */
+function privateRows(db: Db, has: Set<string>) {
+  const pids = new Set(db.prepare('select id, settings from projects').all().filter(r => { try { return !!JSON.parse(String(r.settings ?? '{}')).access?.private; } catch { return false; } }).map(r => r.id as string));
+  const iids = new Set(pids.size ? db.prepare('select id, project_id from items').all().filter(r => pids.has(r.project_id as string)).map(r => r.id as string) : []);
+  const mine = (t: string, r: Record<string, unknown>) => (t === 'projects' && pids.has(r.id as string)) || (t === 'items' && iids.has(r.id as string))
+    || (typeof r.project_id === 'string' && pids.has(r.project_id)) || (typeof r.item_id === 'string' && iids.has(r.item_id));
+  const rows: Record<string, Record<string, unknown>[]> = {};
+  if (pids.size) for (const t of TABLES) if (has.has(t)) rows[t] = (db.prepare(`select * from ${t}`).all() as Record<string, unknown>[]).filter(r => mine(t, r));
+  return {pids, rows, mine};
 }
 
-export function importAll(db: Db, dump: {app?: string; version?: number; settings?: Partial<Workspace>; tables?: Record<string, Record<string, unknown>[]>}, dir = DIR()) {
+/**
+ * The whole workspace as JSON. skipPrivate (downloads by admins, the export tool) leaves out personal spaces:
+ * admins do not see into other people's personal spaces, and a restore from such a file keeps them as they are.
+ * Server snapshots (backup.ts snapshot) still hold everything, so the server can be restored in full.
+ */
+export function exportAll(db: Db, opts: {skipPrivate?: boolean} = {}) {
+  const data: Record<string, unknown[]> = {};
+  const has = new Set(db.prepare("select name from sqlite_master where type = 'table'").all().map(r => r.name as string));
+  const priv = opts.skipPrivate ? privateRows(db, has) : null;
+  for (const t of TABLES) if (has.has(t)) data[t] = (db.prepare(`select * from ${t}`).all() as Record<string, unknown>[])
+    .filter(r => !priv?.pids.size || !priv.mine(t, r)).map(r => t === 'people' ? {...r, password: null} : r);
+  // Workspace settings travel too (roles, job roles, customization, features); Google secrets and the sign-in switch do not.
+  const w = has.has('workspace') ? getWorkspace(db) : null;
+  return {app: 'cadence', version: 1, exported: new Date().toISOString(), ...(priv ? {privateExcluded: true} : {}),
+    ...(w ? {settings: {roles: w.roles, custom: w.custom, features: w.features, jobRoles: w.jobRoles, domainJoin: w.domainJoin}} : {}), tables: data};
+}
+
+export function importAll(db: Db, dump: {app?: string; version?: number; privateExcluded?: boolean; settings?: Partial<Workspace>; tables?: Record<string, Record<string, unknown>[]>}, dir = DIR()) {
   if (!['cadence', 'tasks'].includes(dump?.app ?? '') || !dump.tables) throw new Error('Not a Cadence export file');
   const before = snapshot(db, 'before-restore', dir);
   db.exec('begin');
   try {
     const has = new Set(db.prepare("select name from sqlite_master where type = 'table'").all().map(r => r.name as string));
+    // A file without personal spaces keeps the ones here: they are put back after the restore.
+    const keep = dump.privateExcluded ? privateRows(db, has).rows : {};
     // Tables missing from an older export are left as they are.
     for (const t of [...TABLES].reverse()) if (has.has(t) && t in dump.tables) db.exec(`delete from ${t}`);
     for (const t of TABLES) {
@@ -159,7 +180,11 @@ export function importAll(db: Db, dump: {app?: string; version?: number; setting
         db.prepare(`insert into ${t} (${keys.join(',')}) values (${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k] as never));
       }
     }
-    if (dump.settings && has.has('workspace')) { const {roles, custom, features} = dump.settings; saveWorkspace(db, {...(roles ? {roles} : {}), ...(custom ? {custom} : {}), ...(features ? {features} : {})}); }
+    for (const t of TABLES) for (const row of keep[t] ?? []) {
+      const cols = (db.prepare(`pragma table_info(${t})`).all() as {name: string}[]).map(c => c.name), keys = cols.filter(c => c in row);
+      db.prepare(`insert or ignore into ${t} (${keys.join(',')}) values (${keys.map(() => '?').join(',')})`).run(...keys.map(k => row[k] as never));
+    }
+    if (dump.settings && has.has('workspace')) { const {roles, custom, features, jobRoles, domainJoin} = dump.settings; saveWorkspace(db, {...(roles ? {roles} : {}), ...(custom ? {custom} : {}), ...(features ? {features} : {}), ...(jobRoles ? {jobRoles} : {}), ...(domainJoin ? {domainJoin} : {})}); }
     db.exec('commit');
   } catch (e) {
     db.exec('rollback');

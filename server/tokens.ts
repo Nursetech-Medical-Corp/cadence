@@ -41,7 +41,7 @@ export class Forbidden extends Error {}
 const OPEN = new Set(['listPeople', 'person', 'today', 'gallery', 'findItem', 'on', 'emit', 'notifyPublic']);
 
 export function guarded(tasks: Tasks, actor: string): Tasks {
-  const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true);
+  const caps = (projectId: string) => capsFor(tasks.db, actor, (tasks.project(projectId).settings as {access?: Access}).access, true, projectId);
   const need = (projectId: string, cap: Cap) => { if (!caps(projectId).has(cap)) throw new Forbidden(`Not allowed: needs "${cap}" in space ${tasks.project(projectId).key}`); };
   const sees = (projectId: string) => { try { return caps(projectId).has('view'); } catch { return false; } };
   const projOfItem = (id: string) => tasks.findItem(id).projectId;
@@ -121,6 +121,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     exportPack: (ids: string[]) => { for (const id of ids) checks.getTemplate(id); },
   };
   const filters: Record<string, (r: any) => any> = {
+    // Admins see the full setup; everyone else sees job role names and their own job roles.
+    jobRoles: (r: any) => isAdmin() ? r : {levels: r.levels.map((l: any) => ({id: l.id, name: l.name})), jobRoles: r.jobRoles.map((j: any) => ({id: j.id, name: j.name})), people: r.people.filter((p: any) => p.id === actor), domainJoin: null},
     listProjects: (r: any[]) => r.filter(p => sees(p.id)),
     listItems: (r: any[]) => r.filter(i => sees(i.projectId)),
     listRoutines: (r: any[]) => r.filter(i => sees(i.projectId)),

@@ -67,6 +67,8 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   server.registerResource('guide', 'tasks://guide', {mimeType: 'text/markdown', description: 'How to use this task app as an AI agent'}, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: readGuide()}]}));
   tool('get_workspace', 'List projects (with statuses, types, custom fields) and people.', {}, true,
     () => ({projects: tasks.listProjects(), people: people(), today: tasks.today(), actingAs: actor}));
+  tool('list_job_roles', 'Job roles (company roles like Sales rep or R&D engineer), the spaces each one opens and at which permission level, the permission levels, and who holds which job roles. Read only: an admin changes access on the Team page.', {}, true,
+    () => tasks.jobRoles());
   tool('search_items', 'Find items. All filters optional.', {
     project: z.string().optional(), assignee: z.string().optional(), status: z.string().optional(),
     text: z.string().optional(), dueBefore: z.string().optional(), openOnly: z.boolean().optional(), limit: z.number().int().max(500).optional(),
