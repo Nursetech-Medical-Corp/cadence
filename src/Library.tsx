@@ -1,11 +1,11 @@
 // Templates (gallery, yours, export and import of packs) and Routines (all repeating work in one place).
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {Bot, Copy, Download, LayoutTemplate, Pencil, Plus, Repeat, Trash2, Upload, User} from 'lucide-react';
+import {Bot, CircleStop, Copy, Download, LayoutTemplate, Pencil, Plus, Repeat, SkipForward, Trash2, Upload, User} from 'lucide-react';
 import type {Item, Template} from './types.ts';
 import {api, type Store, realProjects, validProject} from './store.ts';
-import {Avatar, Empty, Popover, itemKey} from './components.tsx';
+import {Avatar, Empty, Popover, fmtHours, itemKey} from './components.tsx';
 import {VIEW_KINDS, stepCount} from './TemplateEditor.tsx';
-import {describeRecur} from './recur.ts';
+import {describeRecur, perWeek} from './recur.ts';
 import {useTemplates} from './SettingsExtras.tsx';
 
 const VIEW_LABEL: Record<string, string> = Object.fromEntries(VIEW_KINDS);
@@ -175,35 +175,101 @@ const CADENCE: [string, (i: Item) => boolean][] = [
   ['Every few years', i => months(i) >= 24],
 ];
 
-/** Every repeating item across projects, grouped by how often it comes back. */
+const MODES = ['auto-job', 'hybrid', 'manual'] as const;
+type Mode = typeof MODES[number] | 'unset';
+const MODE_LABEL: Record<Mode, string> = {'auto-job': 'Auto job', hybrid: 'Hybrid', manual: 'Manual', unset: 'Not set'};
+const MODE_TIP: Record<Mode, string> = {
+  'auto-job': 'A job runs it. You check the output and approve.',
+  hybrid: 'A job drafts it. You review, fix and send.',
+  manual: 'You do it.',
+  unset: 'Tag it auto-job, hybrid or manual.',
+};
+export const modeOf = (i: Item): Mode => (MODES.find(m => i.tags.includes(m)) ?? (i.fields.worker === 'ai' ? 'auto-job' : 'unset'));
+export const sopOf = (i: Item) => i.tags.find(t => /^sop-/i.test(t))?.toUpperCase() ?? 'No SOP';
+const hoursWeek = (list: Item[]) => list.filter(i => !i.recur?.paused).reduce((h, i) => h + (i.estimate ?? 0) * perWeek(i.recur!), 0);
+const sopNum = (s: string) => s === 'No SOP' ? [999] : s.replace(/^SOP-/, '').split('.').map(x => Number(x) || 0);
+const bySop = (a: string, b: string) => { const x = sopNum(a), y = sopNum(b); for (let k = 0; k < Math.max(x.length, y.length); k++) if ((x[k] ?? 0) !== (y[k] ?? 0)) return (x[k] ?? 0) - (y[k] ?? 0); return a.localeCompare(b); };
+
+/**
+ * Every repeating item across spaces. Each routine has one live copy; finishing it makes the next one.
+ * Switch a routine (or a whole SOP) off to take it out of views, sprints and plans without losing its history.
+ */
 export function RoutinesPage({store, open}: {store: Store; open: (id: string) => void}) {
-  const routines = useMemo(() => [...store.items.values()].filter(i => i.recur && !i.completed).sort((a, b) => (a.due ?? '9').localeCompare(b.due ?? '9')), [store.items]);
+  const routines = useMemo(() => [...store.items.values()].filter(i => i.recur && !i.recur.spawned && !i.completed).sort((a, b) => (a.due ?? '9').localeCompare(b.due ?? '9')), [store.items]);
   const [templates] = useTemplates(store);
   const [project, setProject] = useState(realProjects(store.projects)[0]?.id ?? '');
+  const [group, setGroup] = useState<'sop' | 'often'>(() => (localStorage.getItem('routines-group') as 'sop' | 'often') ?? 'sop');
+  const [mode, setMode] = useState<Mode | 'all' | 'paused'>('all');
+  const [busy, setBusy] = useState(false);
   const repeatTemplates = templates.filter(t => t.kind === 'item' && (t.data as {recur?: unknown}).recur);
   const add = async (t: Template) => {
     const due = prompt(`First due date for "${t.name}" (YYYY-MM-DD)`, store.today);
     if (due === null) return;
     try { const it = await api<Item>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project, due: due || undefined}}); open(it.id); } catch (e) { store.fail(e); }
   };
+  const act = async (ids: string[], action: 'skip' | 'pause' | 'resume' | 'end') => {
+    if (!ids.length) return;
+    if (action === 'end' && !confirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`)) return;
+    setBusy(true);
+    try {
+      const r = await api<{errors?: string[]} | unknown[]>('/routines/act', {method: 'POST', body: {ids, action}});
+      if (Array.isArray(r)) alert('Held for approval on the AI work page.');
+      else if (r.errors?.length) alert(r.errors.join('\n'));
+    } catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
+  const shown = routines.filter(i => mode === 'all' || (mode === 'paused' ? i.recur!.paused : modeOf(i) === mode && !i.recur!.paused));
+  const active = routines.filter(i => !i.recur!.paused);
+  const groups: [string, Item[]][] = group === 'sop'
+    ? [...shown.reduce((m, i) => m.set(sopOf(i), [...(m.get(sopOf(i)) ?? []), i]), new Map<string, Item[]>())].sort((a, b) => bySop(a[0], b[0]))
+    : CADENCE.map(([label, test]) => [label, shown.filter(test)] as [string, Item[]]).filter(([, l]) => l.length);
+  const space = (i: Item) => store.projects.find(p => p.id === i.projectId)?.name ?? '';
+  const row = (i: Item) => {
+    const paused = !!i.recur!.paused, m = modeOf(i);
+    return (
+      <div key={i.id} className={'row routine-row' + (paused ? ' paused' : '')}>
+        <button className={'switch' + (paused ? '' : ' on')} disabled={busy} title={paused ? 'Off. Turn on to schedule the next one.' : 'On. Turn off to pause it.'} onClick={() => act([i.id], paused ? 'resume' : 'pause')} />
+        <span className="grow" style={{cursor: 'pointer'}} onClick={() => open(i.id)}>{i.title}</span>
+        <span className={'mode-chip mode-' + m} title={MODE_TIP[m]}>{MODE_LABEL[m]}</span>
+        <span className="muted small" title={describeRecur(i.recur!, i.due)} style={{width: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{describeRecur(i.recur!, i.due)}</span>
+        <span className="muted small" title={space(i)} style={{width: 64}}>{itemKey(i, store.projects)}</span>
+        {i.assignees.length ? i.assignees.slice(0, 2).map(a => <Avatar key={a} person={store.people.find(p => p.id === a)} size={18} />) : <span className="muted small" title="Nobody assigned">-</span>}
+        <span className="muted small" style={{width: 54, textAlign: 'right'}} title="Estimate per copy">{i.estimate ? fmtHours(i.estimate) : '-'}</span>
+        <span className={'small' + (!paused && i.due && i.due < store.today ? ' overdue' : ' muted')} style={{width: 78, textAlign: 'right'}}>{paused ? 'paused' : i.due ?? 'no date'}</span>
+        <span className="routine-actions">
+          {!paused && <button className="icon" disabled={busy} title="Skip this one: move it to the next date" onClick={() => act([i.id], 'skip')}><SkipForward size={13} /></button>}
+          <button className="icon" disabled={busy} title="End routine: stop repeating, keep this copy as a normal task" onClick={() => act([i.id], 'end')}><CircleStop size={13} /></button>
+        </span>
+      </div>
+    );
+  };
   return (
-    <div className="page" style={{maxWidth: 1100}}>
+    <div className="page" style={{maxWidth: 1180}}>
       <h1><Repeat size={20} /> Routines</h1>
-      <p className="muted">Repeating work across all projects: filings, reviews, payments, reorders, follow-ups. Finish one and the next appears on schedule. Open any routine to change how often it repeats, who does it, or when it ends.</p>
-      {CADENCE.map(([label, test]) => {
-        const list = routines.filter(test);
-        if (!list.length) return null;
-        return <section key={label}><h3>{label} <span className="count">{list.length}</span></h3>
-          {list.map(i => (
-            <div key={i.id} className="row" style={{cursor: 'pointer'}} onClick={() => open(i.id)}>
-              {i.fields.worker === 'ai' ? <Bot size={14} className="muted" /> : <User size={14} className="muted" />}
-              <span className="grow">{i.title}</span>
-              <span className="muted small">{describeRecur(i.recur!, i.due)}</span>
-              <span className="muted small">{itemKey(i, store.projects)}</span>
-              {i.assignees.slice(0, 2).map(a => <Avatar key={a} person={store.people.find(p => p.id === a)} size={18} />)}
-              <span className={'small' + (i.due && i.due < store.today ? ' overdue' : ' muted')}>{i.due ?? 'no date'}</span>
-            </div>
-          ))}
+      <p className="muted">Repeating work across all spaces. Each routine has one live copy; finish it and the next appears. Nothing piles up. Switch a routine or a whole SOP off to pause it: it leaves views, sprints and plans, keeps its history, and comes back on its next date when you switch it on.</p>
+      <div className="routine-stats">
+        <div><b>{active.length}</b><span>on</span></div>
+        <div><b>{routines.length - active.length}</b><span>paused</span></div>
+        <div title="Estimate times how often each one comes back, for routines that are on"><b>{fmtHours(hoursWeek(routines))}</b><span>per week</span></div>
+        {MODES.map(m => <div key={m} title={MODE_TIP[m]}><b>{fmtHours(hoursWeek(routines.filter(i => modeOf(i) === m)))}</b><span>{MODE_LABEL[m].toLowerCase()} / wk</span></div>)}
+      </div>
+      <div className="toolbar" style={{padding: '0 0 10px', border: 0, gap: 6, flexWrap: 'wrap'}}>
+        <span className="small muted">Group</span>
+        <select className="plain-select" value={group} onChange={e => { setGroup(e.target.value as 'sop'); localStorage.setItem('routines-group', e.target.value); }}>
+          <option value="sop">By SOP</option><option value="often">By how often</option>
+        </select>
+        <span className="small muted" style={{marginLeft: 10}}>Show</span>
+        {(['all', ...MODES, 'unset', 'paused'] as const).map(k => <button key={k} className={'chip-toggle' + (mode === k ? ' on' : '')} onClick={() => setMode(k)}>{k === 'all' ? 'All' : k === 'paused' ? 'Paused' : MODE_LABEL[k]}</button>)}
+      </div>
+      {groups.map(([label, list]) => {
+        const on = list.filter(i => !i.recur!.paused);
+        return <section key={label}>
+          <h3 className="routine-group">
+            {group === 'sop' && <button className={'switch' + (on.length ? ' on' : '')} disabled={busy} title={on.length ? `Pause all ${list.length} in ${label}` : `Turn on all ${list.length} in ${label}`}
+              onClick={() => act((on.length ? on : list).map(i => i.id), on.length ? 'pause' : 'resume')} />}
+            {label} <span className="count">{list.length}</span>
+            <span className="muted small" style={{fontWeight: 400, marginLeft: 'auto'}}>{fmtHours(hoursWeek(list))} / week</span>
+          </h3>
+          {list.map(row)}
         </section>;
       })}
       {!routines.length && <Empty title="No routines yet">Add some from below, or open any item and press Make it repeat.</Empty>}

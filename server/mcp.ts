@@ -171,6 +171,18 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
       throw new Error('AI agents do not invite people outside the workspace. Ask your owner to send this invitation.');
     return {...rest, ...(project ? {projectId: projectId(project)} : {}), ...(item ? {itemId: tasks.findItem(item).id} : {})};
   };
+  const keyOf = (x: {projectId: string; number: number}) => `${tasks.project(x.projectId).key}-${x.number}`;
+  tool('list_routines', 'Repeating work (routines): one live copy each, the next is made when it is finished. Shows paused ones too. Filter by tag, like an SOP code "SOP-07.2" or a mode "auto-job", "hybrid", "manual".',
+    {tag: z.string().optional(), paused: z.boolean().optional()}, true,
+    i => tasks.listRoutines().filter(r => (!i.tag || r.tags.includes(i.tag)) && (i.paused === undefined || !!r.recur?.paused === i.paused))
+      .map(r => ({key: keyOf(r), title: r.title, due: r.due, estimate: r.estimate, tags: r.tags, paused: !!r.recur?.paused, recur: r.recur})));
+  tool('set_routine', 'Turn routines on or off. skip: move this copy to its next date. pause: hide it from views, sprints and plans (history kept). resume: show it again from its next date. end: stop repeating (the copy stays as a normal task). Pass items, or tag to act on every routine with that tag (a whole SOP).',
+    {items: z.array(z.string()).optional(), tag: z.string().optional(), action: z.enum(['skip', 'pause', 'resume', 'end'])}, false,
+    i => {
+      const refs = i.items?.length ? i.items : i.tag ? tasks.listRoutines().filter(r => r.tags.includes(i.tag!)).map(r => r.id) : [];
+      if (!refs.length) throw new Error('No routines matched. Pass items or a tag.');
+      return refs.map(ref => { try { const r = tasks.routine(ref, i.action, actor) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title, due: r.due, paused: !!r.recur?.paused, repeating: !!r.recur}; } catch (e) { return {item: ref, error: e instanceof Error ? e.message : String(e)}; } });
+    });
   tool('list_events', 'Meetings and calendar events between two dates (Cadence events plus synced Google events), repeating ones expanded. mine: only where you organize or attend.',
     {from: z.string(), to: z.string(), project: z.string().optional(), mine: z.boolean().optional()}, true,
     i => listEvents(tasks, {from: i.from, to: i.to, person: actor, projectId: i.project ? projectId(i.project) : undefined, mine: i.mine}, seesProject));

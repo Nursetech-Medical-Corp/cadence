@@ -51,6 +51,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const checks: Record<string, (...a: any[]) => void> = {
     createItem: (i) => { need(i.projectId, 'create'); for (const d of i.deps ?? []) need(projOfItem(d), 'view'); },
     quickAdd: (i) => need(i.projectId, 'create'),
+    routine: (id) => need(projOfItem(id), 'edit'),
     updateItem: (id, patch) => { need(projOfItem(id), 'edit'); if (patch?.projectId) need(patch.projectId, 'create'); for (const d of patch?.deps ?? []) need(projOfItem(d), 'view'); },
     deleteItem: (id) => need(projOfItem(id), 'delete'),
     addComment: (id) => need(projOfItem(id), 'comment'),
@@ -119,6 +120,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const filters: Record<string, (r: any) => any> = {
     listProjects: (r: any[]) => r.filter(p => sees(p.id)),
     listItems: (r: any[]) => r.filter(i => sees(i.projectId)),
+    listRoutines: (r: any[]) => r.filter(i => sees(i.projectId)),
     listSprints: (r: any[]) => r.filter(s => sees(s.projectId)),
     listTime: (r: any[]) => r.filter(e => sees(projOfItem(e.itemId))),
     listApprovals: (r: any[]) => r.filter(a => sees(projOfItem(a.itemId))),

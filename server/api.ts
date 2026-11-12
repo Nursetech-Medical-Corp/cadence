@@ -869,7 +869,7 @@ If you did not ask for it, ignore this email.`)
           if (held('createItem', [body, actor])) return send(res, 202, propose(tasks, actor!, 'createItem', [body, actor]));
           return send(res, 201, tasks.createItem(body, actor));
         }
-        if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); return send(res, 201, tasks.quickAdd(body, actor)); }
+        if (b === 'quick' && m === 'POST') { need(body.projectId, 'create'); if (held('quickAdd', [body, actor])) return send(res, 202, propose(tasks, actor!, 'quickAdd', [body, actor])); return send(res, 201, tasks.quickAdd(body, actor)); }
         const it = b ? tasks.findItem(b) : null;
         if (it) need(it.projectId, 'view');
         if (it && c === 'comments') {
@@ -1038,6 +1038,19 @@ If you did not ask for it, ignore this email.`)
           if (!agentsOf(tasks, actor).some(x => x.id === b)) needAdmin();
           const tk = createToken(tasks.db, b, String(body.name ?? 'Agent token'));
           return send(res, 201, {...tk, mcpUrl: `${publicOrigin(req)}/mcp?ws=${info.id}&key=${tk.token}`});
+        }
+      }
+      if (a === 'routines') {
+        if (!b && m === 'GET') return send(res, 200, tasks.listRoutines().filter(i => canSee(i.projectId)));
+        // POST /routines/act {ids: [...], action}: one or many routines at once (a whole SOP).
+        if (b === 'act' && m === 'POST') {
+          const ids = (Array.isArray(body.ids) ? body.ids : []) as string[], action = String(body.action);
+          if (!ids.length) throw new Invalid('Pick at least one routine');
+          for (const iid of ids) need(tasks.findItem(iid).projectId, 'edit');
+          if (held('routine', [ids[0], action, actor])) return send(res, 202, ids.map(iid => propose(tasks, actor!, 'routine', [iid, action, actor])));
+          const out: unknown[] = [], errors: string[] = [];
+          for (const iid of ids) { try { out.push(tasks.routine(iid, action as 'skip', actor)); } catch (e) { errors.push(e instanceof Error ? e.message : String(e)); } }
+          return send(res, 200, {items: out, errors});
         }
       }
       if (a === 'proposals') {

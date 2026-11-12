@@ -3,6 +3,7 @@
 import {useState} from 'react';
 import {ChevronLeft, ChevronRight, Plus} from 'lucide-react';
 import type {Item} from './types.ts';
+import {perWeek, upcoming} from './recur.ts';
 import {addDays, daysBetween, iso, parseDay, onWorkdays} from './dates.ts';
 import {Avatars, PriorityIcon, StatusIcon} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
@@ -35,6 +36,13 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
     if (!i.due) continue;
     if (config.dueOnly || !i.start || i.start >= i.due) { put(i.due, i); continue; }
     for (let d = i.start < start ? start : i.start; d <= i.due && d <= last; d = addDays(d, 1)) put(d, i);
+  }
+  // Routines: faded previews on their next dates (not daily ones, which would fill every day). Only the live copy is real.
+  const ghostDay = new Map<string, Item[]>();
+  if (!config.hideRepeats) for (const i of items) {
+    const r = i.recur;
+    if (!r || r.paused || r.spawned || i.completed || !i.due || perWeek(r) > 1) continue;
+    for (const d of upcoming(r, i.due, 60)) { if (d > last) break; if (d >= start) ghostDay.set(d, [...(ghostDay.get(d) ?? []), i]); }
   }
   const segment = (i: Item, d: string) => config.dueOnly || !i.start || i.start >= i.due! ? '' : d === i.start ? ' seg-start' : d === i.due ? ' seg-end' : ' seg-mid';
   // Keep multi-day items in the same row order on every day so bars line up.
@@ -73,6 +81,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
           <b className="cal-title">{title}</b>
           <span className="spacer" />
           <label className="small muted" title="Show items only on their due date instead of across start to due"><input type="checkbox" checked={!!config.dueOnly} onChange={e => setConfig({dueOnly: e.target.checked})} /> Due dates only</label>
+          <label className="small muted" title="Faded previews of routines on their next dates"><input type="checkbox" checked={!config.hideRepeats} onChange={e => setConfig({hideRepeats: !e.target.checked})} /> Upcoming repeats</label>
           <button className="btn small" onClick={() => setNewMeeting(true)} title="Schedule a meeting (goes to Google Calendar when connected)">New meeting</button>
           <div className="seg">
             <button className={!hours && mode === 'month' ? 'on' : ''} onClick={() => setConfig({zoom: 'month', calHours: null})}>Month</button>
@@ -103,6 +112,7 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
                     {mode === 'week' && <Avatars ids={i.assignees} people={store.people} size={16} />}
                   </div>
                 ))}
+                {(ghostDay.get(d) ?? []).map(i => <div key={'g' + i.id} className="cal-chip cal-ghost" onClick={() => open(i.id)} title={`${i.title}: repeats here. Only the next copy is a real task.`}><span className="cal-text">{i.title}</span></div>)}
                 {mode === 'month' && list.length > 4 && <button className="cal-more" onClick={() => setOpenDays(s => { const n = new Set(s); if (n.has(d)) n.delete(d); else n.add(d); return n; })}>{openDays.has(d) ? 'Show less' : `+${list.length - 4} more`}</button>}
                 {adding?.day === d && (
                   <input autoFocus className="cal-input" placeholder="Title, Enter" value={adding.text}

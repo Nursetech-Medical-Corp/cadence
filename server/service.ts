@@ -68,6 +68,7 @@ export function checkRecur(r: unknown) {
   if (x.weekdays !== undefined && (!Array.isArray(x.weekdays) || x.weekdays.some(d => !Number.isInteger(d) || d < 0 || d > 6))) throw new Invalid('Repeat weekdays must be numbers 0 (Sunday) to 6');
   if (x.count !== undefined && x.count !== null && (!Number.isInteger(x.count) || x.count < 1)) throw new Invalid('Repeat count must be 1 or more');
   if (x.until !== undefined && x.until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(x.until))) throw new Invalid('Repeat until must be a date like 2026-12-31');
+  if (x.paused !== undefined && typeof x.paused !== 'boolean') throw new Invalid('Repeat paused must be true or false');
 }
 export const isColor = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c);
 /** Field values must match their column kind, so bad API input cannot break views. */
@@ -264,7 +265,7 @@ export class Tasks {
     if (q.parentId !== undefined) { where.push(q.parentId === null ? 'parent_id is null' : 'parent_id = ?'); if (q.parentId !== null) args.push(q.parentId); }
     if (q.text) { where.push('(title like ? or body like ?)'); args.push(`%${q.text}%`, `%${q.text}%`); }
     if (q.dueBefore) { where.push('due is not null and due <= ?'); args.push(q.dueBefore); }
-    if (q.open) where.push('completed is null');
+    if (q.open) where.push("completed is null and coalesce(json_extract(recur, '$.paused'), 0) = 0");
     const sql = `select * from items ${where.length ? 'where ' + where.join(' and ') : ''} order by sort limit ${Math.min(q.limit ?? 5000, 5000)}`;
     return this.db.prepare(sql).all(...args).map(toItem);
   }
@@ -345,7 +346,8 @@ export class Tasks {
     if (v === null) { if (isDone) throw new Invalid('Done work needs a completed date. Reopen it to clear the date.'); return null; }
     if (!isDone) throw new Invalid('Only done work has a completed date. Mark it done first.');
     if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/.test(v)) throw new Invalid('Completed must be a date like 2026-11-30 or a time like 2026-11-30T15:00:00Z');
-    const t = new Date(v.length === 10 ? v + 'T12:00:00Z' : v);
+    // A bare date means midday, or now when that date is today and midday has not come yet.
+    const t = v.length === 10 ? new Date(v === new Date().toISOString().slice(0, 10) ? Math.min(Date.parse(v + 'T12:00:00Z'), Date.now()) : Date.parse(v + 'T12:00:00Z')) : new Date(v);
     if (Number.isNaN(t.getTime())) throw new Invalid('Completed must be a real date');
     if (t.getTime() > Date.now() + 60_000) throw new Invalid('Completed cannot be in the future');
     if (t.toISOString().slice(0, 10) < created.slice(0, 10)) throw new Invalid('Completed cannot be before the item was created');
@@ -535,6 +537,36 @@ export class Tasks {
       this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor);
     this.db.prepare('update items set recur = ? where id = ?').run(JSON.stringify({...r, spawned: next.id}), done.id);
     this.emit({kind: 'item', item: this.item(done.id)});
+  }
+
+  /** Routines: open items that repeat, paused ones included. One live copy each; the next is made when it is finished. */
+  listRoutines(): Item[] {
+    return this.listItems({}).filter(i => i.recur && !i.recur.spawned && !i.completed);
+  }
+  /**
+   * Turn a routine on or off without losing its history.
+   * skip: move this copy to the next date. pause: hide it from views, sprints and plans. resume: show it again on
+   * its next date from today. end: stop repeating; this copy stays as a normal task.
+   */
+  routine(ref: string, action: 'skip' | 'pause' | 'resume' | 'end', actor: string | null = null): Item {
+    const it = this.findItem(ref), r = it.recur;
+    if (!r || r.spawned || it.completed) throw new Invalid(`${it.title} is not an open repeating item`);
+    const shift = (due: string) => it.start && it.due ? addUnit(it.start, daysBetween(it.due, due), 'day') : it.start;
+    const anchor = it.due ?? this.today();
+    if (action === 'pause') return this.updateItem(it.id, {recur: {...r, paused: true}, sprint: null}, actor);
+    if (action === 'end') return this.updateItem(it.id, {recur: null}, actor);
+    if (action === 'resume') {
+      const {paused: _p, ...rule} = r; void _p;
+      let due = it.due;
+      for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, anchor);
+      if (due && rule.until && due > rule.until) return this.updateItem(it.id, {recur: null, due}, actor);
+      return this.updateItem(it.id, {recur: rule, due, start: due ? shift(due) : it.start}, actor);
+    }
+    if (action !== 'skip') throw new Invalid('Action must be skip, pause, resume or end');
+    const due = nextOccurrence(r, anchor, anchor);
+    if (r.until && due > r.until) throw new Invalid('That was the last one. End the routine instead.');
+    if (r.count != null && r.count <= 1) throw new Invalid('That was the last one. End the routine instead.');
+    return this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...r, count: r.count - 1} : r}, actor);
   }
 
   // Comments, with @mentions by first name.
@@ -1121,7 +1153,8 @@ export class Tasks {
     const out: BurnPoint[] = [];
     for (let n = 0; n <= days; n++) {
       const date = addUnit(s.start, n, 'day');
-      const doneBy = items.filter(i => i.completed && iso(new Date(i.completed)) <= date);
+      // A completion stamped after "today" (clock or time-zone skew) counts as today.
+      const doneBy = items.filter(i => i.completed && [iso(new Date(i.completed)), today].sort()[0] <= date);
       const future = date > today;
       out.push({
         date, done: doneBy.length,
@@ -1310,7 +1343,7 @@ export class Tasks {
     const state = new Map<string, string>(); // item -> status id
     let k = 0;
     for (let d = start; d <= today; d = addUnit(d, 1, 'day')) {
-      for (; k < acts.length && acts[k].at <= d; k++) {
+      for (; k < acts.length && (acts[k].at <= d || d === today); k++) {
         const a = acts[k];
         if (a.kind === 'create' && a.after) state.set(a.item, a.after.status as string);
         else if (a.kind === 'update' && a.after && 'status' in a.after) state.set(a.item, a.after.status as string);

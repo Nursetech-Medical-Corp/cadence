@@ -289,9 +289,11 @@ function RelatedLinks({store, item, open}: {store: Store; item: Item; open: (id:
 
 /** When done work was finished, in local time. People can correct it (for work marked done late). */
 function CompletedInput({value, onChange}: {value: string; onChange: (iso: string) => void}) {
-  const d = new Date(value);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  return <input type="datetime-local" className="plain-input" value={local} max={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+  const toLocal = (iso: string) => { const d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+  const [draft, setDraft] = useState(toLocal(value));
+  useEffect(() => setDraft(toLocal(value)), [value]);
+  const commit = () => { if (draft && draft !== toLocal(value)) onChange(new Date(draft).toISOString()); };
+  return <input type="datetime-local" className="plain-input" value={draft} max={toLocal(new Date().toISOString())}
     title="When this was finished. Change it if it was marked done late."
-    onChange={e => { if (e.target.value) onChange(new Date(e.target.value).toISOString()); }} />;
+    onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit(); }} />;
 }

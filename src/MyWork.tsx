@@ -52,7 +52,7 @@ export function MyWork({store, me, open}: {store: Store; me: string; open: (id: 
   useEffect(() => setCells(load()), [me]);
   const save = (c: Cell[]) => { setCells(c); localStorage.setItem(gridKey, JSON.stringify(c)); };
   const name = store.people.find(p => p.id === me)?.name ?? '';
-  const mine = useMemo(() => [...store.items.values()].filter(i => i.assignees.includes(me)), [store.items, me]);
+  const mine = useMemo(() => [...store.items.values()].filter(i => i.assignees.includes(me) && !i.recur?.paused), [store.items, me]);
   const openCount = mine.filter(i => !i.completed).length;
   const overdue = mine.filter(i => !i.completed && i.due && i.due < store.today).length;
   const hour = new Date().getHours();
