@@ -675,7 +675,7 @@ function MyDataCard() {
 type AgentSettings = {provider: string; spaces: string[] | null; workTypes: 'ai' | 'ai+either'; watchAssignments: boolean; checkFrequency: string; maxClaims: number;
   writePolicy: 'review' | 'direct'; autoApprove: string[]; canCreate: boolean; canInviteOutside: boolean; webhook: string | null};
 type AgentRow = {id: string; name: string; owner: string | null; settings: AgentSettings};
-const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (Nursetech's project manager). Each run:
+const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (the team's project manager). Each run:
 1. Call agent_inbox (pass the "now" from your last run as since).
 2. For each new task for your owner and each available task: decide if you can do it well with your tools. If yes, claim_task (existing work) or suggest_work (new work) with a short plan. If not, skip it.
 3. For work you are accepted on or that was sent back: do it, log_step as you go (links, screenshots), then submit_work with a report and what you missed.

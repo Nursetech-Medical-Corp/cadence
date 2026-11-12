@@ -1,10 +1,10 @@
 // Under a repeating item's rule: this copy's date, the one after, and one-click Skip, Delay, Wait and Pause.
 // Also opens the item's SOP when it has an SOP-xx.x tag and a link is set.
 import {useEffect, useState} from 'react';
-import {Clock3, ExternalLink, Hourglass, Pause, Play, SkipForward} from 'lucide-react';
+import {Clock3, ExternalLink, Hourglass, Pause, Play, Repeat, SkipForward} from 'lucide-react';
 import type {Item} from './types.ts';
 import {api, type Store} from './store.ts';
-import {nextOccurrence} from './recur.ts';
+import {describeRecur, nextOccurrence} from './recur.ts';
 import {itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
@@ -21,6 +21,7 @@ export function RoutineControls({store, item}: {store: Store; item: Item}) {
     {r.paused ? <span className="rt-note paused">Paused</span> : r.waiting ? <span className="rt-note waiting">Waiting on {waitingOn.join(', ') || 'its dependencies'}</span>
       : <span className="muted">This one {item.due ?? 'no date'}{r.slot && ` (moved from ${r.slot})`}{next && <>, then <b>{next}</b></>}</span>}
     <span className="spacer" />
+    <a className="btn ghost small" href={`#/routines/${item.id}`} title="See it with all routines: timeline, workload, pause or end"><Repeat size={12} /> In Routines</a>
     {!r.paused && !r.waiting && <button className="btn ghost small" title="Done for this cycle without doing it: moves to the next date" onClick={() => act('skip')}><SkipForward size={12} /> Skip</button>}
     {!r.paused && !r.waiting && <button className="btn ghost small" title="Push only this copy; the next one stays on schedule. Change the date above to move the whole schedule" onClick={() => { const to = prompt(`Delay only this copy to (YYYY-MM-DD). The next stays on ${next ?? 'schedule'}.`, item.due ? addDays(item.due, 3) : store.today); if (to) act('delay', {to}); }}><Clock3 size={12} /> Delay</button>}
     <button className="btn ghost small" title="Start only after other work is done, like a hire or a W-2 setup" onClick={() => { const k = prompt('Wait until which item is done? Its key, like GEN-12 (comma for several).'); if (!k) return; const on = k.split(/[,\s]+/).filter(Boolean).map(x => [...store.items.values()].find(i => itemKey(i, store.projects).toUpperCase() === x.toUpperCase())?.id ?? x); act('wait', {on}); }}><Hourglass size={12} /> Wait</button>
@@ -35,4 +36,27 @@ export function SopLinks({store, item}: {store: Store; item: Item}) {
   useEffect(() => { if (codes.length) api<{code: string; url: string}[]>('/sops').then(l => setLinks(Object.fromEntries(l.map(x => [x.code, x.url])))).catch(() => {}); }, [codes.join(), store.tick]);
   if (!codes.length) return null;
   return <span className="sop-links">{codes.map(c => { const u = links[c] ?? links['*']; return u ? <a key={c} className="tag" href={u} target="_blank" rel="noreferrer" title={links[c] ? 'Open the SOP' : 'No document linked yet; opens the SOP master list'}><ExternalLink size={10} /> {c}</a> : <span key={c} className="tag">{c}</span>; })}</span>;
+}
+
+/** Header chip on a repeating item: says it is a routine (on, delayed, waiting, paused) and opens it on the Routines page, where it can be paused, skipped or delayed. */
+export function RoutineBadge({item}: {item: Item}) {
+  const r = item.recur;
+  if (!r) return null;
+  const state = r.spawned || item.completed ? 'done' : r.paused ? 'paused' : r.waiting ? 'waiting' : r.slot ? 'delayed' : 'on';
+  const label = state === 'done' ? 'Past routine copy' : state === 'on' ? 'Routine' : `Routine: ${state}`;
+  return <a className={'routine-badge ' + state} href={`#/routines/${item.id}`} title="This task repeats. Open it on the Routines page to pause it, skip this one or delay it">
+    <Repeat size={11} /> {label}
+  </a>;
+}
+
+/** Small routine mark for lists, tables and boards: shows that an item repeats (and its state), click opens it on the Routines page. */
+export function RoutineMark({item, label}: {item: Item; label?: boolean}) {
+  const r = item.recur;
+  if (!r) return null;
+  const state = r.spawned || item.completed ? 'done' : r.paused ? 'paused' : r.waiting ? 'waiting' : r.slot ? 'delayed' : 'on';
+  const rule = describeRecur(r, item.due);
+  return <a className={'routine-mark ' + state} href={`#/routines/${item.id}`} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
+    title={`Routine (${state === 'on' ? 'on' : state}): ${rule}. Click to manage it on the Routines page (pause, skip, delay)`}>
+    <Repeat size={12} />{label && <span>{state === 'on' ? rule : state === 'done' ? 'past copy' : state}</span>}
+  </a>;
 }
