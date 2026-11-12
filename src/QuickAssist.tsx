@@ -29,8 +29,8 @@ function tokenAt(text: string, caret: number) {
   return t ? {start: s, end: e, text: t} : null;
 }
 
-export type NewDefaults = {me: boolean; due: '' | 'today' | 'tomorrow' | '+1w'; priority: '' | 'urgent' | 'high' | 'medium' | 'low'; auto: boolean};
-export const newDefaults = (store: Pick<Store, 'prefs'>): NewDefaults => ({me: true, due: 'today', priority: '', auto: false, ...(store.prefs.newDefaults as Partial<NewDefaults> | undefined)});
+export type NewDefaults = {me: boolean; due: '' | 'today' | 'tomorrow' | '+1w'; priority: '' | 'urgent' | 'high' | 'medium' | 'low'; estimate: string; sprint: '' | 'now' | 'next'; tags: string; auto: boolean};
+export const newDefaults = (store: Pick<Store, 'prefs'>): NewDefaults => ({me: true, due: 'today', priority: '', estimate: '', sprint: '', tags: '', auto: false, ...(store.prefs.newDefaults as Partial<NewDefaults> | undefined)});
 /** Shortcut text for your defaults, leaving out anything the text already sets. */
 export function defaultTokens(store: Pick<Store, 'people' | 'me' | 'prefs'>, text: string) {
   const d = newDefaults(store), out: string[] = [];
@@ -38,6 +38,9 @@ export function defaultTokens(store: Pick<Store, 'people' | 'me' | 'prefs'>, tex
   if (d.me && me && !/(^|\s)@\S/.test(text)) out.push('@' + handle(me.name, store.people.map(p => p.name)));
   if (d.due && !/(^|\s)due:\S/i.test(text)) out.push('due:' + d.due);
   if (d.priority && !/(^|\s)!\S/.test(text)) out.push('!' + d.priority);
+  if (d.estimate && !/(^|\s)~\S/.test(text)) out.push('~' + d.estimate);
+  if (d.sprint && !/(^|\s)sprint:\S/i.test(text)) out.push('sprint:' + d.sprint);
+  for (const t of (d.tags ?? '').split(/[,\s]+/).filter(Boolean)) if (!new RegExp('(^|\\s)#' + t.replace(/[^\w-]/g, '') + '(\\s|$)', 'i').test(text)) out.push('#' + t.replace(/^#/, ''));
   return out.join(' ');
 }
 

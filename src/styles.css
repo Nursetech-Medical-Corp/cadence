@@ -1382,7 +1382,15 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .routine-mark.paused, .routine-mark.done { color: var(--muted); }
 .routine-mark.waiting { color: #8a5a00; }
 .routine-mark.delayed { color: #2952a3; }
-.type-cell { display: inline-flex; align-items: center; gap: 4px; }
+.type-cell { position: relative; display: inline-flex; align-items: center; }
+.routine-mark.corner { position: absolute; top: -7px; right: -9px; width: 16px; height: 16px; justify-content: center; border-radius: 50%; background: var(--bg, #fff); box-shadow: 0 0 0 1px var(--border, #ddd); z-index: 1; }
 .repeat-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .repeat-cell .routine-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .tags-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.wl-bar.ghost { opacity: .45; border-style: dashed; }
+/* Built-in spaces: summary band under the space title */
+.routine-summary { padding: 6px 0 2px; }
+.routine-summary .routine-stats { margin: 4px 0 6px; }
+.routine-summary p { margin: 0 0 4px; max-width: 980px; }
+.space-note { margin: 4px 0 2px; }
+.r-state { display: inline-flex; align-items: center; gap: 6px; }

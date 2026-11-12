@@ -89,18 +89,20 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 
 ### Routines (repeating work)
 - One live copy per routine; finish it and the next appears, so nothing piles up.
-- Routines page: List (group by SOP, frequency, person, space or mode; edit owner, estimate, date and mode inline), Timeline (month, quarter, year) and Workload (routine hours plus other dated work per person against capacity).
+- A built-in Routines space, always in the sidebar: a Routines view (group by SOP, frequency, person, space or mode; switches; edit owner, estimate, date and mode inline) plus the usual Table, Board, Timeline, Calendar and Workload views, with Mode, On/off, Then and SOP columns. Workload counts every date a routine comes back.
+- Auto-job routines are assigned to AI agents only (the agent's owner reviews).
 - Per routine: switch off (pause), Skip this one, Delay only this copy (the next stays on schedule), Wait until other work is done (a hire, a setup), or End. Switch a whole SOP off at once.
 - Each task that repeats shows a Routine chip in its header and a repeat mark in lists, tables and boards; both open it on the Routines page.
 - SOP links: tag work with an SOP code (`SOP-07.2`) and it opens that SOP's document.
 
 ### Archive and later
-- Archive ideas (maybe later), parked work (not now) and rejected items (decided no) without deleting them, or snooze an item until a date. Review and restore them on the Archive and later page.
+- Archive ideas (maybe later), parked work (not now) and rejected items (decided no) without deleting them, or snooze an item until a date. They live in the built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns.
 
 ### Views
 - List: an outline with nesting. Enter adds the next item, Tab indents, a hover gutter adds above or below and drags.
 - Table: spreadsheet editing, resizable and reorderable columns, multi-level sort, filters, a property visibility panel, column totals (sum, average, min, max, counts, percent), and virtual scrolling for large tables.
 - Board: Kanban by any field, swimlanes, WIP limits, card covers from image attachments.
+- Sort works in every view: rows in tables, lists and timelines, cards in boards, items within a calendar day, and workload lists (priority, due, status, any column).
 - Timeline (Gantt): drag to move and resize, drag to link dependencies, parent spans, critical path, named baselines, sprint bands, and an overrun marker when subtasks run past a parent.
 - Calendar, Workload (hours per person against capacity), Backlog, Sprint (burndown, velocity, capacity, rollover), and Files.
 - Everything: one dashboard, calendar, timeline and list across all your workspaces, all editable.
@@ -111,7 +113,7 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Automatic: created time, last edited time, created by.
 
 ### Writing fast
-- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates. Ctrl+Space adds your defaults (for example `@me due:today !high`).
+- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates. Ctrl+Space adds your defaults from the New line menu (assignee, due, priority, estimate, sprint, tags).
 - New items are tinted for a few minutes and the view jumps to them; turn either off in the New menu. Filters can match "created in the last N minutes".
 - Quick capture from anywhere (C), with dictation. Command palette (Ctrl+K). Rebindable shortcuts.
 - Block editor for descriptions: headings, lists, checklists, code, images (paste a screenshot), links to other items with `[[KEY-12]]`.

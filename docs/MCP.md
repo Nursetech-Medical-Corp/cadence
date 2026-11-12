@@ -80,8 +80,8 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
 | AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
-| Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag) |
-| Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked` |
+| Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
+| Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
 | SOP links | `list_sop_links`, `set_sop_links` (admins) |
 | Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |
 | Agents | `agent_inbox`, `suggest_work`, `my_proposals` |

@@ -50,13 +50,16 @@ export function RoutineBadge({item}: {item: Item}) {
 }
 
 /** Small routine mark for lists, tables and boards: shows that an item repeats (and its state), click opens it on the Routines page. */
-export function RoutineMark({item, label}: {item: Item; label?: boolean}) {
+export function RoutineMark({item, label, corner}: {item: Item; label?: boolean; corner?: boolean}) {
   const r = item.recur;
   if (!r) return null;
   const state = r.spawned || item.completed ? 'done' : r.paused ? 'paused' : r.waiting ? 'waiting' : r.slot ? 'delayed' : 'on';
   const rule = describeRecur(r, item.due);
-  return <a className={'routine-mark ' + state} href={`#/routines/${item.id}`} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
+  return <a className={'routine-mark ' + state + (corner ? ' corner' : '')} href={`#/routines/${item.id}`} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
     title={`Routine (${state === 'on' ? 'on' : state}): ${rule}. Click to manage it on the Routines page (pause, skip, delay)`}>
-    <Repeat size={12} />{label && <span>{state === 'on' ? rule : state === 'done' ? 'past copy' : state}</span>}
+    <Repeat size={corner ? 10 : 12} />{label && <span>{state === 'on' ? rule : state === 'done' ? 'past copy' : state}</span>}
   </a>;
 }
+
+/** Who may be assigned: auto-job routines are run by AI agents, so only agents are offered. */
+export const peopleFor = <P extends {kind?: string}>(i: Pick<Item, 'tags'>, people: P[]) => i.tags.includes('auto-job') ? people.filter(p => p.kind === 'ai') : people;

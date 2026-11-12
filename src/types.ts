@@ -58,8 +58,10 @@ export type ProjectSettings = {
   icon?: string; color?: string;
   /** When dates move: skip weekends, and whether steps that follow another move always (gap) or only when they would overlap. */
   dates?: {skipWeekends?: boolean; shift?: 'gap' | 'overlap'};
-  /** A rollup shows work from other projects together. include null means every project. */
-  rollup?: {include: string[] | null};
+  /** A rollup shows work from other projects together. include null means every project.
+   *  scope makes it a built-in space that is always there: 'routines' (every repeating item, paused and waiting ones too)
+   *  or 'parked' (archived and snoozed items). Built-in spaces cannot be deleted. */
+  rollup?: {include: string[] | null; scope?: 'routines' | 'parked'};
 };
 
 export type TypeRule = {
@@ -150,7 +152,7 @@ export type Sprint = {
   created: string;
 };
 
-export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files';
+export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines';
 export type ViewConfig = {
   text?: string; assignee?: string; hideDone?: boolean; hideRepeats?: boolean; types?: string[]; sprint?: string;
   groupBy?: 'status' | 'priority' | 'assignee' | 'type' | 'sprint';

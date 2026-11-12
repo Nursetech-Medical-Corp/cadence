@@ -1,6 +1,6 @@
-// Routines: every repeating item across spaces in one place, with the same kinds of views a space has.
-// List edits who, estimate, next date and mode inline. Timeline shows when each routine comes back over a month,
-// quarter or year. Workload shows who carries the routine load each week next to their other work.
+// Routines: the Routines view of the built-in Routines space (which also has the usual table, board, timeline,
+// calendar and workload views). Groups every repeating item by SOP, frequency, person, space or mode, and edits
+// who, estimate, next date and mode inline.
 // A routine has one live copy; finishing it makes the next. Switch one (or a whole SOP) off, delay this copy,
 // skip it, make it wait for other work (a hire, a W-2 setup), or end it.
 import {Fragment, useEffect, useMemo, useState} from 'react';
@@ -11,6 +11,8 @@ import {Avatar, DateInput, Empty, PeoplePicker, fmtHours, itemKey} from './compo
 import {describeRecur, nextOccurrence, perWeek, upcoming} from './recur.ts';
 import {addDays, daysBetween, monday, parseDay} from './dates.ts';
 import {useTemplates} from './SettingsExtras.tsx';
+import type {ViewProps} from './viewProps.ts';
+import {peopleFor} from './RoutineControls.tsx';
 
 const MODES = ['auto-job', 'hybrid', 'manual'] as const;
 export type Mode = typeof MODES[number] | 'unset';
@@ -64,31 +66,46 @@ export function useSopLinks(store: Store) {
 }
 
 type Group = 'sop' | 'often' | 'person' | 'space' | 'mode';
-type Tab = 'list' | 'timeline' | 'workload';
 
-export function RoutinesPage({store, open, focus}: {store: Store; open: (id: string) => void; focus?: string}) {
-  const all = useMemo(() => [...store.items.values()].filter(i => i.recur && !i.recur.spawned && !i.completed).sort((a, b) => (a.due ?? '9').localeCompare(b.due ?? '9')), [store.items]);
-  const [tab, setTab] = useState<Tab>(() => (localStorage.getItem('routines-tab') as Tab) ?? 'list');
+/** Summary band at the top of the Routines space: what is on, waiting, paused, and the hours it all takes. */
+export function RoutineSummary({items}: {items: Item[]}) {
+  const all = items.filter(i => i.recur && !i.recur.spawned && !i.completed);
+  const counts = {on: all.filter(i => live(i)).length, paused: all.filter(i => stateOf(i) === 'paused').length, waiting: all.filter(i => stateOf(i) === 'waiting').length};
+  return <div className="routine-summary">
+    <div className="routine-stats">
+      <div title="Routines that are on (including delayed copies)"><b>{counts.on}</b><span>on</span></div>
+      <div title="Waiting for other work, like a hire"><b>{counts.waiting}</b><span>waiting</span></div>
+      <div title="Switched off; history kept"><b>{counts.paused}</b><span>paused</span></div>
+      <div title="Estimate times how often each comes back, for routines that are on"><b>{fmtHours(hoursWeek(all))}</b><span>per week</span></div>
+      {MODES.map(m => <div key={m} title={MODE_TIP[m]}><b>{fmtHours(hoursWeek(all.filter(i => modeOf(i) === m)))}</b><span>{MODE_LABEL[m].toLowerCase()} / wk</span></div>)}
+    </div>
+    <p className="muted small">Every repeating task from every space. Each has one live copy; finish it and the next appears. <b>Skip</b> closes this cycle. <b>Delay</b> moves only this copy. <b>Wait</b> holds it until other work is done. <b>Switch off</b> pauses it everywhere. Auto jobs go to AI agents only.</p>
+  </div>;
+}
+
+/** The Routines view (in the Routines space): routines grouped by SOP, frequency, person, space or mode, with switches and actions. */
+export function RoutinesView({store, items, open}: ViewProps) {
+  const all = useMemo(() => items.filter(i => i.recur && !i.recur.spawned && !i.completed).sort((a, b) => (a.due ?? '9').localeCompare(b.due ?? '9')), [items]);
   const [group, setGroup] = useState<Group>(() => (localStorage.getItem('routines-group') as Group) ?? 'sop');
   const [show, setShow] = useState<Mode | 'all' | State>('all');
-  const [who, setWho] = useState('');
-  const [space, setSpace] = useState('');
   const [busy, setBusy] = useState(false);
   const sopLink = useSopLinks(store);
-  // Opened from a task's Routine link (#/routines/<id>): show the list with every filter cleared, then scroll to that row and flash it.
+  // Opened from a task's Routine link: scroll to that row and flash it.
   useEffect(() => {
+    const focus = sessionStorage.getItem('routine-focus');
     if (!focus) return;
-    setTab('list'); setShow('all'); setWho(''); setSpace('');
+    sessionStorage.removeItem('routine-focus');
+    setShow('all');
     let tries = 0;
     const t = setInterval(() => {
       const el = document.querySelector(`[data-rid="${focus}"]`) as HTMLElement | null;
-      if (el || ++tries > 20) {
+      if (el || ++tries > 30) {
         clearInterval(t);
         if (el) { el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.setAttribute('data-flash', ''); el.setAttribute('data-focus', ''); setTimeout(() => el.removeAttribute('data-flash'), 2500); }
       }
     }, 100);
     return () => clearInterval(t);
-  }, [focus]);
+  }, []);
   const act = async (ids: string[], action: 'skip' | 'pause' | 'resume' | 'end' | 'delay' | 'wait', extra: {to?: string; on?: string[]} = {}) => {
     if (!ids.length) return;
     if (action === 'end' && !confirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`)) return;
@@ -107,10 +124,8 @@ export function RoutinesPage({store, open, focus}: {store: Store; open: (id: str
     const ids = keys.map(k => [...store.items.values()].find(x => itemKey(x, store.projects).toUpperCase() === k.toUpperCase())?.id ?? k);
     act([i.id], 'wait', {on: ids});
   };
-  const shown = all.filter(i => (show === 'all' || (['on', 'paused', 'waiting', 'delayed'].includes(show) ? stateOf(i) === show : modeOf(i) === show))
-    && (!who || (who === 'none' ? !i.assignees.length : i.assignees.includes(who))) && (!space || i.projectId === space));
-  const people = store.people;
-  const nameOf = (id: string) => people.find(p => p.id === id)?.name ?? 'Unknown';
+  const shown = all.filter(i => show === 'all' || (['on', 'paused', 'waiting', 'delayed'].includes(show) ? stateOf(i) === show : modeOf(i) === show));
+  const nameOf = (id: string) => store.people.find(p => p.id === id)?.name ?? 'Unknown';
   const groups: [string, Item[]][] = (() => {
     const by = (f: (i: Item) => string[]) => { const m = new Map<string, Item[]>(); for (const i of shown) for (const k of f(i)) m.set(k, [...(m.get(k) ?? []), i]); return [...m]; };
     if (group === 'often') return OFTEN.map(([l, t]) => [l, shown.filter(t)] as [string, Item[]]).filter(([, l]) => l.length);
@@ -119,33 +134,16 @@ export function RoutinesPage({store, open, focus}: {store: Store; open: (id: str
     if (group === 'mode') return by(i => [MODE_LABEL[modeOf(i)]]);
     return by(i => [sopOf(i)]).sort((a, b) => bySop(a[0], b[0]));
   })();
-  const counts = {on: all.filter(i => stateOf(i) === 'on').length, delayed: all.filter(i => stateOf(i) === 'delayed').length, paused: all.filter(i => stateOf(i) === 'paused').length, waiting: all.filter(i => stateOf(i) === 'waiting').length};
   return (
     <div className="page routines-page" style={{maxWidth: 1320}}>
-      <h1><Repeat size={20} /> Routines</h1>
-      <p className="muted small">Each routine has one live copy; finish it and the next appears, so nothing piles up. <b>Skip</b> closes this cycle without doing it. <b>Delay</b> moves only this copy; the next stays on schedule (change the date in the item to move the whole schedule). <b>Wait</b> holds a routine until other work is done, then it starts by itself. <b>Switch off</b> pauses it everywhere and keeps its history.</p>
-      <div className="routine-stats">
-        <div><b>{counts.on + counts.delayed}</b><span>on</span></div>
-        <div title="Waiting for other work, like a hire"><b>{counts.waiting}</b><span>waiting</span></div>
-        <div><b>{counts.paused}</b><span>paused</span></div>
-        <div title="Estimate times how often each comes back, for routines that are on"><b>{fmtHours(hoursWeek(all))}</b><span>per week</span></div>
-        {MODES.map(m => <div key={m} title={MODE_TIP[m]}><b>{fmtHours(hoursWeek(all.filter(i => modeOf(i) === m)))}</b><span>{MODE_LABEL[m].toLowerCase()} / wk</span></div>)}
-      </div>
-      <div className="tabs routine-tabs">
-        {(['list', 'timeline', 'workload'] as Tab[]).map(t => <button key={t} className={'tab' + (tab === t ? ' active' : '')} onClick={() => { setTab(t); localStorage.setItem('routines-tab', t); }}>{t === 'list' ? 'List' : t === 'timeline' ? 'Timeline' : 'Workload'}</button>)}
-      </div>
-      <div className="toolbar" style={{padding: '8px 0', border: 0, gap: 6, flexWrap: 'wrap'}}>
-        {tab !== 'workload' && <><span className="small muted">Group</span>
-          <select className="plain-select" value={group} onChange={e => { setGroup(e.target.value as Group); localStorage.setItem('routines-group', e.target.value); }}>
-            <option value="sop">By SOP</option><option value="often">By how often</option><option value="person">By person</option><option value="space">By space</option><option value="mode">By mode</option>
-          </select></>}
-        <select className="plain-select" value={who} onChange={e => setWho(e.target.value)}><option value="">Anyone</option><option value="none">Unassigned</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select className="plain-select" value={space} onChange={e => setSpace(e.target.value)}><option value="">All spaces</option>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      <div className="toolbar" style={{padding: '0 0 8px', border: 0, gap: 6, flexWrap: 'wrap'}}>
+        <span className="small muted">Group</span>
+        <select className="plain-select" value={group} onChange={e => { setGroup(e.target.value as Group); localStorage.setItem('routines-group', e.target.value); }}>
+          <option value="sop">By SOP</option><option value="often">By how often</option><option value="person">By person</option><option value="space">By space</option><option value="mode">By mode</option>
+        </select>
         {(['all', 'on', 'waiting', 'paused', ...MODES] as const).map(k => <button key={k} className={'chip-toggle' + (show === k ? ' on' : '')} onClick={() => setShow(k)}>{k === 'all' ? 'All' : k === 'on' ? 'On' : k === 'waiting' ? 'Waiting' : k === 'paused' ? 'Paused' : MODE_LABEL[k]}</button>)}
       </div>
-      {tab === 'list' && <RoutineList store={store} groups={groups} group={group} open={open} busy={busy} act={act} delay={delay} wait={wait} sopLink={sopLink} />}
-      {tab === 'timeline' && <RoutineTimeline store={store} groups={groups} open={open} />}
-      {tab === 'workload' && <RoutineWorkload store={store} routines={shown} />}
+      <RoutineList store={store} groups={groups} group={group} open={open} busy={busy} act={act} delay={delay} wait={wait} sopLink={sopLink} />
       {!all.length && <Empty title="No routines yet">Add some from below, or open any item and press Make it repeat.</Empty>}
       <AddFromTemplate store={store} open={open} />
     </div>
@@ -154,7 +152,9 @@ export function RoutinesPage({store, open, focus}: {store: Store; open: (id: str
 
 function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLink}: {store: Store; groups: [string, Item[]][]; group: Group; open: (id: string) => void; busy: boolean;
   act: (ids: string[], a: 'skip' | 'pause' | 'resume' | 'end') => void; delay: (i: Item) => void; wait: (i: Item) => void; sopLink: (code: string) => string | undefined}) {
-  const setMode = (i: Item, m: Mode) => store.updateItem(i.id, {tags: [...i.tags.filter(t => !(MODES as readonly string[]).includes(t)), ...(m === 'unset' ? [] : [m])]});
+  // Auto jobs are run by AI agents, so switching to Auto job drops people from the assignees.
+  const setMode = (i: Item, m: Mode) => store.updateItem(i.id, {tags: [...i.tags.filter(t => !(MODES as readonly string[]).includes(t)), ...(m === 'unset' ? [] : [m])],
+    ...(m === 'auto-job' ? {assignees: i.assignees.filter(a => store.people.find(p => p.id === a)?.kind === 'ai')} : {})});
   return (
     <div className="routine-table">
       <div className="rt-row rt-head small muted">
@@ -185,7 +185,7 @@ function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLin
                   {[...MODES, 'unset' as const].map(x => <option key={x} value={x}>{MODE_LABEL[x]}</option>)}
                 </select>
                 <span className="muted small rt-rule" title={describeRecur(i.recur!, i.due)}>{describeRecur(i.recur!, i.due)}</span>
-                <span className="rt-who">{i.assignees.length ? null : <span className="muted small">Nobody</span>}<PeoplePicker compact value={i.assignees} people={store.people} onChange={assignees => store.updateItem(i.id, {assignees})} /></span>
+                <span className="rt-who">{i.assignees.length ? null : <span className="muted small">Nobody</span>}<PeoplePicker compact value={i.assignees} people={peopleFor(i, store.people)} onChange={assignees => store.updateItem(i.id, {assignees})} /></span>
                 <input className="plain-input rt-est" type="number" min={0} step={0.25} title="Hours per copy (review time for auto jobs)" defaultValue={i.estimate ?? ''} key={i.id + String(i.estimate)}
                   onBlur={e => { const v = e.target.value === '' ? null : Number(e.target.value); if (v !== i.estimate) store.updateItem(i.id, {estimate: v}); }} />
                 <DateInput value={i.due} today={store.today} onChange={due => store.updateItem(i.id, {due})} />
@@ -202,101 +202,6 @@ function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLin
           })}
         </Fragment>;
       })}
-    </div>
-  );
-}
-
-type Span = 'month' | 'quarter' | 'year';
-function RoutineTimeline({store, groups, open}: {store: Store; groups: [string, Item[]][]; open: (id: string) => void}) {
-  const [span, setSpan] = useState<Span>(() => (localStorage.getItem('routines-span') as Span) ?? 'quarter');
-  const start = span === 'month' ? store.today : monday(store.today);
-  const cols: {from: string; to: string; label: string}[] = useMemo(() => {
-    if (span === 'month') return Array.from({length: 35}, (_, n) => { const d = addDays(start, n); return {from: d, to: d, label: String(parseDay(d).getDate())}; });
-    if (span === 'quarter') return Array.from({length: 13}, (_, n) => { const d = addDays(start, 7 * n); return {from: d, to: addDays(d, 6), label: parseDay(d).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}; });
-    const t = parseDay(store.today);
-    return Array.from({length: 12}, (_, n) => { const a = new Date(t.getFullYear(), t.getMonth() + n, 1), b = new Date(t.getFullYear(), t.getMonth() + n + 1, 0);
-      const iso = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-      return {from: iso(a), to: iso(b), label: a.toLocaleDateString(undefined, {month: 'short', year: n === 0 || a.getMonth() === 0 ? '2-digit' : undefined})}; });
-  }, [span, start, store.today]);
-  const end = cols[cols.length - 1].to;
-  return (
-    <div>
-      <div className="toolbar" style={{padding: '0 0 8px', border: 0}}>
-        {(['month', 'quarter', 'year'] as Span[]).map(s => <button key={s} className={'chip-toggle' + (span === s ? ' on' : '')} onClick={() => { setSpan(s); localStorage.setItem('routines-span', s); }}>{s === 'month' ? 'Month (days)' : s === 'quarter' ? 'Quarter (weeks)' : 'Year (months)'}</button>)}
-        <span className="muted small">Dots are future copies. Only the first is a real task. Paused and waiting routines show none.</span>
-      </div>
-      <div className="rtl" style={{gridTemplateColumns: `minmax(220px, 300px) repeat(${cols.length}, minmax(${span === 'month' ? 22 : 44}px, 1fr)) 60px`}}>
-        <div className="rtl-h" />{cols.map(c => <div key={c.from} className={'rtl-h small muted' + (c.from <= store.today && store.today <= c.to ? ' now' : '')}>{c.label}</div>)}<div className="rtl-h small muted">Hours</div>
-        {groups.map(([label, list]) => <Fragment key={label}>
-          <div className="rtl-g">{label}</div>
-          {list.map(i => {
-            const dates = routineDates(i, end);
-            const per = cols.map(c => dates.filter(d => d >= c.from && d <= c.to).length);
-            const total = per.reduce((a, b) => a + b, 0) * (i.estimate ?? 0);
-            return <Fragment key={i.id}>
-              <div className="rtl-name" title={i.title} onClick={() => open(i.id)}>{i.title}</div>
-              {per.map((n, k) => <div key={k} className={'rtl-cell' + (cols[k].from <= store.today && store.today <= cols[k].to ? ' now' : '')}>
-                {n > 0 && <span className={'rtl-dot mode-' + modeOf(i) + (k === per.findIndex(x => x > 0) ? ' first' : '')} title={`${n} copy${n > 1 ? 'ies' : ''} ${cols[k].from}${cols[k].to !== cols[k].from ? ' to ' + cols[k].to : ''}`}>{n > 1 ? n : ''}</span>}
-              </div>)}
-              <div className="rtl-cell small muted">{total ? fmtHours(total) : ''}</div>
-            </Fragment>;
-          })}
-        </Fragment>)}
-      </div>
-    </div>
-  );
-}
-
-/** Who carries the routine load, week by week, next to the rest of their dated work. */
-function RoutineWorkload({store, routines}: {store: Store; routines: Item[]}) {
-  const [weekly, setWeekly] = useState<Record<string, number>>({});
-  const [other, setOther] = useState(true);
-  useEffect(() => { api<{id: string; weeklyHours: number}[]>('/plan/people').then(l => setWeekly(Object.fromEntries(l.map(p => [p.id, p.weeklyHours])))).catch(() => {}); }, [store.tick]);
-  const weeks = Array.from({length: 12}, (_, n) => addDays(monday(store.today), 7 * n));
-  const end = addDays(weeks[11], 6);
-  const rows = [...store.people.filter(p => p.kind !== 'ai').map(p => p.id), 'none'];
-  const routineHours = (pid: string, w: string) => routines.reduce((h, i) => {
-    const mine = pid === 'none' ? !i.assignees.length : i.assignees.includes(pid);
-    if (!mine) return h;
-    const n = routineDates(i, end).filter(d => d >= w && d <= addDays(w, 6)).length;
-    return h + n * (i.estimate ?? 0) / Math.max(1, i.assignees.length);
-  }, 0);
-  const routineIds = new Set(routines.map(i => i.id));
-  const otherHours = (pid: string, w: string) => [...store.items.values()].reduce((h, i) => {
-    if (i.completed || i.recur || routineIds.has(i.id) || !i.estimate || !i.due || i.fields.archived) return h;
-    const mine = pid === 'none' ? !i.assignees.length : i.assignees.includes(pid);
-    if (!mine) return h;
-    const from = i.start && i.start < i.due ? i.start : i.due;
-    const span = Math.max(1, daysBetween(from, i.due) + 1);
-    const overlap = Math.max(0, daysBetween(from < w ? w : from, i.due > addDays(w, 6) ? addDays(w, 6) : i.due) + 1);
-    return h + i.estimate * overlap / span / Math.max(1, i.assignees.length);
-  }, 0);
-  const byMode = (pid: string) => MODES.map(m => [m, routines.filter(i => modeOf(i) === m && live(i) && (pid === 'none' ? !i.assignees.length : i.assignees.includes(pid))).reduce((h, i) => h + (i.estimate ?? 0) * perWeek(i.recur!) / Math.max(1, i.assignees.length), 0)] as const);
-  const level = (h: number, cap: number) => h > cap ? 'over' : h > cap * 0.8 ? 'near' : h > 0 ? 'ok' : '';
-  return (
-    <div>
-      <div className="toolbar" style={{padding: '0 0 8px', border: 0}}>
-        <label className="small muted"><input type="checkbox" checked={other} onChange={e => setOther(e.target.checked)} /> Add their other dated work (projects and tasks)</label>
-        <span className="muted small">Hours per week: routines {other ? '+ other work ' : ''}against each person's weekly capacity. Shared routines split evenly.</span>
-      </div>
-      <div className="rtl" style={{gridTemplateColumns: `200px 200px repeat(12, minmax(56px, 1fr))`}}>
-        <div className="rtl-h" /><div className="rtl-h small muted">Routines per wk by mode</div>
-        {weeks.map(w => <div key={w} className="rtl-h small muted">{parseDay(w).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}</div>)}
-        {rows.map(pid => {
-          const p = store.people.find(x => x.id === pid), cap = pid === 'none' ? Infinity : weekly[pid] ?? 40;
-          return <Fragment key={pid}>
-            <div className="rtl-name">{p ? <><Avatar person={p} size={18} /> {p.name}</> : 'Unassigned'} {p && <span className="muted small">({cap}h)</span>}</div>
-            <div className="rtl-cell small">{byMode(pid).map(([m, h]) => h > 0 && <span key={m} className={'mode-chip mode-' + m} style={{marginRight: 4}}>{fmtHours(h)}</span>)}</div>
-            {weeks.map(w => {
-              const r = routineHours(pid, w), o = other ? otherHours(pid, w) : 0, h = r + o;
-              return <div key={w} className={'rtl-cell wl ' + level(h, cap)} title={`${p?.name ?? 'Unassigned'}, week of ${w}: routines ${r.toFixed(1)}h${other ? `, other work ${o.toFixed(1)}h` : ''}, capacity ${cap === Infinity ? 'none' : cap + 'h'}`}>
-                <b>{h ? Math.round(h) : ''}</b>{other && r > 0 && <span className="muted small"> ({Math.round(r)})</span>}
-              </div>;
-            })}
-          </Fragment>;
-        })}
-      </div>
-      <p className="muted small">Bold is total hours that week; the number in brackets is the routine part. Green is under 80% of capacity, amber near full, red over.</p>
     </div>
   );
 }

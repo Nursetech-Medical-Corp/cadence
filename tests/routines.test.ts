@@ -20,7 +20,7 @@ function setup(today = '2026-11-11') {
 
 test('routines: skip moves to the next date, pause hides from open lists, resume rolls forward, end stops repeating', () => {
   const {t, david, p, setDay} = setup();
-  const weekly = t.createItem({projectId: p.id, title: 'Weekly check', assignees: [david.id], due: '2026-11-16', start: '2026-11-15', estimate: 0.5, tags: ['routine', 'SOP-07.2', 'auto-job'], recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  const weekly = t.createItem({projectId: p.id, title: 'Weekly check', assignees: [david.id], due: '2026-11-16', start: '2026-11-15', estimate: 0.5, tags: ['routine', 'SOP-07.2', 'hybrid'], recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
   t.createItem({projectId: p.id, title: 'One-off', due: '2026-11-20'}, david.id);
   assert.equal(t.listRoutines().length, 1);
 
@@ -133,4 +133,36 @@ test('renaming a space key keeps old item keys working', () => {
   assert.equal(t.findItem(`GEN-${it.number}`).id, it.id);
   assert.equal(t.findItem(`NT-${it.number}`).id, it.id);
   assert.throws(() => t.createProject({name: 'Other', key: 'X1'}) && t.updateProject(t.listProjects().find(x => x.key === 'X1')!.id, {key: 'NT'}), /already used/);
+});
+
+test('built-in spaces: Routines and Archive and later exist once, have views, and cannot be deleted', () => {
+  const {t} = setup();
+  const made = t.ensureSystemSpaces();
+  assert.equal(made.length, 2);
+  assert.equal(t.ensureSystemSpaces().length, 0, 'made only once');
+  const routines = t.listProjects().find(p => p.settings.rollup?.scope === 'routines')!;
+  const parked = t.listProjects().find(p => p.settings.rollup?.scope === 'parked')!;
+  assert.ok(routines && parked);
+  const kinds = t.listViews(routines.id).map(v => v.kind);
+  assert.deepEqual(kinds, ['routines', 'table', 'board', 'gantt', 'calendar', 'workload']);
+  assert.throws(() => t.deleteProject(routines.id), /built in/);
+  assert.throws(() => t.createItem({projectId: parked.id, title: 'x'}), /other spaces/);
+});
+
+test('auto-job routines go to AI agents only; the agent owner may be on it to review; routine copies keep working', () => {
+  const {t, david, p} = setup();
+  const bot = t.createPerson({name: 'Bot'});
+  t.db.prepare("update people set kind = 'ai', owner = ? where id = ?").run(david.id, bot.id);
+  const rule = {every: 1, unit: 'week' as const, mode: 'schedule' as const};
+  assert.throws(() => t.createItem({projectId: p.id, title: 'Job', assignees: [david.id], tags: ['auto-job'], recur: rule, due: '2026-11-16'}), /AI agent/);
+  const job = t.createItem({projectId: p.id, title: 'Job', assignees: [bot.id], tags: ['auto-job'], recur: rule, due: '2026-11-16'});
+  assert.deepEqual(new Set(job.assignees), new Set([bot.id, david.id]), 'owner added to review');
+  const other = t.createPerson({name: 'Sam'});
+  assert.throws(() => t.updateItem(job.id, {assignees: [bot.id, other.id]}), /AI agent/);
+  const human = t.createItem({projectId: p.id, title: 'Manual', assignees: [other.id], tags: ['manual'], recur: rule, due: '2026-11-16'});
+  assert.throws(() => t.updateItem(human.id, {tags: ['auto-job']}), /AI agent/, 'switching to auto-job with a person on it is refused');
+  // Finishing a copy still makes the next one.
+  const done = p.statuses.find(s => s.category === 'done')!.id;
+  t.updateItem(job.id, {status: done});
+  assert.equal(t.listRoutines().filter(i => i.title === 'Job').length, 1);
 });

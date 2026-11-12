@@ -1,7 +1,7 @@
 // New items you just made: tint them for a few minutes and scroll to the newest so it never gets lost when a
 // sort or filter puts it somewhere else. Settings live in your own preferences (New items menu in a view's toolbar).
 import {useEffect, useState} from 'react';
-import {Sparkles} from 'lucide-react';
+import {Highlighter} from 'lucide-react';
 import type {Store} from './store.ts';
 import {Popover} from './components.tsx';
 import {newDefaults, defaultTokens, type NewDefaults} from './QuickAssist.tsx';
@@ -51,7 +51,7 @@ export function NewItemsButton({store}: {store: Store}) {
   const setCfg = (p: Partial<NewPrefs>) => store.setPref('newItems', {...cfg, ...p});
   const setD = (p: Partial<NewDefaults>) => store.setPref('newDefaults', {...d, ...p});
   return <span className="picker">
-    <button className={'btn' + (cfg.jump || cfg.tintMins ? ' on' : '')} title="New items: jump to them, tint them, and your default shortcuts" onClick={() => setOpen(o => !o)}><Sparkles size={14} /> New</button>
+    <button className={'btn' + (open ? ' on' : '')} title="New lines: highlight them, jump to them, and the defaults Ctrl+Space adds" onClick={() => setOpen(o => !o)}><Highlighter size={14} /> New line</button>
     <Popover open={open} onClose={() => setOpen(false)} className="wide">
       <div className="pop-label">When you add an item</div>
       <label className="pop-row"><input type="checkbox" checked={cfg.jump} onChange={e => setCfg({jump: e.target.checked})} /> Scroll to it and flash it</label>
@@ -66,6 +66,11 @@ export function NewItemsButton({store}: {store: Store}) {
         <select className="plain-select" value={d.due} onChange={e => setD({due: e.target.value as NewDefaults['due']})}><option value="">none</option><option value="today">today</option><option value="tomorrow">tomorrow</option><option value="+1w">in a week</option></select></label>
       <label className="pop-row">Priority
         <select className="plain-select" value={d.priority} onChange={e => setD({priority: e.target.value as NewDefaults['priority']})}><option value="">none</option><option value="urgent">urgent</option><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
+      <label className="pop-row">Estimate
+        <select className="plain-select" value={d.estimate} onChange={e => setD({estimate: e.target.value})}><option value="">none</option>{['15m', '30m', '1h', '2h', '4h'].map(x => <option key={x} value={x}>{x}</option>)}</select></label>
+      <label className="pop-row">Sprint
+        <select className="plain-select" value={d.sprint} onChange={e => setD({sprint: e.target.value as NewDefaults['sprint']})}><option value="">none</option><option value="now">current sprint</option><option value="next">next sprint</option></select></label>
+      <label className="pop-row">Tags <input className="plain-input" style={{width: 140}} placeholder="ops, follow-up" defaultValue={d.tags} onBlur={e => setD({tags: e.target.value})} /></label>
       <label className="pop-row"><input type="checkbox" checked={d.auto} onChange={e => setD({auto: e.target.checked})} /> Always add them to new lines that do not set them</label>
       <div className="muted small" style={{padding: '4px 8px'}}>Adds: <code>{defaultTokens(store, '') || 'nothing'}</code>. For a color rule instead, use Colors with "Created (minutes ago) at most 10".</div>
     </Popover>

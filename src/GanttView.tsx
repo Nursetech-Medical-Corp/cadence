@@ -9,6 +9,7 @@ import {criticalPath} from './critical.ts';
 import {upcoming} from './recur.ts';
 import {InlineText, PeoplePicker, TypeBadge} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {sortItems, sortsOf} from './Sorting.tsx';
 
 const PX = {day: 36, week: 16, month: 5} as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -42,7 +43,9 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
       const parent = i.parentId && shown.has(i.parentId) ? i.parentId : null;
       kids.set(parent, [...(kids.get(parent) ?? []), i]);
     }
-    for (const l of kids.values()) l.sort((a, b) => a.sort - b.sort);
+    // Sort picks the order of rows within each level (priority, due, status...); otherwise your manual order.
+    const rules = sortsOf(config);
+    for (const [k, l] of kids) kids.set(k, rules.length ? sortItems(l, rules, project, store) : l.sort((a, b) => a.sort - b.sort));
     const out: {item: Item; depth: number; hasKids: boolean}[] = [];
     const walk = (p: string | null, depth: number) => (kids.get(p) ?? []).forEach(i => {
       out.push({item: i, depth, hasKids: kids.has(i.id)});
@@ -50,7 +53,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
     });
     walk(null, 0);
     return {list: out, kids};
-  }, [items, allItems, collapsed]);
+  }, [items, allItems, collapsed, JSON.stringify(sortsOf(config))]);
 
   // Effective dates, including live drag preview.
   const span = (i: Item): [string, string] | null => {

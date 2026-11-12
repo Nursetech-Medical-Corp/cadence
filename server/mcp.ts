@@ -102,7 +102,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     + 'groupBy status|priority|assignee|type|sprint, swimlane, hidden [column ids], columns [{id, width}], calcs {columnId: sum|avg|count|min|max}, '
     + 'colors [{rule, color: #rrggbb}], hideDone, types [type names], text (search), zoom day|week|month, covers, locked, privateTo (your person id).';
   tool('list_views', 'List the views (tabs) of a project with their settings.', {project: z.string()}, true, i => tasks.listViews(projectId(i.project), actor));
-  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files']),
+  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files', 'routines']).describe('routines: the routine manager view; makes sense in the built-in Routines space'),
     config: z.record(z.string(), z.any()).optional()}, false, i => tasks.createView({projectId: projectId(i.project), name: i.name, kind: i.kind, config: i.config ?? {}}));
   tool('update_view', 'Change a view: rename it, or change its settings (merged into the current ones unless replace is true). Locked views must be unlocked first (config.locked false). ' + VIEW_CONFIG_DOC,
     {view: z.string().describe('View id'), name: z.string().optional(), config: z.record(z.string(), z.any()).optional(), replace: z.boolean().optional()}, false, i => {
