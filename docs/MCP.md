@@ -68,7 +68,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 
 | Area | Tools |
 | --- | --- |
-| Read | `get_guide`, `get_workspace`, `search_items`, `get_item`, `my_work`, `project_summary`, `changes_since`, `history` |
+| Read | `get_guide`, `get_workspace`, `list_job_roles` (job roles, the spaces and levels each opens, who has them; names only for non-admins), `search_items`, `get_item`, `my_work`, `project_summary`, `changes_since`, `history` |
 | Write | `create_item`, `quick_add`, `update_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
 | Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |

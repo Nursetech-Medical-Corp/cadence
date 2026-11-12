@@ -92,7 +92,7 @@ export function WorkspaceSwitcher({store, me}: {store: Store; me: string}) {
             try { await api(`/workspaces/${cur.id}?confirm=${encodeURIComponent(typed)}`, {method: 'DELETE'}); switchWorkspace('main'); } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
           }}><Trash2 size={14} /> Delete {cur.name}</button>}
         </>}
-        {mode === 'new' && <><div className="pop-label">New workspace</div><div className="muted small" style={{padding: '0 8px 4px'}}>Its own projects, people, templates and backups. You join as its admin.</div>{form(create, 'Create and open')}</>}
+        {mode === 'new' && <><div className="pop-label">New workspace</div><div className="muted small" style={{padding: '0 8px 4px'}}>Its own spaces, people, templates and backups. You join as its admin and are its only member until you invite people; admins of your other workspaces cannot see into it.</div>{form(create, 'Create and open')}</>}
         {mode === 'edit' && <><div className="pop-label">Workspace</div>{form(save, 'Save')}</>}
       </Popover>
     </span>
