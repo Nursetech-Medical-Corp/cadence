@@ -49,7 +49,9 @@ function dateValue(v: string | undefined, today: string) {
 }
 
 export function matchFilter(i: Item, g: FilterGroup | undefined, ctx: {project: Project; today: string; currentSprint: string | null}): boolean {
-  if (!g || !g.rules.length) return true;
+  // Switched-off rules and groups are kept but skipped. A group with nothing switched on matches everything.
+  const on = g && !g.off ? g.rules.filter(r => !r.off && (!isGroup(r) || countRules(r) > 0)) : [];
+  if (!on.length) return true;
   const test = (r: FilterRule | FilterGroup): boolean => isGroup(r) ? matchFilter(i, r, ctx) : rule(r);
   const rule = (r: FilterRule): boolean => {
     let vals: string[];
@@ -82,22 +84,28 @@ export function matchFilter(i: Item, g: FilterGroup | undefined, ctx: {project: 
       case 'lte': return vals.some(x => Number(x) <= Number(v));
     }
   };
-  return g.join === 'and' ? g.rules.every(test) : g.rules.some(test);
+  return g!.join === 'and' ? on.every(test) : on.some(test);
 }
 
+/** Rules that are switched on (what the view applies). */
 export function countRules(g?: FilterGroup): number {
-  return g ? g.rules.reduce((n, r) => n + (isGroup(r) ? countRules(r) : 1), 0) : 0;
+  return g && !g.off ? g.rules.reduce((n, r) => n + (r.off ? 0 : isGroup(r) ? countRules(r) : 1), 0) : 0;
+}
+/** Every saved rule, on or off. */
+export function countAllRules(g?: FilterGroup): number {
+  return g ? g.rules.reduce((n, r) => n + (isGroup(r) ? countAllRules(r) : 1), 0) : 0;
 }
 
 export function FilterButton({store, project, sprints, value, onChange}: {store: Store; project: Project; sprints: Sprint[]; value?: FilterGroup; onChange: (g: FilterGroup | undefined) => void}) {
   const [open, setOpen] = useState(false);
   const fields = filterFields(project, store, sprints);
   const g = value ?? {join: 'and', rules: []};
-  const n = countRules(value);
+  const n = countRules(value), all = countAllRules(value), off = all - n;
   return (
     <span className="picker">
-      <button className={'btn' + (n ? ' on' : '')} onClick={() => setOpen(o => !o)}><Filter size={13} /> {n ? `${n} filter${n > 1 ? 's' : ''}` : 'Filter'}</button>
+      <button className={'btn' + (n ? ' on' : '')} title={off ? `${off} saved filter${off > 1 ? 's are' : ' is'} switched off` : undefined} onClick={() => setOpen(o => !o)}><Filter size={13} /> {n ? `${n} filter${n > 1 ? 's' : ''}` : 'Filter'}{off > 0 && <span className="muted"> ({off} off)</span>}</button>
       <Popover open={open} onClose={() => setOpen(false)} className="wide filter-pop">
+        {all > 0 && <label className="pop-row f-master"><input type="checkbox" checked={!g.off} onChange={e => onChange({...g, off: !e.target.checked || undefined})} /> Filters on <span className="muted small">(off keeps them saved)</span></label>}
         <GroupEditor group={g} fields={fields} depth={0} onChange={next => onChange(next.rules.length ? next : undefined)} />
         <div className="muted small" style={{marginTop: 8}}>Dates accept today, +7 or -3 (days from today), or a date. Saved with this view.</div>
       </Popover>
@@ -110,7 +118,8 @@ function GroupEditor({group, fields, depth, onChange, onRemove}: {group: FilterG
   return (
     <div className={'f-group' + (depth ? ' nested' : '')}>
       {group.rules.map((r, k) => (
-        <div key={k} className="f-row">
+        <div key={k} className={'f-row' + (r.off || group.off ? ' f-off' : '')}>
+          <input type="checkbox" className="f-switch" title={r.off ? 'Off: kept but not applied. Check to turn on.' : 'On. Uncheck to turn off without removing it.'} checked={!r.off} onChange={e => set(k, {...r, off: !e.target.checked || undefined})} />
           <span className="f-join">{k === 0 ? 'Where' : k === 1
             ? <select className="plain-select" value={group.join} onChange={e => onChange({...group, join: e.target.value as 'and' | 'or'})}><option value="and">and</option><option value="or">or</option></select>
             : group.join}</span>

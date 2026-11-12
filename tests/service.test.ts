@@ -540,7 +540,7 @@ test('QA3: AI cannot fake review or create done work; rollups take no items; rul
   assert.equal((t.item(task.id).fields.review as {state: string}).state, 'submitted', 'the review tools still work');
 
   const roll = t.createRollup();
-  assert.throws(() => t.createItem({projectId: roll.id, title: 'x'}), /shows work from other spaces/);
+  assert.throws(() => t.createItem({projectId: roll.id, title: 'x'}), new RegExp(`shows work from other spaces.*${p.name} \\(${p.key}\\)`), 'the error names the spaces to use');
   assert.throws(() => t.createItem({projectId: p.id, title: 'x', recur: {every: 0, unit: 'day', mode: 'schedule'}}), /from 1 to 1000/);
   assert.throws(() => t.createItem({projectId: p.id, title: 'x', recur: {every: 1, unit: 'decade' as never, mode: 'schedule'}}), /unit/);
   t.createSprint({projectId: p.id, name: 'S1', start: '2026-11-02', end: '2026-11-15'});

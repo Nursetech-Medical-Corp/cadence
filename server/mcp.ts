@@ -99,7 +99,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('stop_timer', 'Stop your running timer, with an optional note such as the outcome. Submitting work stops it for you.', {note: z.string().optional()}, false,
     i => tasks.stopTimer(me(), i.note) ?? {stopped: false, reason: 'No timer was running'});
   // ---- Views: what the board shows (filters, sorts, grouping, columns, colors) ----
-  const VIEW_CONFIG_DOC = 'View config keys: filter {join: and|or, rules: [{field, op: is|is-not|contains|empty|not-empty|before|after|gte|lte, value}]}, '
+  const VIEW_CONFIG_DOC = 'View config keys: filter {join: and|or, rules: [{field, op: is|is-not|contains|empty|not-empty|before|after|gte|lte, value, off?}], off?} (off: kept but not applied), '
     + 'sorts [{col, dir: 1|-1, by?: order|alpha}] (col: title, status, type, priority, assignees, due, start, estimate, sprint, key, created, updated, or f:<fieldId>), '
     + 'groupBy status|priority|assignee|type|sprint, swimlane, hidden [column ids], columns [{id, width}], calcs {columnId: sum|avg|count|min|max}, '
     + 'colors [{rule, color: #rrggbb}], hideDone, types [type names], text (search), zoom day|week|month, covers, locked, privateTo (your person id).';

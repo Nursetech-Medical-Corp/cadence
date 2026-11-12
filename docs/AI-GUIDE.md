@@ -61,6 +61,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 
 ## Built-in spaces
 
+- A rollup (like All spaces) holds no items. Agents create items in a real space; the error for a rollup lists them. In the app, a rollup's toolbar has "Add to" (saved per person in prefs `rollupAdd`): items added in its board, list, table or calendar are saved in that space, show up in the rollup, flash, and a note says where they went. If saving fails, the typed text stays in the add box.
 - Every workspace has two built-in spaces, opened from the Workspace section of the sidebar (Routines, Archive and later). They are rollups with `settings.rollup.scope`: `routines` (every live routine from every space, paused and waiting ones included) and `parked` (every archived or snoozed item). They have normal views, can be renamed, and cannot be deleted. Items are never created in them; they stay in their own space.
 - View kind `routines` (only useful in the Routines space) is the routine manager: grouped by SOP, frequency, person, space or mode, with on/off switches, skip, delay, wait and end, and "Add a routine from your templates".
 - Sort (`update_view` with `sorts`) orders rows in tables, lists, boards, timelines, calendars (within a day) and workload lists.
@@ -104,8 +105,9 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 
 ## New items in the app
 
-- Quick add tokens (below) work in every add row, including the table's insert row; a one-line hint shows them. Ctrl+Space adds the person's defaults from the New line menu: assignee, due, priority, estimate, sprint and tags (for example `@me due:today !high ~30m sprint:now #ops`).
-- New items are tinted for a few minutes and the view jumps to them (each person can switch this off in the New menu). Filters can use "created in the last N minutes".
+- Quick add tokens (below) work in every add row, including the table's insert row; a one-line hint shows them. Ctrl+Space adds the person's defaults from the New entry menu: assignee, due, priority, estimate, sprint and tags (for example `@me due:today !high ~30m sprint:now #ops`).
+- New items are tinted for a few minutes and the view jumps to them (each person can switch this off in the New entry menu). Filters can use "created in the last N minutes".
+- Each filter rule and group has an on/off checkbox (on by default), and the filter menu has a "Filters on" switch for all of them. Off rules stay saved with the view (`off: true` in `config.filter`) and the toolbar shows how many are off.
 
 ## Quick add syntax (quick_add, and the UI)
 

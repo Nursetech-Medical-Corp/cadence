@@ -175,8 +175,9 @@ export type ViewConfig = {
   zoom?: 'day' | 'week' | 'month'; calHours?: 'week' | 'day' | null; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
 /** Filters: a group of rules joined by AND or OR; a rule can itself be a group (one level of nesting in the UI). */
-export type FilterRule = {field: string; op: 'is' | 'is-not' | 'contains' | 'empty' | 'not-empty' | 'before' | 'after' | 'gte' | 'lte'; value?: string};
-export type FilterGroup = {join: 'and' | 'or'; rules: (FilterRule | FilterGroup)[]};
+/** off: kept with the view but not applied (a switch in the filter menu), so it can be turned back on without re-adding it. */
+export type FilterRule = {field: string; op: 'is' | 'is-not' | 'contains' | 'empty' | 'not-empty' | 'before' | 'after' | 'gte' | 'lte'; value?: string; off?: boolean};
+export type FilterGroup = {join: 'and' | 'or'; rules: (FilterRule | FilterGroup)[]; off?: boolean};
 
 export type View = {id: string; projectId: string; name: string; kind: ViewKind; config: ViewConfig; sort: number};
 

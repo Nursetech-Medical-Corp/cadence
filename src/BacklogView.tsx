@@ -116,7 +116,8 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
                 if (e.key !== 'Enter' || !text.trim()) return;
                 const t = text; setText('');
                 const item = await store.quickAdd(project.id, t);
-                if (item && level !== 'all' && item.type !== level) store.updateItem(item.id, {type: level});
+                if (!item) { setText(t); return; }
+                if (level !== 'all' && item.type !== level) store.updateItem(item.id, {type: level});
               }} />{qa.ui}</span>
           </div>
           {unparented.filter(visible).length > 0 && <>

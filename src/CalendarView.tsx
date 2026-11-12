@@ -127,7 +127,8 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
                       if (e.key === 'Enter' && adding.text.trim()) {
                         const t = adding.text; setAdding({day: d, text: ''});
                         const it = await store.quickAdd(project.id, t);
-                        if (it && !it.due) store.updateItem(it.id, {due: d});
+                        if (!it) { setAdding({day: d, text: t}); return; }
+                        if (!it.due) store.updateItem(it.id, {due: d});
                       }
                     }} />
                 )}

@@ -113,8 +113,8 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 - Automatic: created time, last edited time, created by.
 
 ### Writing fast
-- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates. Ctrl+Space adds your defaults from the New line menu (assignee, due, priority, estimate, sprint, tags).
-- New items are tinted for a few minutes and the view jumps to them; turn either off in the New menu. Filters can match "created in the last N minutes".
+- Quick add everywhere: `Call vendor @sam !high #ops due:fri ~2h every:2w`. Typing `@`, `!`, `#`, `due:` or `every:` opens a picker, and the preview shows real dates. Ctrl+Space adds your defaults from the New entry menu (assignee, due, priority, estimate, sprint, tags).
+- New items are tinted for a few minutes and the view jumps to them; turn either off in the New entry menu. Filters can match "created in the last N minutes". Any filter can be switched off and back on without removing it. In a rollup like All spaces, "Add to" picks the space new items are saved in.
 - Quick capture from anywhere (C), with dictation. Command palette (Ctrl+K). Rebindable shortcuts.
 - Block editor for descriptions: headings, lists, checklists, code, images (paste a screenshot), links to other items with `[[KEY-12]]`.
 

@@ -1,6 +1,8 @@
 // Client state: everything loads once, edits apply instantly, server confirms, SSE keeps every tab in sync.
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {defaultTokens} from './QuickAssist.tsx';
+import {rollupTarget} from './rollup.ts';
+export {rollupTarget, rollupSpaces} from './rollup.ts';
 import type {ChangeEvent, Item, ItemPatch, Person, Project, Sprint, TimeEntry, View, ViewKind} from './types.ts';
 import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from './types.ts';
 
@@ -91,13 +93,19 @@ export function useStore(me: string) {
   // Items you just made in this window: the views tint them and scroll to the newest one (New items menu).
   const [lastNew, setLastNew] = useState<{id: string; at: number} | null>(null);
   const markNew = (id: string) => setLastNew({id, at: Date.now()});
-  // A rollup shows other projects' work; new items go to the parent's project or the rollup's first project.
+  // A rollup shows other spaces' work. New items go to the parent's space, or the space you picked for this rollup
+  // ("Add to" in the toolbar, kept in your prefs), or the rollup's first space. Reads refs: the actions are memoized.
+  const peopleRef = useRef<Person[]>([]);
+  peopleRef.current = people;
   const realProject = (pid: string, parentId?: string | null) => {
     if (parentId) return itemsRef.current.get(parentId)?.projectId ?? pid;
-    const p = projects.find(x => x.id === pid);
-    if (!p?.settings.rollup) return pid;
-    const inc = p.settings.rollup.include;
-    return realProjects(projects).find(x => !inc || inc.includes(x.id))?.id ?? pid;
+    return rollupTarget(projectsRef.current, prefsRef.current, pid)?.id ?? pid;
+  };
+  // After adding from a rollup, say where the item went so it is never lost.
+  const saidWhere = (pid: string, item: Item) => {
+    if (!projectsRef.current.find(x => x.id === pid)?.settings.rollup) return;
+    const sp = projectsRef.current.find(x => x.id === item.projectId);
+    if (sp) flash(`Added to ${sp.name} as ${sp.key}-${item.number}`);
   };
   itemsRef.current = items;
   // Undo history for item edits, creates and deletes. Steps pushed in the same tick (one drop that moves a family) undo together.
@@ -180,15 +188,17 @@ export function useStore(me: string) {
       return api<Item>(`/items/${id}`, {method: 'PATCH', body: patch}).catch(e => { fail(e); load(); });
     },
     async quickAdd(projectId: string, text: string, extra: {parentId?: string | null; status?: string; sort?: number; sprint?: string | null} = {}) {
+      const asked = projectId;
       projectId = realProject(projectId, extra.parentId);
       // "Always add my defaults" (New items menu): fill in what the line does not set itself.
-      if ((prefsRef.current.newDefaults as {auto?: boolean} | undefined)?.auto) { const d = defaultTokens({people, me, prefs: prefsRef.current}, text); if (d) text = `${text} ${d}`; }
-      try { const item = await api<Item>('/items/quick', {method: 'POST', body: {projectId, text, ...extra}}); markNew(item.id); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
+      if ((prefsRef.current.newDefaults as {auto?: boolean} | undefined)?.auto) { const d = defaultTokens({people: peopleRef.current, me, prefs: prefsRef.current}, text); if (d) text = `${text} ${d}`; }
+      try { const item = await api<Item>('/items/quick', {method: 'POST', body: {projectId, text, ...extra}}); markNew(item.id); if (!extra.parentId) saidWhere(asked, item); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
       catch (e) { fail(e); return null; }
     },
     async createItem(input: ItemPatch & {projectId: string; title: string}) {
+      const asked = input.projectId;
       input = {...input, projectId: realProject(input.projectId, input.parentId)};
-      try { const item = await api<Item>('/items', {method: 'POST', body: input}); markNew(item.id); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
+      try { const item = await api<Item>('/items', {method: 'POST', body: input}); markNew(item.id); if (!input.parentId) saidWhere(asked, item); setItems(prev => new Map(prev).set(item.id, item)); push({kind: 'create', id: item.id, label: `create "${item.title}"`}); return item; }
       catch (e) { fail(e); return null; }
     },
     deleteItem(id: string, record = true) {

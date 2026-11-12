@@ -336,7 +336,11 @@ export class Tasks {
     if (input.start && input.due && input.start > input.due) throw new Invalid('Start must be on or before due');
     const title = String(input.title).trim();
     if (!title) throw new Invalid('Title is required');
-    if (p.settings.rollup) throw new Invalid(`${p.name} shows work from other spaces. Add the item to one of those spaces.`);
+    if (p.settings.rollup) {
+      const inc = p.settings.rollup.include;
+      const names = this.listProjects().filter(x => !x.settings.rollup && (!inc || inc.includes(x.id))).map(x => `${x.name} (${x.key})`);
+      throw new Invalid(`${p.name} shows work from other spaces and holds none itself. Add the item to one of these: ${names.join(', ') || 'no spaces yet'}.`);
+    }
     if (input.parentId) input = this.inherit(p, input);
     const status = input.status ?? p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
     this.checkStatus(p, status);

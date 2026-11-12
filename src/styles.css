@@ -1410,3 +1410,7 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .jr-table tr.dragging { opacity: .4; }
 .jr-table tr.drop-here td { border-top: 2px solid var(--accent, #7c5cff); }
 .jr-names { color: var(--text2, inherit); padding: 1px 2px; }
+.add-to { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.f-switch { margin-top: 7px; flex: none; cursor: pointer; }
+.f-off > .f-join, .f-off > .f-rule, .f-off > .f-group { opacity: .45; }
+.f-master { border-bottom: 1px solid var(--line, #e5e5e5); margin-bottom: 6px; padding-bottom: 6px; }
