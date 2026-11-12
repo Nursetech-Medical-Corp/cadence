@@ -679,6 +679,31 @@ const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (N
 3. For work you are accepted on or that was sent back: do it, log_step as you go (links, screenshots), then submit_work with a report and what you missed.
 4. Never mark work done and never invite people outside the workspace. Your changes wait for your owner unless they follow an approved AI SOP.`;
 
+/** Where to paste the key, per AI app. Kept short; the Learn page has the full walk-through. */
+function ConnectSteps({provider, url, prompt}: {provider: string; url: string; prompt: string}) {
+  const bare = url.replace(/[&?]key=[^&]+/, ''), key = /[?&]key=([^&]+)/.exec(url)?.[1] ?? '';
+  const copy = (t: string) => <button className="btn ghost small" onClick={() => navigator.clipboard.writeText(t)}><Copy size={11} /> Copy</button>;
+  const promptBox = <><pre className="proposal-args">{prompt}</pre>{copy(prompt)}</>;
+  if (provider === 'meta') return <div className="small">
+    <div><b>Muse (Meta AI)</b> has no box for a connector address. You ask Muse to build one, and the key goes in its Secure Credentials Store, never in the chat.</div>
+    <ol>
+      <li>In Muse, send: <code className="agent-key">Create a custom connector named Cadence for the MCP server at {bare} (streamable HTTP). It needs the header Authorization: Bearer KEY. Ask me for KEY through the secure credential flow, then list its tools to test it and save it as a skill.</code> {copy(`Create a custom connector named Cadence for the MCP server at ${bare} (streamable HTTP). It needs the header Authorization: Bearer KEY. Ask me for KEY through the secure credential flow, then list its tools to test it and save it as a skill.`)}</li>
+      <li>When Muse opens the credential prompt, paste this key there: <code className="agent-key">{key}</code> {copy(key)}</li>
+      <li>Ask Muse to run this on a schedule (Muse calls these scheduled tasks):</li>
+    </ol>{promptBox}</div>;
+  if (provider === 'chatgpt') return <div className="small">
+    <ol>
+      <li>ChatGPT on the web: Settings, Apps, Advanced settings, turn on Developer mode. On Business or Enterprise an admin turns it on first.</li>
+      <li>Create app. Name: Cadence. MCP server URL: <code className="agent-key">{url}</code> {copy(url)} Authentication: none (the key is in the address).</li>
+      <li>ChatGPT asks you to confirm each change it makes. Open Scheduled in the sidebar and add a task with this prompt:</li>
+    </ol>{promptBox}</div>;
+  return <div className="small">
+    <ol>
+      <li>Claude: Settings (or Customize), Connectors, +, Add custom connector. Name: Cadence agent. URL: <code className="agent-key">{url}</code> {copy(url)} Leave the OAuth fields empty. On a Team plan an Owner adds it first.</li>
+      <li>Make a scheduled task in Claude with this prompt, and turn on only the Cadence agent connector for it:</li>
+    </ol>{promptBox}</div>;
+}
+
 /** Your own AI agents: add one, connect it with its key, and set what it may do. */
 function AgentsCard() {
   const [list, setList] = useState<AgentRow[]>([]);
@@ -694,11 +719,12 @@ function AgentsCard() {
     catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
   };
   return (
-    <section className="set-card">
-      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">Add your Claude (or ChatGPT, Meta AI) as a teammate. It finds work it can do, claims or suggests it, logs every step and submits it. You approve its claims, its finished work and, on "Review", every change it makes. Only you (and admins) approve your agents.</span></div>
+    <section className="set-card agents-card">
+      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">
+        Optional. The Cadence connector you already use in Claude works <b>as you</b>: what it does is logged as you and applies right away. Add an agent here only when you want an AI to work <b>on its own</b> (on a schedule, while you are away) under its own name, with its changes held for your approval. Its key is its login: whoever has the key acts as the agent, so keep it private. Step-by-step guides for Claude, ChatGPT and Muse (Meta AI) are on the Learn page.</span></div>
       <div className="time-row">
         <input className="plain-select" placeholder="Agent name, like David's Claude" value={name} onChange={e => setName(e.target.value)} />
-        <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Meta AI</option><option value="other">Other</option></select>
+        <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Muse (Meta AI)</option><option value="other">Other</option></select>
         <button className="btn primary" disabled={!name.trim()} onClick={async () => { try { await api('/agents', {method: 'POST', body: {name, provider}}); setName(''); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><Plus size={13} /> Add agent</button>
       </div>
       {list.map(a => (
@@ -707,11 +733,9 @@ function AgentsCard() {
             <button className="btn small" onClick={async () => { try { const r = await api<{token: string; mcpUrl: string}>(`/agents/${a.id}/token`, {method: 'POST', body: {name: 'Connector'}}); setKey({agent: a.id, url: r.mcpUrl, token: r.token}); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><KeyRound size={12} /> Get connection key</button>
           </div>
           {key?.agent === a.id && <div className="g-out small">
-            <b>Shown once. Keep it private.</b>
-            <div>Connector URL (Claude: Settings, Connectors, Add custom connector):</div>
-            <code className="agent-key">{key.url}</code> <button className="btn ghost small" onClick={() => navigator.clipboard.writeText(key.url)}><Copy size={11} /> Copy</button>
-            <div>Then make a scheduled task in that Claude account ({a.settings.checkFrequency}) with this prompt:</div>
-            <pre className="proposal-args">{RUN_PROMPT(a.name)}</pre><button className="btn ghost small" onClick={() => navigator.clipboard.writeText(RUN_PROMPT(a.name))}><Copy size={11} /> Copy prompt</button>
+            <b>Shown once. Keep it private. It is this agent's login; anyone with it acts as {a.name}.</b>
+            <ConnectSteps provider={a.settings.provider} url={key.url} prompt={RUN_PROMPT(a.name)} />
+            <div className="muted">Run it {a.settings.checkFrequency}. Lost the key? Get a new one; revoke old ones under Tokens.</div>
           </div>}
           <div className="agent-grid small">
             <label>Changes it makes <select className="plain-select" value={a.settings.writePolicy} onChange={e => save(a, {writePolicy: e.target.value as AgentSettings['writePolicy']})}><option value="review">Wait for my approval</option><option value="direct">Apply right away</option></select></label>

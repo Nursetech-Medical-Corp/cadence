@@ -88,7 +88,7 @@ export function saveAgentSettings(tasks: Tasks, agent: string, patch: Partial<Ag
 // ---- Proposals: agent changes held for the owner ----
 
 /** Ops that change the workspace. Logging, comments, claims, submissions and timers are not held. */
-export const WRITE_OPS = new Set(['createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
+export const WRITE_OPS = new Set(['routine', 'createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes']);
@@ -119,6 +119,7 @@ function describe(tasks: Tasks, op: string, args: unknown[]) {
     case 'updateItem': return `Change ${ref(a0)}: ${Object.keys((args[1] ?? {}) as object).join(', ')}`;
     case 'deleteItem': return `Delete ${ref(a0)}`;
     case 'quickAdd': return `Add "${(a0 as {text?: string})?.text ?? ''}"`;
+    case 'routine': return `${String(args[1] ?? '')} routine ${String(a0 ?? '')}`;
     case 'importItems': return `Import ${Array.isArray(args[1]) ? args[1].length : 'some'} items`;
     case 'applyPlan': return `Reschedule ${Array.isArray(args[1]) ? args[1].length : 'some'} items`;
     case 'event.create': return `Schedule "${(a0 as {title?: string})?.title ?? ''}"`;

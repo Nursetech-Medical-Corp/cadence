@@ -83,3 +83,11 @@ export function describeRecur(r: Recur, anchor?: string | null) {
   if (r.count) s += `, ${r.count} more`;
   return s;
 }
+
+/** How many times a routine comes back in an average week. */
+export function perWeek(r: Recur): number {
+  if (r.unit === 'day') return (r.skipWeekends ? 5 : 7) / r.every;
+  if (r.unit === 'week') return (r.weekdays?.length || 1) / r.every;
+  if (r.unit === 'month') return 12 / 52 / r.every;
+  return 1 / 52 / r.every;
+}

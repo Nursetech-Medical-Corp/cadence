@@ -22,6 +22,7 @@ export type Recur = {
   reopen?: boolean;             // reopen this same item instead of creating a new one
   copySubitems?: boolean;       // copy open-or-closed subitems into the new occurrence, reset to To do
   spawned?: string;
+  paused?: boolean;             // routine switched off: hidden from views, sprints and plans until turned back on
 };
 
 export type Person = {id: string; name: string; email: string | null; color: string; kind?: 'human' | 'ai'; owner?: string | null};
@@ -146,7 +147,7 @@ export type Sprint = {
 
 export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files';
 export type ViewConfig = {
-  text?: string; assignee?: string; hideDone?: boolean; types?: string[]; sprint?: string;
+  text?: string; assignee?: string; hideDone?: boolean; hideRepeats?: boolean; types?: string[]; sprint?: string;
   groupBy?: 'status' | 'priority' | 'assignee' | 'type' | 'sprint';
   columns?: {id: string; width: number}[]; hidden?: string[];
   /** Table footer calculation per column id: sum, avg, count and so on. */

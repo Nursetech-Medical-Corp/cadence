@@ -405,7 +405,8 @@ function RunningTimer({store, open}: {store: Store; open: (id: string) => void})
 
 export function applyFilters(items: Item[], c: ViewConfig, ctx?: {project: Project; today: string; currentSprint: string | null}) {
   const text = c.text?.toLowerCase();
-  return items.filter(i => (!ctx || matchFilter(i, c.filter, ctx)) &&
+  // Paused routines live only on the Routines page until switched back on.
+  return items.filter(i => !i.recur?.paused && (!ctx || matchFilter(i, c.filter, ctx)) &&
     (!text || i.title.toLowerCase().includes(text) || i.tags.some(t => t.toLowerCase().includes(text))) &&
     (!c.assignee || (c.assignee === 'none' ? !i.assignees.length : i.assignees.includes(c.assignee))) &&
     (!c.hideDone || !i.completed) &&
