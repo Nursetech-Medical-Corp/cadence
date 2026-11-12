@@ -1,7 +1,7 @@
 // Team page cards for job roles (company roles that open spaces at a permission level) and company domain join.
 // Job roles replace setting access space by space: set it once per job role, then give people job roles.
 import {useState} from 'react';
-import {Briefcase, ChevronDown, Plus, Trash2} from 'lucide-react';
+import {Briefcase, ChevronDown, GripVertical, Plus, Trash2} from 'lucide-react';
 import type {Project} from './types.ts';
 import {api} from './store.ts';
 import {Popover} from './components.tsx';
@@ -33,19 +33,32 @@ export function JobRolePicker({all, value, onChange, disabled}: {all: {id: strin
   </span>;
 }
 
-/** The job role matrix: rows are job roles, columns are shared spaces, each cell a permission level. */
+/** Job role names for a person, in the order the job roles are listed. */
+export const jobRoleNames = (all: {id: string; name: string}[], ids: string[] = []) => all.filter(j => ids.includes(j.id)).map(j => j.name);
+
+/** The job role matrix: rows are job roles (drag the grip to reorder), columns are shared spaces, each cell a permission level. */
 export function JobRolesCard({jobRoles, levels, projects, counts, onSave}: {jobRoles: JobRole[]; levels: Level[]; projects: Project[]; counts: Record<string, number>; onSave: (j: JobRole[]) => Promise<void>}) {
   const [rows, setRows] = useState(jobRoles);
+  const [drag, setDrag] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  const drop = (target: string) => {
+    if (!drag || drag === target) return;
+    const moving = rows.find(r => r.id === drag)!, rest = rows.filter(r => r.id !== drag);
+    const at = rest.findIndex(r => r.id === target);
+    save([...rest.slice(0, at), moving, ...rest.slice(at)]);
+  };
   const spaces = jobRoleSpaces(projects);
   const save = (next: JobRole[]) => { setRows(next); void onSave(next); };
   const set = (id: string, patch: Partial<JobRole>) => save(rows.map(r => r.id === id ? {...r, ...patch} : r));
   const cell = (r: JobRole, pid: string, v: string) => { const s = {...r.spaces}; if (v === 'inherit') delete s[pid]; else s[pid] = v; set(r.id, {spaces: s}); };
   return (
     <section className="set-card">
-      <div className="set-card-head"><h3><Briefcase size={15} /> Job roles</h3><span className="muted small">Your company's roles, like Executive, Sales rep, Clinical rep, R&amp;D engineer, Quality, VA or Logistics. Set once here which spaces each one opens and at what level, then give people job roles (People, below) or pick one when you invite. A person with two job roles gets the stronger level. "Default" falls back to the space's own setting, then the person's level. A per-person entry on a space still wins. Admins see every shared space; nobody sees another person's personal space unless it is shared with them.</span></div>
+      <div className="set-card-head"><h3><Briefcase size={15} /> Job roles</h3><span className="muted small">Drag the grip to reorder. Your company's roles, like Executive, Sales rep, Clinical rep, R&amp;D engineer, Quality, VA or Logistics. Set once here which spaces each one opens and at what level, then give people job roles (People, below) or pick one when you invite. A person with two job roles gets the stronger level. "Default" falls back to the space's own setting, then the person's level. A per-person entry on a space still wins. Admins see every shared space; nobody sees another person's personal space unless it is shared with them.</span></div>
       {rows.length > 0 && <div className="jr-wrap"><table className="jr-table">
-        <thead><tr><th>Job role</th>{spaces.map(p => <th key={p.id} title={p.name}>{p.key}</th>)}<th title="Spaces not listed, including new ones">Other spaces</th><th /></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.id}>
+        <thead><tr><th /><th>Job role</th>{spaces.map(p => <th key={p.id} title={p.name}>{p.key}</th>)}<th title="Spaces not listed, including new ones">Other spaces</th><th /></tr></thead>
+        <tbody>{rows.map(r => <tr key={r.id} className={(drag === r.id ? 'dragging' : '') + (over === r.id && drag && drag !== r.id ? ' drop-here' : '')}
+          onDragOver={e => { if (drag) { e.preventDefault(); setOver(r.id); } }} onDragLeave={() => setOver(o => o === r.id ? null : o)} onDrop={e => { e.preventDefault(); drop(r.id); setDrag(null); setOver(null); }}>
+          <td className="jr-grip" draggable onDragStart={e => { setDrag(r.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', r.id); }} onDragEnd={() => { setDrag(null); setOver(null); }} title="Drag to reorder"><GripVertical size={14} /></td>
           <td><input className="inline" defaultValue={r.name} onBlur={e => e.target.value.trim() && e.target.value !== r.name && set(r.id, {name: e.target.value.trim()})} /><div className="muted small">{counts[r.id] ?? 0} people</div></td>
           {spaces.map(p => <td key={p.id}><select className={'plain-select jr-cell' + ((r.spaces[p.id] ?? 'inherit') === 'none' ? ' none' : (r.spaces[p.id] ?? 'inherit') === 'inherit' ? ' inherit' : '')} value={r.spaces[p.id] ?? 'inherit'} onChange={e => cell(r, p.id, e.target.value)}>{levelOptions(levels, 'Default')}</select></td>)}
           <td><select className="plain-select jr-cell" value={r.others} onChange={e => set(r.id, {others: e.target.value})}>{levelOptions(levels, 'Default')}</select></td>
