@@ -8,6 +8,7 @@ import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
 import {openDb} from './db.ts';
+import {listSopLinks, setSopLinks} from './sops.ts';
 import {personalAccess} from './auth.ts';
 import {Tasks} from './service.ts';
 import {readFileSync} from 'node:fs';
@@ -145,8 +146,8 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
   tool('create_project', 'Create a space (project) with default statuses. personal: true makes it private to you until you share it (anyone can do this; shared spaces need an admin).', {name: z.string(), key: z.string().optional(), personal: z.boolean().optional()}, false,
     i => tasks.createProject({name: i.name, key: i.key, ...(i.personal && actor ? {settings: {access: personalAccess(actor)}} : {})}));
-  tool('update_project', 'Change project name, statuses, types or custom fields.', {
-    project: z.string(), name: z.string().optional(),
+  tool('update_project', 'Change project name, key (the item prefix, like GEN in GEN-12; old keys stop working), statuses, types or custom fields.', {
+    project: z.string(), name: z.string().optional(), key: z.string().regex(/^[A-Za-z][A-Za-z0-9]{1,9}$/).optional(),
     statuses: z.array(z.object({id: z.string(), name: z.string(), category: z.enum(['todo', 'doing', 'done']), color: z.string()})).optional(),
     types: z.array(z.string()).optional(),
     fields: z.array(z.object({id: z.string(), name: z.string(), kind: z.enum(['text', 'number', 'select', 'multi', 'date', 'checkbox', 'person', 'url']), options: z.array(z.string()).optional()})).optional(),
@@ -175,13 +176,33 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
   tool('list_routines', 'Repeating work (routines): one live copy each, the next is made when it is finished. Shows paused ones too. Filter by tag, like an SOP code "SOP-07.2" or a mode "auto-job", "hybrid", "manual".',
     {tag: z.string().optional(), paused: z.boolean().optional()}, true,
     i => tasks.listRoutines().filter(r => (!i.tag || r.tags.includes(i.tag)) && (i.paused === undefined || !!r.recur?.paused === i.paused))
-      .map(r => ({key: keyOf(r), title: r.title, due: r.due, estimate: r.estimate, tags: r.tags, paused: !!r.recur?.paused, recur: r.recur})));
-  tool('set_routine', 'Turn routines on or off. skip: move this copy to its next date. pause: hide it from views, sprints and plans (history kept). resume: show it again from its next date. end: stop repeating (the copy stays as a normal task). Pass items, or tag to act on every routine with that tag (a whole SOP).',
-    {items: z.array(z.string()).optional(), tag: z.string().optional(), action: z.enum(['skip', 'pause', 'resume', 'end'])}, false,
+      .map(r => ({key: keyOf(r), title: r.title, due: r.due, estimate: r.estimate, tags: r.tags, assignees: r.assignees.map(a => people().find(p => p.id === a)?.name ?? a),
+        state: r.recur?.paused ? 'paused' : r.recur?.waiting ? 'waiting' : r.recur?.slot ? 'delayed' : 'on', waitingOn: r.recur?.waiting ? r.deps.map(d => { try { return keyOf(tasks.item(d)); } catch { return d; } }) : undefined, recur: r.recur})));
+  tool('set_routine', 'Manage routines. skip: this copy moves to its next date (done for this cycle without doing it). delay: push only this copy to "to"; the next one stays on schedule. pause: hide it from views, sprints and plans (history kept). resume: show it again from its next date. wait: start only after the items in "on" are done (a hire, a W-2 setup); hidden until then, starts by itself. end: stop repeating (the copy stays as a normal task). Pass items, or tag to act on every routine with that tag (a whole SOP).',
+    {items: z.array(z.string()).optional(), tag: z.string().optional(), action: z.enum(['skip', 'delay', 'pause', 'resume', 'wait', 'end']), to: z.string().optional().describe('delay: new date YYYY-MM-DD'), on: z.array(z.string()).optional().describe('wait: item keys it waits on')}, false,
     i => {
       const refs = i.items?.length ? i.items : i.tag ? tasks.listRoutines().filter(r => r.tags.includes(i.tag!)).map(r => r.id) : [];
       if (!refs.length) throw new Error('No routines matched. Pass items or a tag.');
-      return refs.map(ref => { try { const r = tasks.routine(ref, i.action, actor) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title, due: r.due, paused: !!r.recur?.paused, repeating: !!r.recur}; } catch (e) { return {item: ref, error: e instanceof Error ? e.message : String(e)}; } });
+      return refs.map(ref => { try { const r = tasks.routine(ref, i.action, actor, {to: i.to, on: i.on}) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title, due: r.due, paused: !!r.recur?.paused, repeating: !!r.recur}; } catch (e) { return {item: ref, error: e instanceof Error ? e.message : String(e)}; } });
+    });
+  tool('archive_item', 'Park an item out of every list without deleting it: kind "idea" (maybe later), "parked" (not now), or "rejected" (decided no). Find them again with list_parked; restore_item brings one back.',
+    {item: z.string(), kind: z.enum(['idea', 'parked', 'rejected']).optional(), reason: z.string().optional()}, false,
+    i => { const r = tasks.archiveItem(i.item, {kind: i.kind, reason: i.reason}, actor) as any; return r?.proposal ? r : {key: keyOf(r), archived: r.fields.archived}; });
+  tool('snooze_item', 'Hide an item until a date, then it comes back to its list (decide later). until null brings it back now.',
+    {item: z.string(), until: z.string().nullable()}, false,
+    i => { const r = tasks.snoozeItem(i.item, i.until, actor) as any; return r?.proposal ? r : {key: keyOf(r), snooze: r.fields.snooze ?? null}; });
+  tool('restore_item', 'Bring back an archived or snoozed item.', {item: z.string()}, false,
+    i => { const r = tasks.restoreItem(i.item, actor) as any; return r?.proposal ? r : {key: keyOf(r), title: r.title}; });
+  tool('list_parked', 'Archived ideas and rejected items, and items snoozed until a later date.', {}, true,
+    () => tasks.listParked().map(r => ({key: keyOf(r), title: r.title, archived: r.fields.archived ?? null, snoozeUntil: r.fields.snooze ?? null})));
+  const rawTasks = ((tasks as any)[Symbol.for('cadence.raw')] ?? tasks) as Tasks;
+  tool('list_sop_links', 'SOP codes (the SOP-xx.x tags) and the document each one opens. Code * is the fallback, such as the SOP master list.', {}, true, () => listSopLinks(rawTasks));
+  tool('set_sop_links', 'Admins: link SOP codes to their documents so every item tagged with that code opens it. Empty url removes a link.',
+    {links: z.array(z.object({code: z.string(), url: z.string().nullable().optional(), title: z.string().optional()}))}, false,
+    i => {
+      const admin = actor && (rawTasks.db.prepare('select admin from people where id = ?').get(actor) as {admin?: number} | undefined)?.admin;
+      if (rawTasks !== tasks && !admin) throw new Error('Only workspace admins change SOP links');
+      return setSopLinks(rawTasks, i.links as {code: string; url: string}[]);
     });
   tool('list_events', 'Meetings and calendar events between two dates (Cadence events plus synced Google events), repeating ones expanded. mine: only where you organize or attend.',
     {from: z.string(), to: z.string(), project: z.string().optional(), mine: z.boolean().optional()}, true,

@@ -29,6 +29,18 @@ function tokenAt(text: string, caret: number) {
   return t ? {start: s, end: e, text: t} : null;
 }
 
+export type NewDefaults = {me: boolean; due: '' | 'today' | 'tomorrow' | '+1w'; priority: '' | 'urgent' | 'high' | 'medium' | 'low'; auto: boolean};
+export const newDefaults = (store: Pick<Store, 'prefs'>): NewDefaults => ({me: true, due: 'today', priority: '', auto: false, ...(store.prefs.newDefaults as Partial<NewDefaults> | undefined)});
+/** Shortcut text for your defaults, leaving out anything the text already sets. */
+export function defaultTokens(store: Pick<Store, 'people' | 'me' | 'prefs'>, text: string) {
+  const d = newDefaults(store), out: string[] = [];
+  const me = store.people.find(p => p.id === store.me);
+  if (d.me && me && !/(^|\s)@\S/.test(text)) out.push('@' + handle(me.name, store.people.map(p => p.name)));
+  if (d.due && !/(^|\s)due:\S/i.test(text)) out.push('due:' + d.due);
+  if (d.priority && !/(^|\s)!\S/.test(text)) out.push('!' + d.priority);
+  return out.join(' ');
+}
+
 export function useQuickAssist(store: Store, types: string[], text: string, setText: (t: string) => void) {
   const ref = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const [, setTick] = useState(0);
@@ -92,8 +104,15 @@ export function useQuickAssist(store: Store, types: string[], text: string, setT
     const sp = pre && !/\s$/.test(pre) ? ' ' : '';
     place(pre + sp + prefix + text.slice(c), c + sp.length + prefix.length);
   };
+  /** Adds your default shortcuts (set under New items in the toolbar) that the text does not have yet. */
+  const addDefaults = () => {
+    const extra = defaultTokens(store, text);
+    if (!extra) return;
+    place(text.replace(/\s*$/, ' ') + extra + ' ', (text.replace(/\s*$/, ' ') + extra + ' ').length);
+  };
   /** Call first in the box's onKeyDown. True means the key was used to pick, so skip your own handling. */
   const keyDown = (e: React.KeyboardEvent): boolean => {
+    if (e.key === ' ' && e.ctrlKey) { e.preventDefault(); addDefaults(); return true; }
     if (!open) return false;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setSel(s => (Math.min(s, opts.length - 1) + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length); return true; }
     if ((e.key === 'Enter' || e.key === 'Tab') && !e.ctrlKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); pick(opts[at]); return true; }
@@ -130,8 +149,9 @@ export function useQuickAssist(store: Store, types: string[], text: string, setT
       </div>
     </Popover>
     {(focus || chips.length > 0) && <div className="qa-bar" onMouseDown={keep}>
-      {focus && [['@', 'person'], ['!', 'priority'], ['#', 'tag'], ['due:', 'due'], ['start:', 'start'], ['~', 'estimate'], ['every:', 'repeat'], ['type:', 'type'], ['sprint:', 'sprint']].map(([p, l]) =>
-        <button key={p} className="qa-chip" title={`Insert ${p}`} onClick={() => start(p)}><b>{p}</b> {l}</button>)}
+      {focus && [['@', 'who'], ['!', 'prio'], ['#', 'tag'], ['due:', ''], ['start:', ''], ['~', 'hrs'], ['every:', ''], ['type:', ''], ['sprint:', '']].map(([p, l]) =>
+        <button key={p} className="qa-chip" title={`Insert ${p}`} onClick={() => start(p)}><b>{p}</b>{l && <span className="qa-l">{l}</span>}</button>)}
+      {focus && <button className="qa-chip qa-def" title={`Add your defaults: ${defaultTokens(store, '') || 'none set'} (Ctrl+Space). Change them under New items in the toolbar.`} onClick={addDefaults}>Ctrl+Space: defaults</button>}
       {chips.length > 0 && <span className="qa-preview">{chips}</span>}
     </div>}
   </>;

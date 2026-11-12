@@ -1,8 +1,9 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {NewItemSpotlight, NewItemsButton} from './NewItems.tsx';
 import {CoverHeader} from './Cover.tsx';
 import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight} from 'lucide-react';
+import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -45,12 +46,13 @@ const TemplateEditor = lazy(() => import('./TemplateEditor.tsx').then(m => ({def
 const Everything = lazy(() => import('./Everything.tsx').then(m => ({default: m.Everything})));
 const PlanPage = lazy(() => import('./PlanPage.tsx').then(m => ({default: m.PlanPage})));
 const ApprovalsPage = lazy(() => import('./Approvals.tsx').then(m => ({default: m.ApprovalsPage})));
-const RoutinesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.RoutinesPage})));
+const RoutinesPage = lazy(() => import('./Routines.tsx').then(m => ({default: m.RoutinesPage})));
+const ParkedPage = lazy(() => import('./Parked.tsx').then(m => ({default: m.ParkedPage})));
 const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.TemplatesPage})));
 const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -66,7 +68,7 @@ function readRoute(): Route {
   if (page === 'invite' && id) return {page: 'invite', id};
   if (page === 'signin-link' && id) return {page: 'signin-link', id};
   if (page === 'today') return {page: 'today'};
-  if (page === 'templates' || page === 'routines' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
+  if (page === 'templates' || page === 'routines' || page === 'parked' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
   if (page === 'signin') return {page: 'signin'};
   if (page === 'open' && id) { sessionStorage.setItem('open-after', id); history.replaceState(null, '', '#/mywork'); return {page: 'mywork'}; }
   return {page: 'mywork'};
@@ -222,6 +224,7 @@ export function App() {
     <StoreContext.Provider value={store}>
     <div className={'app' + (collapsed ? ' side-collapsed' : '') + (drawer ? ' drawer-open' : '')} style={{'--side-w': `${sideW}px`} as React.CSSProperties}>
       <div className="side-wrap">
+        <NewItemSpotlight store={store} />
         <Sidebar store={store} me={me} setMe={setMe} route={route} unread={unread} openPalette={() => setPalette(true)} open={open} onToggle={toggleSide} onShortcuts={() => setShortcuts(true)} signedIn={!!auth?.required} />
         <div className="side-resize" onPointerDown={startResize} onDoubleClick={() => { setSideW(248); localStorage.setItem('side-w', '248'); }} title="Drag to resize, double-click to reset" />
       </div>
@@ -243,6 +246,7 @@ export function App() {
         {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
         {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
         {route.page === 'routines' && <div className="content"><RoutinesPage store={store} open={open} /></div>}
+        {route.page === 'parked' && <div className="content"><ParkedPage store={store} open={open} /></div>}
         {route.page === 'timesheet' && <div className="content"><TimesheetPage store={store} open={open} /></div>}
         {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}
         {route.page === 'ai' && <div className="content"><AIWorkPage store={store} open={open} /></div>}
@@ -324,7 +328,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
           {expanded && views.map(v => {
             const Icon = viewIcon(v.kind);
             const on = route.page === 'project' && (route.view === v.id || (!route.view && v === views[0]));
-            return <button key={v.id} className={'nav-btn nav-sub' + (on ? ' active' : '')} onClick={() => go({page: 'project', id: p.id, view: v.id})}><Icon size={14} color={VIEW_COLORS[v.kind]} />{v.name}</button>;
+            return <ViewNavButton key={v.id} on={on} name={v.name} icon={<Icon size={14} color={VIEW_COLORS[v.kind]} />} onOpen={() => go({page: 'project', id: p.id, view: v.id})} onRename={name => store.updateView(v.id, {name})} />;
           })}
         </>;
       }} />
@@ -337,6 +341,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
         {wsOpen && <>
           <button className={'nav-btn' + (route.page === 'plan' ? ' active' : '')} onClick={() => go({page: 'plan'})}><Sparkles size={15} /> Plan and forecast</button>
           {store.settings.features.routines && <button className={'nav-btn' + (route.page === 'routines' ? ' active' : '')} onClick={() => go({page: 'routines'})}><Repeat size={15} /> Routines</button>}
+          <button className={'nav-btn' + (route.page === 'parked' ? ' active' : '')} title="Archived ideas, rejected work and snoozed items" onClick={() => go({page: 'parked'})}><Archive size={15} /> Archive and later</button>
           {store.settings.features.timeTracking && <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>}
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
           {store.settings.features.insights && <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>}
@@ -388,6 +393,20 @@ function ProjectNavButton({store, project, active, extra, onOpen, expanded, onTo
 }
 
 
+/** A view under a space in the sidebar. Click opens it; double-click renames it in place, like a space. */
+function ViewNavButton({on, name, icon, onOpen, onRename}: {on: boolean; name: string; icon: React.ReactNode; onOpen: () => void; onRename: (name: string) => void}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(name);
+  const done = () => { setEditing(false); if (text.trim() && text.trim() !== name) onRename(text.trim()); else setText(name); };
+  return <button className={'nav-btn nav-sub' + (on ? ' active' : '')} title="Double-click to rename" onClick={() => !editing && onOpen()} onDoubleClick={() => { setText(name); setEditing(true); }}>
+    {icon}
+    {editing
+      ? <input autoFocus className="nav-edit" value={text} onChange={e => setText(e.target.value)} onBlur={done} onClick={e => e.stopPropagation()}
+          onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') done(); if (e.key === 'Escape') { setText(name); setEditing(false); } }} />
+      : name}
+  </button>;
+}
+
 /** Live clock for the running timer, always visible. */
 function RunningTimer({store, open}: {store: Store; open: (id: string) => void}) {
   const run = store.running;
@@ -406,7 +425,7 @@ function RunningTimer({store, open}: {store: Store; open: (id: string) => void})
 export function applyFilters(items: Item[], c: ViewConfig, ctx?: {project: Project; today: string; currentSprint: string | null}) {
   const text = c.text?.toLowerCase();
   // Paused routines live only on the Routines page until switched back on.
-  return items.filter(i => !i.recur?.paused && (!ctx || matchFilter(i, c.filter, ctx)) &&
+  return items.filter(i => !i.recur?.paused && !i.recur?.waiting && !i.fields.archived && !(typeof i.fields.snooze === 'string' && ctx && i.fields.snooze > ctx.today) && (!ctx || matchFilter(i, c.filter, ctx)) &&
     (!text || i.title.toLowerCase().includes(text) || i.tags.some(t => t.toLowerCase().includes(text))) &&
     (!c.assignee || (c.assignee === 'none' ? !i.assignees.length : i.assignees.includes(c.assignee))) &&
     (!c.hideDone || !i.completed) &&
@@ -592,6 +611,7 @@ function Toolbar({store, project, view, config, setConfig, openItem}: {store: St
       </span>
       {(view.kind === 'list' || view.kind === 'table' || view.kind === 'board') && <SortButton project={project} config={config} setConfig={setConfig} />}
       <FilterButton store={store} project={project} sprints={store.sprints.filter(s => s.projectId === project.id)} value={config.filter} onChange={filter => setConfig({filter})} />
+      <NewItemsButton store={store} />
       <button className={'btn' + (config.hideDone ? ' on' : '')} onClick={() => setConfig({hideDone: !config.hideDone})}>{config.hideDone ? 'Done hidden' : 'Showing done'}</button>
       {view.kind === 'board' && (
         <select className="plain-select" value={config.groupBy ?? 'status'} onChange={e => setConfig({groupBy: e.target.value as ViewConfig['groupBy']})} title="Group by">

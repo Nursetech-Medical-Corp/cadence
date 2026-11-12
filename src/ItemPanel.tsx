@@ -7,6 +7,8 @@ import {GripVertical, Link2, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight
 import type {Comment, Item} from './types.ts';
 import {api, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
+import {RoutineControls, SopLinks} from './RoutineControls.tsx';
+import {ParkButtons} from './Parked.tsx';
 import {BlockEditor} from './BlockEditor.tsx';
 import {WorkSection} from './AIWork.tsx';
 import {ApprovalsSection} from './Approvals.tsx';
@@ -153,6 +155,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         </span>
         <span className="spacer" />
         <SaveTemplateButton store={store} item={item} />
+        <ParkButtons store={store} item={item} />
         <button className="icon" title="Delete" onClick={() => { if (confirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`)) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>
         {nav && <button className={'icon' + (nav.pinned ? ' on' : '')} title={nav.pinned ? 'Pinned: stays open when you click elsewhere. Click to unpin' : 'Pin open (otherwise clicking outside closes it)'} onClick={nav.togglePin}>{nav.pinned ? <Pin size={15} /> : <PinOff size={15} />}</button>}
         <button className="icon" title="Close (Esc)" onClick={close}><X size={16} /></button>
@@ -185,8 +188,8 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
             <option value="">None</option>
             {all.filter(i => i.projectId === project.id && i.id !== item.id && project.types.indexOf(i.type) < Math.max(project.types.indexOf(item.type), 1)).map(i => <option key={i.id} value={i.id}>{i.type}: {i.title.slice(0, 50)}</option>)}
           </select>],
-          ['tags', 'Tags', <TagEditor tags={item.tags} onChange={tags => up({tags})} />],
-          ['repeat', 'Repeat', <RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} />],
+          ['tags', 'Tags', <><TagEditor tags={item.tags} onChange={tags => up({tags})} /><SopLinks store={store} item={item} /></>],
+          ['repeat', 'Repeat', <><RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} /><RoutineControls store={store} item={item} /></>],
           ['project', 'Project', <select className="plain-select" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
           ...project.fields.filter(f => f.kind !== 'time').map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)
             ? <FieldCell field={f} item={item} project={project} value={item.fields[f.id]} store={store} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />

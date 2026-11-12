@@ -69,6 +69,8 @@ export function checkRecur(r: unknown) {
   if (x.count !== undefined && x.count !== null && (!Number.isInteger(x.count) || x.count < 1)) throw new Invalid('Repeat count must be 1 or more');
   if (x.until !== undefined && x.until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(x.until))) throw new Invalid('Repeat until must be a date like 2026-12-31');
   if (x.paused !== undefined && typeof x.paused !== 'boolean') throw new Invalid('Repeat paused must be true or false');
+  if (x.waiting !== undefined && typeof x.waiting !== 'boolean') throw new Invalid('Repeat waiting must be true or false');
+  if (x.slot !== undefined && x.slot !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(x.slot))) throw new Invalid('Repeat slot must be a date like 2026-12-31');
 }
 export const isColor = (c: unknown) => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c);
 /** Field values must match their column kind, so bad API input cannot break views. */
@@ -235,7 +237,13 @@ export class Tasks {
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
-    if (patch.key !== undefined && this.listProjects().some(x => x.id !== pid && x.key.toUpperCase() === String(p.key).toUpperCase())) throw new Invalid(`Key ${p.key} is already used by another space`);
+    if (patch.key !== undefined) {
+      p.key = String(p.key).toUpperCase();
+      if (!/^[A-Z][A-Z0-9]{1,9}$/.test(p.key)) throw new Invalid('A space key is 2 to 10 letters or digits, starting with a letter, like GEN');
+      if (this.listProjects().some(x => x.id !== pid && (x.key.toUpperCase() === p.key || (x.settings.oldKeys ?? []).includes(p.key)))) throw new Invalid(`Key ${p.key} is already used by another space`);
+      // Old keys keep working in links and searches (NT-12 still finds GEN-12).
+      if (p.key !== cur.key) p.settings = {...p.settings, oldKeys: [...new Set([...((cur.settings.oldKeys ?? [])), cur.key])].filter(k => k !== p.key)};
+    }
     if (patch.name !== undefined && (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 200)) throw new Invalid('Space names need 1 to 200 characters');
     if (patch.name !== undefined) p.name = p.name.trim();
     if (patch.sort !== undefined && !Number.isFinite(p.sort)) throw new Invalid('Sort must be a number');
@@ -265,7 +273,11 @@ export class Tasks {
     if (q.parentId !== undefined) { where.push(q.parentId === null ? 'parent_id is null' : 'parent_id = ?'); if (q.parentId !== null) args.push(q.parentId); }
     if (q.text) { where.push('(title like ? or body like ?)'); args.push(`%${q.text}%`, `%${q.text}%`); }
     if (q.dueBefore) { where.push('due is not null and due <= ?'); args.push(q.dueBefore); }
-    if (q.open) where.push("completed is null and coalesce(json_extract(recur, '$.paused'), 0) = 0");
+    if (q.open) {
+      // Open work: not done, not a paused or waiting routine, not archived, not snoozed past today.
+      where.push("completed is null and coalesce(json_extract(recur, '$.paused'), 0) = 0 and coalesce(json_extract(recur, '$.waiting'), 0) = 0 and json_extract(fields, '$.archived') is null and coalesce(json_extract(fields, '$.snooze'), '') <= ?");
+      args.push(this.today());
+    }
     const sql = `select * from items ${where.length ? 'where ' + where.join(' and ') : ''} order by sort limit ${Math.min(q.limit ?? 5000, 5000)}`;
     return this.db.prepare(sql).all(...args).map(toItem);
   }
@@ -279,7 +291,8 @@ export class Tasks {
     if (typeof ref !== 'string' || !ref) throw new NotFound('Item not found');
     const m = /^([a-z]+)-(\d+)$/i.exec(ref);
     if (m) {
-      const r = this.db.prepare('select i.* from items i join projects p on p.id = i.project_id where upper(p.key) = ? and i.number = ?').get(m[1].toUpperCase(), Number(m[2]));
+      const r = this.db.prepare('select i.* from items i join projects p on p.id = i.project_id where upper(p.key) = ? and i.number = ?').get(m[1].toUpperCase(), Number(m[2]))
+        ?? this.db.prepare("select i.* from items i join projects p on p.id = i.project_id where exists (select 1 from json_each(json_extract(p.settings, '$.oldKeys')) where upper(value) = ?) and i.number = ?").get(m[1].toUpperCase(), Number(m[2]));
       if (r) return toItem(r);
     }
     return this.item(ref);
@@ -404,6 +417,7 @@ export class Tasks {
     if (!wasDone && isDone) {
       for (const who of this.watchers(next)) this.notify(who, actor, iid, 'completed', `completed ${ref}: ${next.title}`);
       this.spawnRecurrence(next, p, actor);
+      this.releaseWaiting(iid, actor);
     }
     if (before.status !== next.status) this.fire({kind: 'status', to: next.status}, this.item(iid));
     if (!wasDone && isDone) this.fire({kind: 'completed'}, this.item(iid));
@@ -512,13 +526,14 @@ export class Tasks {
   private spawnRecurrence(done: Item, p: Project, actor: string | null) {
     const r = done.recur;
     if (!r || r.spawned) return;
-    const base = r.mode === 'completion' || !done.due ? this.today() : done.due;
-    const due = nextOccurrence(r, base, done.due ?? base);
+    const sched = r.slot ?? done.due;
+    const base = r.mode === 'completion' || !sched ? this.today() : sched;
+    const due = nextOccurrence(r, base, sched ?? base);
     if (r.until && due > r.until) return;
     if (r.count != null && r.count <= 0) return;
     const start = done.start && done.due ? addUnit(done.start, daysBetween(done.due, due), 'day') : null;
-    const {spawned: _s, ...rule} = r;
-    void _s;
+    const {spawned: _s, slot: _sl, waiting: _w, ...rule} = r;
+    void _s; void _sl; void _w;
     const nextRule: Recur | null = r.count != null ? (r.count - 1 > 0 ? {...rule, count: r.count - 1} : null) : rule;
     const todo = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
     if (r.reopen) {
@@ -548,25 +563,79 @@ export class Tasks {
    * skip: move this copy to the next date. pause: hide it from views, sprints and plans. resume: show it again on
    * its next date from today. end: stop repeating; this copy stays as a normal task.
    */
-  routine(ref: string, action: 'skip' | 'pause' | 'resume' | 'end', actor: string | null = null): Item {
+  routine(ref: string, action: 'skip' | 'pause' | 'resume' | 'end' | 'delay' | 'wait', actor: string | null = null, opts: {to?: string; on?: string[]} = {}): Item {
     const it = this.findItem(ref), r = it.recur;
     if (!r || r.spawned || it.completed) throw new Invalid(`${it.title} is not an open repeating item`);
     const shift = (due: string) => it.start && it.due ? addUnit(it.start, daysBetween(it.due, due), 'day') : it.start;
     const anchor = it.due ?? this.today();
     if (action === 'pause') return this.updateItem(it.id, {recur: {...r, paused: true}, sprint: null}, actor);
+    if (action === 'delay') {
+      // Push only this copy. The next one is still counted from the date this one was scheduled for.
+      if (!opts.to || !/^\d{4}-\d{2}-\d{2}$/.test(opts.to)) throw new Invalid('Delay needs a date like 2026-12-04');
+      const slot = r.slot ?? it.due;
+      return this.updateItem(it.id, {due: opts.to, start: shift(opts.to), recur: {...r, slot: opts.to === slot ? null : slot}}, actor, {keep: true});
+    }
+    if (action === 'wait') {
+      // Start only after other work is done (a hire, a W-2 setup). Hidden until then; starts by itself.
+      const on = (opts.on ?? []).map(x => this.findItem(x).id);
+      if (!on.length) throw new Invalid('Wait needs the items it waits on');
+      const open = on.filter(d => !this.item(d).completed);
+      const deps = [...new Set([...it.deps, ...on])];
+      return this.updateItem(it.id, {deps, recur: open.length ? {...r, waiting: true} : {...r, waiting: false}, sprint: open.length ? null : it.sprint}, actor, {keep: true});
+    }
     if (action === 'end') return this.updateItem(it.id, {recur: null}, actor);
     if (action === 'resume') {
-      const {paused: _p, ...rule} = r; void _p;
+      const {paused: _p, waiting: _w, slot: _sl, ...rule} = r; void _p; void _w; void _sl;
       let due = it.due;
       for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, anchor);
       if (due && rule.until && due > rule.until) return this.updateItem(it.id, {recur: null, due}, actor);
       return this.updateItem(it.id, {recur: rule, due, start: due ? shift(due) : it.start}, actor);
     }
     if (action !== 'skip') throw new Invalid('Action must be skip, pause, resume or end');
-    const due = nextOccurrence(r, anchor, anchor);
+    const sched = r.slot ?? anchor;
+    let due = nextOccurrence(r, sched, sched);
+    for (let n = 0; due <= anchor && n < 500; n++) due = nextOccurrence(r, due, sched);
     if (r.until && due > r.until) throw new Invalid('That was the last one. End the routine instead.');
     if (r.count != null && r.count <= 1) throw new Invalid('That was the last one. End the routine instead.');
-    return this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...r, count: r.count - 1} : r}, actor);
+    const {slot: _sl, ...kept} = r; void _sl;
+    return this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...kept, count: r.count - 1} : kept}, actor);
+  }
+  /** When work finishes, start the routines that were waiting only on it. Their first date is the next one from today. */
+  private releaseWaiting(doneId: string, actor: string | null) {
+    const waiting = this.db.prepare("select id from items where completed is null and json_extract(recur, '$.waiting') = 1 and exists (select 1 from json_each(deps) where value = ?)").all(doneId) as {id: string}[];
+    for (const {id: wid} of waiting) {
+      const w = this.item(wid);
+      if (w.deps.some(d => { try { return !this.item(d).completed; } catch { return false; } })) continue;
+      const {waiting: _w, ...rule} = w.recur!; void _w;
+      let due = w.due;
+      for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, w.due!);
+      this.updateItem(wid, {recur: rule, due: due ?? this.today()}, actor, {system: true, keep: true});
+      for (const a of w.assignees) this.notify(a, actor, wid, 'assigned', `routine started (what it waited on is done): ${w.title}`);
+    }
+  }
+
+  // Archive and snooze: park ideas and rejected work out of every list without deleting it.
+  archiveItem(ref: string, opts: {reason?: string; kind?: 'parked' | 'rejected' | 'idea'} = {}, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    const archived = {on: this.today(), by: actor, kind: opts.kind ?? 'parked', reason: (opts.reason ?? '').slice(0, 1000)};
+    return this.updateItem(it.id, {fields: {...it.fields, archived}, sprint: null}, actor, {keep: true});
+  }
+  restoreItem(ref: string, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    const {archived: _a, snooze: _s, ...fields} = it.fields; void _a; void _s;
+    return this.updateItem(it.id, {fields}, actor, {keep: true});
+  }
+  /** Hide until a date, then it comes back to its list. Null brings it back now. */
+  snoozeItem(ref: string, until: string | null, actor: string | null = null): Item {
+    const it = this.findItem(ref);
+    if (until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Invalid('Snooze needs a date like 2027-03-01');
+    const {snooze: _s, ...rest} = it.fields; void _s;
+    return this.updateItem(it.id, {fields: until ? {...rest, snooze: until} : rest, sprint: until ? null : it.sprint}, actor, {keep: true});
+  }
+  /** Archived and snoozed items, newest first. */
+  listParked(): Item[] {
+    return this.listItems({}).filter(i => i.fields.archived || (typeof i.fields.snooze === 'string' && i.fields.snooze > this.today()))
+      .sort((a, b) => String((b.fields.archived as {on?: string})?.on ?? b.fields.snooze).localeCompare(String((a.fields.archived as {on?: string})?.on ?? a.fields.snooze)));
   }
 
   // Comments, with @mentions by first name.

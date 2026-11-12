@@ -81,3 +81,56 @@ test('routines over MCP: pause a whole SOP by tag, list paused ones', async () =
   assert.deepEqual(paused.map((x: {title: string}) => x.title).sort(), ['A', 'B']);
   assert.equal((await call('list_routines', {paused: false})).length, 1);
 });
+
+test('routines: delay moves only this copy; the next stays on schedule', () => {
+  const {t, david, p} = setup();
+  const w = t.createItem({projectId: p.id, title: 'Weekly', due: '2026-11-16', recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  const d = t.routine(w.id, 'delay', david.id, {to: '2026-11-19'});
+  assert.equal(d.due, '2026-11-19');
+  assert.equal(d.recur?.slot, '2026-11-16');
+  const done = p.statuses.find(s => s.category === 'done')!.id;
+  t.updateItem(w.id, {status: done}, david.id);
+  const next = t.listRoutines().find(i => i.title === 'Weekly')!;
+  assert.equal(next.due, '2026-11-23', 'next copy counts from the original slot');
+  assert.equal(next.recur?.slot, undefined);
+});
+
+test('routines: wait hides a routine until the work it waits on is done, then it starts', () => {
+  const {t, david, p, setDay} = setup();
+  const hire = t.createItem({projectId: p.id, title: 'Hire first W-2 employee', due: '2026-12-15'}, david.id);
+  const payroll = t.createItem({projectId: p.id, title: 'Weekly payroll check', assignees: [david.id], due: '2026-11-18', recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  const waiting = t.routine(payroll.id, 'wait', david.id, {on: [hire.id]});
+  assert.equal(waiting.recur?.waiting, true);
+  assert.ok(!t.listItems({open: true}).some(i => i.id === payroll.id));
+  setDay('2027-01-05');
+  t.updateItem(hire.id, {status: p.statuses.find(s => s.category === 'done')!.id}, david.id);
+  const live = t.item(payroll.id);
+  assert.equal(live.recur?.waiting, undefined);
+  assert.ok(live.due! >= '2027-01-05', 'starts on its next date from today');
+  assert.ok(t.listItems({open: true}).some(i => i.id === payroll.id));
+});
+
+test('archive, snooze and restore keep items out of open lists without deleting them', () => {
+  const {t, david, p, setDay} = setup();
+  const idea = t.createItem({projectId: p.id, title: 'Maybe another conference'}, david.id);
+  t.archiveItem(idea.id, {kind: 'idea', reason: 'Not sure we will go'}, david.id);
+  assert.ok(!t.listItems({open: true}).some(i => i.id === idea.id));
+  assert.equal(t.listParked().length, 1);
+  t.restoreItem(idea.id, david.id);
+  assert.ok(t.listItems({open: true}).some(i => i.id === idea.id));
+  t.snoozeItem(idea.id, '2026-12-01', david.id);
+  assert.ok(!t.listItems({open: true}).some(i => i.id === idea.id));
+  setDay('2026-12-01');
+  assert.ok(t.listItems({open: true}).some(i => i.id === idea.id), 'comes back on its date');
+});
+
+test('renaming a space key keeps old item keys working', () => {
+  const {t, david} = setup();
+  const nt = t.createProject({name: 'Gen Business', key: 'NT'});
+  const it = t.createItem({projectId: nt.id, title: 'Something'}, david.id);
+  t.updateProject(nt.id, {key: 'gen'});
+  assert.equal(t.project(nt.id).key, 'GEN');
+  assert.equal(t.findItem(`GEN-${it.number}`).id, it.id);
+  assert.equal(t.findItem(`NT-${it.number}`).id, it.id);
+  assert.throws(() => t.createProject({name: 'Other', key: 'X1'}) && t.updateProject(t.listProjects().find(x => x.key === 'X1')!.id, {key: 'NT'}), /already used/);
+});

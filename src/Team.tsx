@@ -384,7 +384,9 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
     <section className="set-card">
       <div className="set-card-head"><h3><Shield size={15} /> {personal ? 'Sharing' : 'Access'}</h3><span className="muted small">{personal
         ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
-        : 'Who can see and change this space. Enforced once sign-in is required (Team page). Only admins can change this.'}</span></div>
+        : 'Shared space: everyone in the workspace sees it with their default role (set on the Team page) unless you change it below. Inviting someone to the workspace gives them every shared space, never your private ones.'}</span></div>
+      {!personal && canEdit && me && <div className="set-item"><span className="grow muted small">Keep this space to yourself and the people you pick, like a private Google Doc.</span>
+        <button className="btn small" onClick={() => { if (confirm('Make this space private? Only you and people you give a role below will see it.')) save({default: 'none', members: {...access.members, [me]: 'admin'}, private: true}); }}>Make private</button></div>}
       <div className="set-item">
         <span className="grow">Everyone else in the workspace</span>
         <select className="plain-select" value={access.default} disabled={!canEdit} onChange={e => save({...access, default: e.target.value})}>
