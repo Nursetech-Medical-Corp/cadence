@@ -29,6 +29,9 @@ test('day planner: top 3, brain dump, time boxes, validation', () => {
   assert.throws(() => t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'x', text: 'x', start: '25:00', minutes: 30}]}), /09:30/);
   assert.throws(() => t.updateDayPlan(david.id, '2026-11-14', {slot: 20}), /15, 30 or 60/);
   assert.equal(t.dayPlan(david.id, '2026-11-15').blocks.length, 0, 'each day is its own page');
+  const meet = t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'm', text: 'Team meeting', start: '14:00', minutes: 60, links: [it.id, 'OPS-1'], eventId: 'ev1', note: 'Agenda'}]});
+  assert.deepEqual(meet.blocks[0].links, [it.id], 'tasks tied to a meeting box (keys work too)');
+  assert.equal(meet.blocks[0].eventId, 'ev1');
 });
 
 test('day planner: schedule from now skips busy and done, uses estimates', () => {

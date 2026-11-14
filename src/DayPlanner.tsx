@@ -2,14 +2,17 @@
 // Drag lines and tasks onto the day, drag boxes to move them, drag the bottom edge to resize. Done boxes turn green.
 // Saved per person per day at /api/day/:date (server/dayplan.ts).
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Bell, BellOff, CalendarClock, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, ListPlus, Play, Square, Wand2, X, Check as CheckIcon} from 'lucide-react';
+import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
+import {PRIORITIES} from './types.ts';
 import {api, realProjects, type Store} from './store.ts';
-import {Check, itemKey} from './components.tsx';
+import {Avatars, Check, PriorityIcon, itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
 type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
-type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean};
+type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string};
+/** A calendar event (Cadence meeting or synced Google event) shown on the day. */
+type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null};
 type Plan = {date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number};
 type DragData = {from: 'top' | 'dump' | 'task' | 'block'; id: string; itemId?: string | null; text: string; grab?: number; grabX?: number};
 
@@ -17,6 +20,7 @@ const rid = () => Math.random().toString(36).slice(2, 10);
 const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const label = (m: number) => { const h = Math.floor(m / 60) % 24, mm = m % 60; return `${h % 12 || 12}${mm ? ':' + String(mm).padStart(2, '0') : ''}${h < 12 ? 'am' : 'pm'}`; };
+const dayName = (d: string, long = false) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, long ? {weekday: 'long', month: 'short', day: 'numeric'} : {weekday: 'short', day: 'numeric'});
 const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).toISOString();
 const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2));
@@ -32,10 +36,17 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [space, setSpace] = useState(() => localStorage.getItem('day-space') ?? '');
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [design, setDesignState] = useState(() => localStorage.getItem('day-design') ?? 'classic');
+  const [design, setDesignState] = useState(() => localStorage.getItem('day-design') ?? 'focus');
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem('day-density') as Density) || 'normal');
   const [bySource, setBySource] = useState(() => !!localStorage.getItem('day-bysource'));
   const [tab, setTab] = useState<'dump' | 'top' | 'tasks' | 'day'>('day');
+  const [events, setEvents] = useState<CalEv[]>([]);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [ghost, setGhost] = useState<{a: number; b: number} | null>(null);
+  const [openSecs, setOpenSecs] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('day-open') ?? '{}'); } catch { return {}; } });
+  const isOpen = (k: string) => openSecs[k] ?? true;
+  const setOpen = (k: string, v: boolean) => setOpenSecs(o => { const n = {...o, [k]: v}; localStorage.setItem('day-open', JSON.stringify(n)); return n; });
+  const dayRef = useRef<HTMLDivElement>(null), scrolled = useRef('');
   const setDesign = (id: string) => { setDesignState(id); localStorage.setItem('day-design', id); };
   const pickDesign = (step: number) => { const i = DESIGNS.findIndex(x => x.id === design); setDesign(DESIGNS[(i + step + DESIGNS.length) % DESIGNS.length].id); };
   const pending = useRef<number | null>(null), latest = useRef<Plan | null>(null), dirty = useRef(false);
@@ -45,6 +56,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     if (!me || dirty.current) return;
     api<Plan>(`/day/${date}?person=${me}`).then(setPlan).catch(e => store.fail(e));
     api<TimeEntry[]>(`/time?person=${me}`).then(setTime).catch(() => {});
+    api<CalEv[]>(`/meetings?from=${addDays(date, -1)}&to=${addDays(date, 1)}&mine=1`).then(l => setEvents(l.filter(e => !e.allDay && localDate(new Date(e.start)) === date))).catch(() => setEvents([]));
   }, [date, me]);
   useEffect(load, [load, store.tick]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
@@ -59,6 +71,15 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       dirty.current = false;
     }, 400);
   };
+  // Scroll the day to an hour before now (or the first box) once per day shown.
+  useEffect(() => {
+    const el = dayRef.current;
+    if (!el || !plan || scrolled.current === date) return;
+    scrolled.current = date;
+    const target = date === localDate() ? new Date().getHours() * 60 - 60 : plan.blocks.length ? Math.min(...plan.blocks.map(b => mins(b.start))) - 30 : plan.dayStart * 60;
+    const grid = el.querySelector('.dp-grid') as HTMLElement | null;
+    if (grid) el.scrollTop = Math.max(0, grid.offsetTop + (target - plan.dayStart * 60) * 1.4);
+  });
   if (!me) return <p className="muted">Pick who you are first.</p>;
   if (!plan) return <div className="loading">Loading...</div>;
 
@@ -148,7 +169,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     patchBlock(b.id, {start, minutes: Math.max(5, Math.round((e - s) / 60000 / 5) * 5), at: atOf(plan.date, start)});
   };
   // Overlapping boxes sit side by side.
-  const lanes = lanesOf(plan.blocks);
+  const tiedEvents = new Set(plan.blocks.map(b => b.eventId).filter(Boolean));
+  const evMin = (iso: string) => { const d = new Date(iso); return d.getHours() * 60 + d.getMinutes(); };
+  const dayEvents = events.filter(e => !tiedEvents.has(e.id)).map(e => ({...e, s: evMin(e.start), len: Math.max(15, Math.round((Date.parse(e.end) - Date.parse(e.start)) / 60000))}));
+  const lanes = lanesOf([...plan.blocks, ...dayEvents.map(e => ({id: 'ev:' + e.id, text: e.title, start: hhmm(Math.max(0, e.s)), minutes: e.len}))]);
   const nowM = date === localDate(now) ? now.getHours() * 60 + now.getMinutes() : null;
 
   const dragProps = (d: DragData) => ({draggable: true, onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }});
@@ -232,7 +256,21 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     </div>; })}
     {!!doneToday.length && <p className="muted small">Done today: {doneToday.length}</p>}
   </section>;
+  const taskInfo = (it: Item) => {
+    const p = store.projects.find(x => x.id === it.projectId), st = p?.statuses.find(x => x.id === it.status);
+    return <span className="dp-info">
+      {st && <span className="dp-status" style={{'--c': st.color} as React.CSSProperties}>{st.name}</span>}
+      {it.priority > 0 && <span title={PRIORITIES[it.priority]}><PriorityIcon value={it.priority} size={11} /></span>}
+      {it.due && <span className={it.due < date && !it.completed ? 'dp-late' : ''}>due {it.due === date ? 'today' : it.due}</span>}
+      {it.estimate ? <span>{it.estimate}h</span> : null}
+      {p && <span className="dp-space">{p.name}</span>}
+      {it.tags.filter(t => /^sop-/i.test(t)).map(t => <span key={t} className="tag">{t.toUpperCase()}</span>)}
+      <Avatars ids={it.assignees} people={store.people} size={16} />
+    </span>;
+  };
+  const linkChips = (b: Block) => !!b.links?.length && <span className="dp-links">{b.links.map(id => { const it = store.items.get(id); return it ? <button key={id} className={'dp-linkchip' + (it.completed ? ' done' : '')} title={`${it.completed ? 'Done' : 'Open'}: ${it.title}`} onClick={() => open(id)}><Link2 size={9} /> {itemKey(it, store.projects)} {it.title}</button> : null; })}</span>;
   const blockTools = (b: Block, it: Item | undefined, done: boolean, running: boolean) => <>
+    <button className="icon" title="Edit this box: time, note, tasks tied to it, calendar invite" onClick={() => setEditing(b.id)}><Pencil size={11} /></button>
     {it && !done && (running ? <button className="icon" title="Stop timer" onClick={() => store.stopTimer()}><Square size={11} /></button> : <button className="icon" title="Start timer" onClick={() => store.startTimer(it.id)}><Play size={11} /></button>)}
     {it && actualOf(it.id).length > 0 && <button className="icon" title="Fit this box to the time you logged" onClick={() => adapt(b)}><Clock size={11} /></button>}
     <button className={'icon' + (b.remind ? ' on' : '')} title={b.remind ? 'Reminder on: you get a notification when it starts' : 'Remind me when it starts (phone and desktop)'} onClick={() => patchBlock(b.id, {remind: !b.remind, at: atOf(plan.date, b.start)})}>{b.remind ? <Bell size={11} /> : <BellOff size={11} />}</button>
@@ -251,11 +289,35 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     const offset = horiz ? ev.clientX - r.left - (d.grabX ?? 0) : ev.clientY - r.top - (d.grab ?? 0);
     placeDrop(d, Math.max(startM, Math.min(endM - snapTo, startM + Math.round(offset / px / snapTo) * snapTo)));
   };
-  const dayGrid = <div className={'dp-day' + (horiz ? ' horiz' : '')}>
-    <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={e => e.preventDefault()} onDrop={dropAt}>
+  const dayGrid = <div className={'dp-day' + (horiz ? ' horiz' : '')} ref={dayRef}>
+    {!horiz && <div className="dp-daynav">
+      <button className="btn ghost small" onClick={() => setDate(addDays(date, -1))}><ChevronLeft size={14} /> {dayName(addDays(date, -1))}</button>
+      <b>{dayName(date, true)}</b>{date !== localDate() && <button className="btn small" onClick={() => setDate(localDate())}>Today</button>}
+      <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))}>{dayName(addDays(date, 1))} <ChevronRight size={14} /></button>
+    </div>}
+    <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={e => e.preventDefault()} onDrop={dropAt}
+      onMouseDown={e => {
+        // Like a calendar: press on an empty time and drag down to make a box.
+        if (horiz || e.button !== 0 || !(e.target as HTMLElement).matches('.dp-grid, .dp-slot, .dp-hour, .dp-half')) return;
+        const grid = e.currentTarget, r = grid.getBoundingClientRect();
+        const at = (y: number) => Math.max(startM, Math.min(endM, startM + Math.round((y - r.top) / px / snapTo) * snapTo));
+        const a = Math.min(at(e.clientY), endM - snapTo);
+        let b2 = a + 30;
+        setGhost({a, b: b2});
+        const move = (ev: MouseEvent) => { b2 = Math.max(a + snapTo, at(ev.clientY)); setGhost({a, b: b2}); };
+        const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); setGhost(null);
+          const id = rid(), start = hhmm(a); save({...plan, blocks: [...plan.blocks, {id, text: '', start, minutes: Math.max(snapTo, b2 - a), at: atOf(plan.date, start), remind: false}]}); setEditing(id); };
+        addEventListener('mousemove', move); addEventListener('mouseup', up);
+      }}>
+      {ghost && <div className="dp-ghost" style={{top: (ghost.a - startM) * px, height: (ghost.b - ghost.a) * px}}>{label(ghost.a)} to {label(ghost.b)}</div>}
+      {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; return <div key={ev.id + ev.start} className="dp-event" style={place(ev.s, ev.len, lane)} title={`${ev.source === 'google' ? 'Google Calendar' : 'Calendar'}: ${ev.title}`}>
+        <div className="dp-brow"><CalendarClock size={11} /><span className="dp-btitle">{ev.title || '(no title)'}</span><span className="dp-btime">{label(ev.s)} to {label(ev.s + ev.len)}</span>
+          {ev.meetUrl && <a className="icon" href={ev.meetUrl} target="_blank" rel="noreferrer" title="Join"><Video size={11} /></a>}
+          <button className="icon" title="Plan in this event: make it a box so you can tie tasks to it" onClick={() => { const id = rid(), start = hhmm(Math.max(startM, ev.s)); save({...plan, blocks: [...plan.blocks, {id, text: ev.title || 'Meeting', start, minutes: ev.len, at: ev.start, remind: false, eventId: ev.id, ...(ev.itemId ? {links: [ev.itemId]} : {})}]}); setEditing(id); }}><Plus size={11} /></button></div>
+      </div>; })}
       {Array.from({length: (endM - startM) / plan.slot}, (_, k) => { const m = startM + k * plan.slot; return <div key={m} className={'dp-slot' + (m % 60 === 0 ? ' hour' : '')} style={span(m, plan.slot)}>
         {m % 60 === 0 && <span className="dp-hour">{label(m)}</span>}{D.id === 'paper' && m % 60 === 30 && <span className="dp-half">:30</span>}</div>; })}
-      {nowM !== null && nowM >= startM && nowM <= endM && <div className="dp-now" style={horiz ? {left: (nowM - startM) * px} : {top: (nowM - startM) * px}} />}
+      {nowM !== null && nowM >= startM && nowM <= endM && <div className="dp-now" style={horiz ? {left: (nowM - startM) * px} : {top: (nowM - startM) * px}}><span className="dp-nowlabel">{label(nowM)}</span></div>}
       {logged.map(t => { const s = new Date(t.start), e = t.end ? new Date(t.end) : new Date(); const sm = s.getHours() * 60 + s.getMinutes(), em = e.getHours() * 60 + e.getMinutes();
         if (em < startM || sm > endM) return null;
         const a = Math.max(sm, startM), len = Math.max(2, Math.min(em, endM) - a);
@@ -266,13 +328,15 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '')} draggable
           onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); e.dataTransfer.setData('application/x-plan', JSON.stringify({from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left})); }}
           style={place(s, b.minutes, lane)}
-          onClick={e => { if ((e.target as HTMLElement).closest('button')) return; if (it) open(it.id); }}>
+          onClick={e => { if ((e.target as HTMLElement).closest('button, a')) return; if (it) open(it.id); else setEditing(b.id); }}>
           <div className="dp-brow">
             <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry('blocks', b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
-            <span className="dp-btitle">{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? b.text}</span>
+            <span className="dp-btitle">{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? (b.text || <span className="muted">(untitled)</span>)}</span>
             <span className="dp-btime">{label(s)} to {label(s + b.minutes)}</span>
+            {b.eventId && <span title="On your calendar"><CalendarClock size={11} className="muted" /></span>}
             {blockTools(b, it, done, running)}
           </div>
+          {(it || b.links?.length || b.note) && b.minutes * px >= 40 && <div className="dp-bmore">{it && taskInfo(it)}{linkChips(b)}{b.note && <span className="dp-note">{b.note}</span>}</div>}
           <span className={'dp-resize' + (horiz ? ' x' : '')} onMouseDown={e => startResize(e, b, plan, save, px, horiz)} onClick={e => e.stopPropagation()} />
         </div>;
       })}
@@ -290,7 +354,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         <input type="time" className="plain-input dp-atime" value={b.start} step={300} onChange={e => e.target.value && patchBlock(b.id, {start: e.target.value, at: atOf(plan.date, e.target.value)})} />
         <select className="plain-select small" value={b.minutes} onChange={e => patchBlock(b.id, {minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v}m` : `${v / 60}h`}</option>)}</select>
         <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry('blocks', b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
-        <button className="dp-text link" onClick={() => it && open(it.id)}>{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? b.text}</button>
+        <span className="dp-acol"><button className="dp-text link" onClick={() => it ? open(it.id) : setEditing(b.id)}>{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? b.text}</button>
+          {it && taskInfo(it)}{linkChips(b)}</span>
         {blockTools(b, it, done, running)}
       </div>; })}
   </div>;
@@ -305,20 +370,32 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         {item(curB) && <button className="btn small" onClick={() => store.startTimer(item(curB)!.id)}><Play size={12} /> Start timer</button>}</div></>}
     {nextB && <div className="dp-next small">Next at {label(mins(nextB.start))}: <b>{item(nextB)?.title ?? nextB.text}</b></div>}
   </div>;
+  // Time logged today with timers, per task (the same entries as the Timesheet).
+  const loggedBy = [...logged.reduce((m, t) => m.set(t.itemId, (m.get(t.itemId) ?? 0) + (t.minutes ?? (t.end ? 0 : (Date.now() - Date.parse(t.start)) / 60000))), new Map<string, number>())].sort((a, b) => b[1] - a[1]);
+  const loggedSec = <section className="dp-sec">
+    <h4>Logged today <span className="count">{fmtM(loggedBy.reduce((a, x) => a + x[1], 0))}</span></h4>
+    <a className="small" href="#/timesheet">Open the timesheet</a>
+    {!loggedBy.length ? <p className="muted small">No time logged yet. Press play on a task box to start a timer.</p>
+      : loggedBy.map(([iid, m]) => { const it = store.items.get(iid); return <div key={iid} className="dp-entry"><button className="dp-text link" onClick={() => open(iid)}>{it ? <><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</> : 'A task'}</button><span className="muted small">{fmtM(m)}</span></div>; })}
+  </section>;
+  const eb = editing ? plan.blocks.find(b => b.id === editing) : undefined;
+  const editor = eb && <BoxEditor key={eb.id} store={store} b={eb} date={date} space={space} open={open}
+    patch={p => patchBlock(eb.id, p)} remove={() => { removeBlock(eb.id); setEditing(null); }} close={() => setEditing(null)} />;
+  const fold = (k: string, title: string, body: React.ReactNode) => <details open={isOpen(k)} onToggle={e => { const v = (e.currentTarget as HTMLDetailsElement).open; if (v !== isOpen(k)) setOpen(k, v); }}><summary>{title}</summary>{body}</details>;
   const tabsBar = <div className="dp-tabs">{(['dump', 'top', 'tasks', 'day'] as const).map(t => <button key={t} className={'btn' + (tab === t ? ' on' : '')} onClick={() => setTab(t)}>{({dump: 'Brain dump', top: 'Top 3', tasks: `Assigned (${mine.length})`, day: `Day (${plan.blocks.length})`})[t]}</button>)}</div>;
 
   let body;
   switch (D.id) {
     case 'gcal': body = <div className="dp-main">{dayGrid}<div className="dp-left right">{topSec}{dumpSec}{mineSec}</div></div>; break;
     case 'columns': body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}</div>{dayGrid}<div className="dp-left right">{mineSec}</div></div>; break;
-    case 'focus': body = <div className="dp-main"><div className="dp-left">{nowCard}{topSec}<details><summary>Brain dump ({plan.dump.length})</summary>{dumpSec}</details><details><summary>Assigned ({mine.length})</summary>{mineSec}</details></div>{dayGrid}</div>; break;
+    case 'focus': body = <div className="dp-main"><div className="dp-left">{nowCard}{fold('top', 'Top 3', topSec)}{fold('dump', `Brain dump (${plan.dump.filter(e => !isDone(e)).length})`, dumpSec)}{fold('mine', `Assigned (${mine.length})`, mineSec)}{fold('logged', 'Logged today', loggedSec)}</div>{dayGrid}</div>; break;
     case 'agenda': body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}{mineSec}</div><div className="dp-day">{agenda}</div></div>; break;
     case 'zen': body = <div className="dp-main"><div className="dp-left">{topSec}<details><summary>Brain dump ({plan.dump.length})</summary>{dumpSec}</details><details><summary>Assigned ({mine.length})</summary>{mineSec}</details></div>{dayGrid}</div>; break;
     case 'tabs': body = <div className="dp-main col">{tabsBar}<div className="dp-tabbody">{tab === 'dump' ? dumpSec : tab === 'top' ? topSec : tab === 'tasks' ? mineSec : <>{nowCard}{dayGrid}</>}</div></div>; break;
     case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-row3">{topSec}{dumpSec}{mineSec}</div></div>; break;
     default: body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}{mineSec}</div>{dayGrid}</div>;
   }
-  return <div className={`dp d-${D.id}${bySource ? ' by-source' : ''}`}>{head}{body}</div>;
+  return <div className={`dp d-${D.id}${bySource ? ' by-source' : ''}`}>{head}{body}{editor}</div>;
 }
 
 type Density = 'compact' | 'normal' | 'roomy';
@@ -358,4 +435,59 @@ function lanesOf(blocks: Block[]) {
     if (group.length) flush();
     return out;
   }
+}
+
+const fmtM = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`;
+
+/** Edit one time box: title, time, note, tasks tied to it (done in or to discuss), make it a task, put it on the calendar. */
+function BoxEditor({store, b, date, space, open, patch, remove, close}: {store: Store; b: Block; date: string; space: string; open: (id: string) => void; patch: (p: Partial<Block>) => void; remove: () => void; close: () => void}) {
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const it = b.itemId ? store.items.get(b.itemId) : undefined;
+  const found = q.trim().length < 2 ? [] : [...store.items.values()].filter(i => !i.recur?.spawned && i.id !== b.itemId && !(b.links ?? []).includes(i.id) &&
+    (itemKey(i, store.projects).toLowerCase() === q.trim().toLowerCase() || i.title.toLowerCase().includes(q.trim().toLowerCase()))).sort((a, c) => Number(!!a.completed) - Number(!!c.completed)).slice(0, 8);
+  const s = mins(b.start);
+  const toCalendar = async () => {
+    setBusy(true);
+    try {
+      const start = new Date(`${date}T${b.start}:00`), end = new Date(start.getTime() + b.minutes * 60000);
+      const linked = (b.links ?? []).map(id => store.items.get(id)).filter(Boolean).map(x => `- ${itemKey(x!, store.projects)} ${x!.title}`);
+      const ev = await api<{id: string; google?: unknown}>('/meetings', {method: 'POST', body: {title: (it?.title ?? b.text) || 'Time block', start: start.toISOString(), end: end.toISOString(),
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: [b.note, linked.length ? 'Tasks:\n' + linked.join('\n') : ''].filter(Boolean).join('\n\n'), ...(b.itemId ? {itemId: b.itemId} : {}), visibility: 'attendees'}});
+      patch({eventId: ev.id});
+    } catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
+  const makeTask = async () => {
+    const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
+    if (!pid || !b.text.trim()) return;
+    const made = await store.quickAdd(pid, b.text);
+    if (made) { if (!made.assignees.length) store.updateItem(made.id, {assignees: [store.me]}); patch({itemId: made.id, text: made.title}); }
+  };
+  return <div className="dp-editor" onMouseDown={e => e.stopPropagation()}>
+    <div className="row"><b className="grow">Time box</b><button className="icon" onClick={close} title="Close"><X size={14} /></button></div>
+    {it ? <button className="btn small" onClick={() => open(it.id)}><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button>
+      : <input className="plain-input" autoFocus placeholder="What is it? (Lunch, Call Tim, Team meeting)" defaultValue={b.text} onBlur={e => e.target.value !== b.text && patch({text: e.target.value})} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />}
+    <div className="row">
+      <input type="time" className="plain-input" value={b.start} step={300} onChange={e => e.target.value && patch({start: e.target.value, at: new Date(`${date}T${e.target.value}:00`).toISOString()})} />
+      <select className="plain-select" value={b.minutes} onChange={e => patch({minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v} min` : `${v / 60} h`}</option>)}</select>
+      <span className="muted small">to {label(s + b.minutes)}</span>
+    </div>
+    <label className="row small"><input type="checkbox" checked={!!b.remind} onChange={e => patch({remind: e.target.checked, at: new Date(`${date}T${b.start}:00`).toISOString()})} /> Remind me when it starts</label>
+    <textarea className="plain-input" rows={2} placeholder="Note or agenda" defaultValue={b.note ?? ''} onBlur={e => e.target.value !== (b.note ?? '') && patch({note: e.target.value})} />
+    <div className="dp-field"><span className="muted small">Tasks tied to this box (done in it, or to discuss)</span>
+      {(b.links ?? []).map(id => { const x = store.items.get(id); return <div key={id} className="row small">
+        {x && <Check item={x} project={store.projects.find(p => p.id === x.projectId)!} onToggle={status => store.updateItem(x.id, {status})} />}
+        <button className="link grow" style={{textAlign: 'left'}} onClick={() => open(id)}>{x ? <><span className="dp-key">{itemKey(x, store.projects)}</span> {x.title}</> : 'Task'}</button>
+        <button className="icon" title="Untie" onClick={() => patch({links: (b.links ?? []).filter(y => y !== id)})}><X size={11} /></button></div>; })}
+      <input className="plain-input" placeholder="Tie a task: key or title" value={q} onChange={e => setQ(e.target.value)} />
+      {found.map(i => <button key={i.id} className="pop-row small" onClick={() => { patch({links: [...(b.links ?? []), i.id]}); setQ(''); }}>{itemKey(i, store.projects)} {i.title}{i.completed ? ' (done)' : ''}</button>)}
+    </div>
+    <div className="row">
+      {!it && <button className="btn small" disabled={!b.text.trim()} onClick={makeTask} title="Make this box a task (quick-add works)"><ListPlus size={12} /> Make it a task</button>}
+      {b.eventId ? <span className="muted small"><CalendarClock size={12} /> On your calendar</span>
+        : <button className="btn small" disabled={busy} onClick={toCalendar} title="Add it to your calendar (and Google Calendar when connected). Invite people from the meeting"><CalendarPlus size={12} /> Add to calendar</button>}
+      <span className="spacer" />
+      <button className="btn small danger" onClick={remove}><Trash2 size={12} /> Remove</button>
+    </div>
+  </div>;
 }

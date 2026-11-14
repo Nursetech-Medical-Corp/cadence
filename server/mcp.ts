@@ -220,12 +220,12 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     });
   // ---- Day planner: your own day ----
   const entry = z.object({id: z.string().optional(), text: z.string().optional(), item: z.string().optional().describe('Task id or key'), done: z.boolean().optional()});
-  const toEntry = (e: any) => { const {item, ...rest} = e; return {...rest, ...(item ? {itemId: tasks.findItem(item).id} : {})}; };
+  const toEntry = (e: any) => { const {item, links, ...rest} = e; return {...rest, ...(item ? {itemId: tasks.findItem(item).id} : {}), ...(links ? {links: links.map((x: string) => tasks.findItem(x).id)} : {})}; };
   tool('get_day_plan', 'Your day planner for a date (default today): top 3 priorities, brain dump lines, and time boxes (start HH:MM, minutes, reminder). Entries are text or tasks.', {date: z.string().optional()}, true,
     i => tasks.dayPlan(me(), i.date ?? tasks.today()));
   tool('update_day_plan', 'Change your day plan. Each list you send replaces that list: top (up to 3), dump (brain dump), blocks (time boxes: start HH:MM, minutes, at ISO time for reminders, remind). Keep ids to keep entries.',
     {date: z.string().optional(), top: z.array(entry).optional(), dump: z.array(entry).optional(),
-     blocks: z.array(entry.extend({start: z.string(), minutes: z.number(), at: z.string().nullable().optional(), remind: z.boolean().optional()})).optional(),
+     blocks: z.array(entry.extend({start: z.string(), minutes: z.number(), at: z.string().nullable().optional(), remind: z.boolean().optional(), links: z.array(z.string()).optional().describe('Tasks (ids or keys) done in or to discuss in this box, like a meeting'), eventId: z.string().nullable().optional().describe('Calendar event this box stands for'), note: z.string().optional()})).optional(),
      dayStart: z.number().optional(), dayEnd: z.number().optional(), slot: z.number().optional().describe('15, 30 or 60')}, false,
     i => { const {date, top, dump, blocks, ...rest} = i; return tasks.updateDayPlan(me(), date ?? tasks.today(), {...rest, ...(top ? {top: top.map(toEntry)} : {}), ...(dump ? {dump: dump.map(toEntry)} : {}), ...(blocks ? {blocks: blocks.map(toEntry)} : {})} as any); });
   tool('schedule_day', 'Fill your day with time boxes from a time on: top 3, then tasks due today and overdue, then the brain dump, each in the next free gap by its estimate (30 minutes if none).',

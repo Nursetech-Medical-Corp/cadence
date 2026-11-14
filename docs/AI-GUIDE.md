@@ -116,6 +116,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 ## Day planner
 
 - One plan per person per day, only for that person: `top` (up to 3 priorities), `dump` (brain dump lines) and `blocks` (time boxes). Each entry is text, or a task (`itemId`; done when the task is done).
+- A block can stand for a calendar event (`eventId`) and carry `links` (tasks done in it or to discuss in it, like a meeting's agenda) and a `note`.
 - A block has `start` (HH:MM), `minutes`, `at` (the same moment as an ISO time, used for reminders) and `remind`. With `remind` on, the person gets a notification (kind `reminder`, to phone and desktop) when the box starts. Moving a box arms its reminder again.
 - `schedule_day` fills the day from `from` (HH:MM, usually now): top 3, then tasks due today and overdue, then the brain dump, each in the next free gap by its estimate (30 minutes when none). Lines that name a time ("2PM meeting", "standup 09:15") go at that time. Pass `offsetMinutes` (offset from UTC) so reminders land right.
 - In the app the brain dump can be matched to existing tasks or turned into new tasks (quick-add syntax works). Drag lines and tasks onto the day; drag boxes to move, drag their bottom edge to resize. Time logged with timers shows beside the boxes.

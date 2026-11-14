@@ -9,7 +9,12 @@ import type {Item} from '../src/types.ts';
 /** A line of the plan: plain text, or a task (itemId). done is only used for plain text; tasks are done when completed. */
 export type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
 /** A time box: start "HH:MM" on the plan's day, minutes long. at is the same moment as an ISO time (set by the app, which knows the time zone). */
-export type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; notified?: boolean};
+export type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; notified?: boolean;
+  /** Tasks tied to this box: done in it or to discuss in it (a meeting, a call). */
+  links?: string[];
+  /** The calendar event this box stands for (Cadence or synced Google event). */
+  eventId?: string | null;
+  note?: string};
 export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; updated: string | null};
 
 const rid = () => randomBytes(5).toString('hex');
@@ -39,11 +44,11 @@ export function getDayPlan(tasks: Tasks, person: string, date: string): DayPlan 
   return {person, date, top: d.top ?? [], dump: d.dump ?? [], blocks: d.blocks ?? [], dayStart: d.dayStart ?? 6, dayEnd: d.dayEnd ?? 22, slot: d.slot ?? 30, updated: r?.updated ?? null};
 }
 
-function cleanEntry(tasks: Tasks, e: Partial<Entry>): Entry {
+function cleanEntry(tasks: Tasks, e: Partial<Entry>, allowEmpty = false): Entry {
   if (!e || typeof e !== 'object') throw new Invalid('Each entry must be an object');
   const out: Entry = {id: typeof e.id === 'string' && e.id ? e.id.slice(0, 40) : rid(), text: String(e.text ?? '').slice(0, 500)};
   if (e.itemId) { const it = tasks.findItem(e.itemId); out.itemId = it.id; if (!out.text) out.text = it.title; }
-  if (!out.text && !out.itemId) throw new Invalid('An entry needs text or a task');
+  if (!out.text && !out.itemId && !allowEmpty) throw new Invalid('An entry needs text or a task');
   if (e.done) out.done = true;
   return out;
 }
@@ -56,7 +61,7 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
   if (patch.blocks !== undefined) {
     if (!Array.isArray(patch.blocks) || patch.blocks.length > 200) throw new Invalid('A day holds up to 200 time boxes');
     next.blocks = patch.blocks.map(b => {
-      const e = cleanEntry(tasks, b);
+      const e = cleanEntry(tasks, b, true);
       if (!TIME.test(String(b.start))) throw new Invalid('Time boxes start at a time like 09:30');
       const minutes = Math.round(Number(b.minutes));
       if (!(minutes >= 5 && minutes <= 24 * 60)) throw new Invalid('A time box is 5 minutes to 24 hours');
@@ -64,7 +69,9 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       const old = cur.blocks.find(x => x.id === e.id);
       // Moving a box or changing its reminder arms the reminder again.
       const notified = !!old?.notified && old.start === b.start && old.at === (b.at ?? null) && !!b.remind;
-      return {...e, start: b.start, minutes, at: b.at ?? null, remind: !!b.remind, ...(notified ? {notified: true} : {})};
+      const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
+      return {...e, start: b.start, minutes, at: b.at ?? null, remind: !!b.remind, ...(notified ? {notified: true} : {}),
+        ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {})};
     });
   }
   if (patch.dayStart !== undefined || patch.dayEnd !== undefined) {
