@@ -56,6 +56,9 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const boardOut = (b: any) => editsBoard(b) ? b : {...b, hookKey: undefined};
   const runBoardOf = (runId: string) => { const r = tasks.db.prepare('select board_id from board_runs where id = ?').get(runId) as {board_id: string} | undefined; if (!r) throw new Forbidden('Not found'); const b = boardOf(r.board_id); if (!seesBoard(b)) throw new Forbidden('Not found'); return b; };
   const checks: Record<string, (...a: any[]) => void> = {
+    dayPlan: (person) => self(person, 'read day plans'),
+    updateDayPlan: (person) => self(person, 'plan days'),
+    autoSchedule: (person) => self(person, 'plan days'),
     createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
     updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
     deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },

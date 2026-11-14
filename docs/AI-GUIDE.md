@@ -43,6 +43,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Views (list, table, board, timeline, calendar, backlog, sprint, files) | Tabs under each space; double-click a tab name in the sidebar to rename it | `list_views`, `create_view`, `update_view` (name, filters, sorts, grouping, columns, color rules), `reorder_views`, `delete_view` |
 | Routines | Built-in Routines space: Routines view (by SOP, switches, skip, delay, wait), plus Table, Board, Timeline, Calendar and Workload. A "Routine" chip in a task's header and a repeat mark on its type open it there | `list_routines`, `set_routine` |
 | Archive and later | Built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
+| Day planner | Day planner page, right under My work: top 3, brain dump, today and overdue, a day of time boxes | `get_day_plan`, `update_day_plan`, `schedule_day` |
 | Whiteboards | Whiteboards page (Workspace section), a Whiteboard view in any space (the Routines space can draw every routine), Whiteboards row in a task | `list_boards`, `get_board`, `create_board`, `update_board`, `delete_board`, `board_from_items`, `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` |
 | SOP links | SOP chips on tagged tasks; SOP column on Routines | `list_sop_links`, `set_sop_links` (admins) |
 | Spaces | Sidebar: shared spaces, then "Private to me" | `create_project`, `update_project` (name, key, statuses, types, fields), `create_rollup`, `delete_project` |
@@ -89,6 +90,13 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `snooze_item` with `until` (YYYY-MM-DD): hidden until that day, then back in its lists. Use it to "decide later".
 - `list_parked` shows archived and snoozed items; `restore_item` brings one back. Stored in `fields.archived` and `fields.snooze`.
 - Never delete an idea someone may want later: archive it.
+
+## Day planner
+
+- One plan per person per day, only for that person: `top` (up to 3 priorities), `dump` (brain dump lines) and `blocks` (time boxes). Each entry is text, or a task (`itemId`; done when the task is done).
+- A block has `start` (HH:MM), `minutes`, `at` (the same moment as an ISO time, used for reminders) and `remind`. With `remind` on, the person gets a notification (kind `reminder`, to phone and desktop) when the box starts. Moving a box arms its reminder again.
+- `schedule_day` fills the day from `from` (HH:MM, usually now): top 3, then tasks due today and overdue, then the brain dump, each in the next free gap by its estimate (30 minutes when none). Lines that name a time ("2PM meeting", "standup 09:15") go at that time. Pass `offsetMinutes` (offset from UTC) so reminders land right.
+- In the app the brain dump can be matched to existing tasks or turned into new tasks (quick-add syntax works). Drag lines and tasks onto the day; drag boxes to move, drag their bottom edge to resize. Time logged with timers shows beside the boxes.
 
 ## Whiteboards (design and run workflows)
 
@@ -150,6 +158,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `GET /api/changes?since=ISO`, `PUT /api/external/:source/:id` `{projectId, title, ...}`
 - `GET /api/routines`; `POST /api/routines/act` `{ids, action, to?, on?}` (action: skip, delay, wait, pause, resume, end)
 - `GET /api/parked`; `POST /api/park/:id` `{action: archive|restore|snooze, kind?, reason?, until?}`
+- Day planner (your own): `GET /api/day/:date`, `PUT /api/day/:date` `{top?, dump?, blocks?, dayStart?, dayEnd?, slot?}`, `POST /api/day/:date/auto` `{from?, offsetMinutes?, include?}`
 - Whiteboards: `GET /api/boards?projectId=&itemId=`, `POST /api/boards` `{name, projectId?, nodes, edges, webhooks?}`, `GET|PATCH|DELETE /api/boards/:id` (PATCH also takes `addNodes`, `updateNodes`, `removeNodes`, `addEdges`, `removeEdges`, `rotateKey`), `POST /api/boards/from-items` `{routines?|tag?|parentId?|itemIds?, name?, projectId?}`, `POST /api/boards/:id/to-tasks` `{projectId?, parentId?}`, `POST /api/boards/:id/run` `{input?, title?}`, `GET /api/boards/:id/runs`, `GET /api/boards/runs/:runId`, `POST /api/boards/runs/:runId/act` `{action: cancel|retry|skip, node?}`, inbound `POST /api/hooks/<hookKey>?ws=` (no sign-in; the key is the secret)
 - `GET /api/sops`; `PUT /api/sops` `{links: [{code, url, title}]}` (admins)
 - `PATCH /api/projects/:id` `{name?, key?, statuses?, types?, fields?}`

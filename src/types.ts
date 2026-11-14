@@ -123,6 +123,7 @@ export const NOTIFY_KINDS = [
   {kind: 'overdue', label: 'Overdue'},
   {kind: 'timer', label: 'Timer left running'},
   {kind: 'automation', label: 'Automations'},
+  {kind: 'reminder', label: 'Day planner reminders'},
 ] as const;
 
 export type ItemPatch = Partial<Pick<Item,
@@ -145,6 +146,7 @@ export type ChangeEvent =
   | {kind: 'proposals'}
   | {kind: 'sops'}
   | {kind: 'boards'}
+  | {kind: 'dayplan'; person: string}
   | {kind: 'refresh'};
 
 export type Sprint = {

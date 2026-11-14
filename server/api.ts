@@ -5,6 +5,7 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {listSopLinks, migrateSops, setSopLinks} from './sops.ts';
 import {boardByKey, migrateBoards, startBoards} from './boards.ts';
+import {dayPlanReminders, migrateDayPlans} from './dayplan.ts';
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
@@ -112,6 +113,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateEvents(tasks);
   migrateSops(tasks);
   migrateBoards(tasks);
+  migrateDayPlans(tasks);
+  // Day planner reminders: checked every minute.
+  setInterval(() => { try { dayPlanReminders(tasks); } catch (e) { console.error('Day planner reminders failed', e); } }, 60_000).unref();
   migrateOAuth(accounts.db);
   startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
   // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
@@ -1088,6 +1092,24 @@ If you did not ask for it, ignore this email.`)
         const args = op === 'archiveItem' ? [it.id, {reason: body.reason, kind: body.kind}, actor] : op === 'snoozeItem' ? [it.id, (body.until as string) ?? null, actor] : [it.id, actor];
         if (held(op, args)) return send(res, 202, propose(tasks, actor!, op, args));
         return send(res, 200, (tasks[op] as (...x: unknown[]) => unknown)(...args));
+      }
+      // ---- Day planner: your own day (top 3, brain dump, time boxes) ----
+      if (a === 'day') {
+        const person = ws.requireLogin || bearer ? actor : (actor ?? q('person') ?? null);
+        if (!person) throw new Invalid('Pick who you are first');
+        const date = b ?? tasks.today();
+        if (b && !c && m === 'GET') return send(res, 200, tasks.dayPlan(person, date));
+        if (b && !c && m === 'PUT') {
+          const patch = Object.fromEntries(['top', 'dump', 'blocks', 'dayStart', 'dayEnd', 'slot'].filter(k => body[k] !== undefined).map(k => [k, body[k]]));
+          for (const e of [...(patch.top ?? []), ...(patch.dump ?? []), ...(patch.blocks ?? [])] as {itemId?: string}[]) if (e.itemId && !seesItem(tasks.findItem(e.itemId).id)) throw new NotFound('Task not found');
+          if (held('updateDayPlan', [person, date, patch])) return send(res, 202, propose(tasks, actor!, 'updateDayPlan', [person, date, patch]));
+          return send(res, 200, tasks.updateDayPlan(person, date, patch));
+        }
+        if (b && c === 'auto' && m === 'POST') {
+          const opts = {from: body.from ? String(body.from) : undefined, offsetMinutes: typeof body.offsetMinutes === 'number' ? body.offsetMinutes : undefined, include: Array.isArray(body.include) ? body.include : undefined};
+          if (held('autoSchedule', [person, date, opts])) return send(res, 202, propose(tasks, actor!, 'autoSchedule', [person, date, opts]));
+          return send(res, 200, tasks.autoSchedule(person, date, opts));
+        }
       }
       // ---- Whiteboards: design and run workflows (boards.ts) ----
       // Inbound webhook: anyone holding the board's secret link can start a run; the JSON body is the run's input.

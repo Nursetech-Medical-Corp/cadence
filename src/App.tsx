@@ -3,7 +3,7 @@ import {NewItemSpotlight, NewItemsButton, AddToSpace} from './NewItems.tsx';
 import {CoverHeader} from './Cover.tsx';
 import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive, Workflow} from 'lucide-react';
+import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive, Workflow, CalendarClock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -49,12 +49,13 @@ const ApprovalsPage = lazy(() => import('./Approvals.tsx').then(m => ({default: 
 const RoutinesView = lazy(() => import('./Routines.tsx').then(m => ({default: m.RoutinesView})));
 const RoutineSummary = lazy(() => import('./Routines.tsx').then(m => ({default: m.RoutineSummary})));
 const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.TemplatesPage})));
+const DayPlanner = lazy(() => import('./DayPlanner.tsx').then(m => ({default: m.DayPlanner})));
 const WhiteboardsPage = lazy(() => import('./Whiteboard.tsx').then(m => ({default: m.WhiteboardsPage})));
 const WhiteboardView = lazy(() => import('./Whiteboard.tsx').then(m => ({default: m.WhiteboardView})));
 const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'; focus?: string} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'} | {page: 'boards'; id?: string};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'; focus?: string} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'} | {page: 'boards'; id?: string} | {page: 'day'};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -72,7 +73,7 @@ function readRoute(): Route {
   if (page === 'invite' && id) return {page: 'invite', id};
   if (page === 'signin-link' && id) return {page: 'signin-link', id};
   if (page === 'today') return {page: 'today'};
-  if (page === 'templates' || page === 'routines' || page === 'parked' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
+  if (page === 'templates' || page === 'routines' || page === 'parked' || page === 'plan' || page === 'help' || page === 'approvals' || page === 'day') return {page};
   if (page === 'signin') return {page: 'signin'};
   if (page === 'open' && id) { sessionStorage.setItem('open-after', id); history.replaceState(null, '', '#/mywork'); return {page: 'mywork'}; }
   return {page: 'mywork'};
@@ -252,6 +253,7 @@ export function App() {
         {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
         {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
         {(route.page === 'routines' || route.page === 'parked') && <SystemRedirect store={store} scope={route.page === 'routines' ? 'routines' : 'parked'} focus={route.page === 'routines' ? route.focus : undefined} />}
+        {route.page === 'day' && <div className="content dp-page"><DayPlanner store={store} me={me} open={open} /></div>}
         {route.page === 'boards' && <div className="content wb-page"><WhiteboardsPage store={store} id={route.id} open={open} /></div>}
         {route.page === 'timesheet' && <div className="content"><TimesheetPage store={store} open={open} /></div>}
         {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}
@@ -317,6 +319,7 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
       </span>
       <button className="nav-btn" onClick={openPalette}><Search size={15} /> Search <kbd>Ctrl K</kbd></button>
       <button className={'nav-btn' + (route.page === 'mywork' ? ' active' : '')} onClick={() => go({page: 'mywork'})}><Sun size={15} /> My work</button>
+      <button className={'nav-btn' + (route.page === 'day' ? ' active' : '')} title="Top 3, brain dump and time boxes for today" onClick={() => go({page: 'day'})}><CalendarClock size={15} /> Day planner</button>
       {wsCount > 1 && <button className={'nav-btn' + (route.page === 'today' ? ' active' : '')} onClick={() => go({page: 'today'})}><Layers size={15} /> Everything</button>}
       <button className={'nav-btn' + (route.page === 'inbox' ? ' active' : '')} onClick={() => go({page: 'inbox'})}><Bell size={15} /> Inbox {unread > 0 && <span className="badge">{unread}</span>}</button>
       {store.settings.features.approvals && <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>}

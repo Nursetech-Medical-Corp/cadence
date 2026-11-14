@@ -16,6 +16,7 @@ import * as planner from './planner.ts';
 import * as ai from './aiwork.ts';
 import * as approvals from './approvals.ts';
 import * as boards from './boards.ts';
+import * as dayplan from './dayplan.ts';
 import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateData} from './packs.ts';
 import {apply as applyRule, matches as ruleMatches, type RuleHost} from './automations.ts';
 import {PRIORITIES} from '../src/types.ts';
@@ -1441,6 +1442,11 @@ export class Tasks {
   listApprovals(q: {itemId?: string; approver?: string; pending?: boolean}) { return approvals.listApprovals(this, q); }
   approvalState(itemId: string) { return approvals.approvalState(this, itemId); }
   notifyPublic(person: string, actor: string | null, itemId: string | null, kind: string, text: string) { this.notify(person, actor, itemId, kind, text); }
+
+  // ---- Day planner: top 3, brain dump and time boxes for one person's day (see dayplan.ts) ----
+  dayPlan(person: string, date: string) { return dayplan.getDayPlan(this, person, date); }
+  updateDayPlan(person: string, date: string, patch: dayplan.DayPatch) { return dayplan.updateDayPlan(this, person, date, patch); }
+  autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
   listBoards(q: {projectId?: string; itemId?: string} = {}) { return boards.listBoards(this, q); }
