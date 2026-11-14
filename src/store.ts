@@ -330,7 +330,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, lastNew, ...actions};
+  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, lastNew, flash, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.

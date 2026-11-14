@@ -2,7 +2,7 @@
 // Drag lines and tasks onto the day, drag boxes to move them, drag the bottom edge to resize. Done boxes turn green.
 // Saved per person per day at /api/day/:date (server/dayplan.ts).
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
+import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {api, realProjects, type Store} from './store.ts';
@@ -23,16 +23,13 @@ const label = (m: number) => { const h = Math.floor(m / 60) % 24, mm = m % 60; r
 const dayName = (d: string, long = false) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, long ? {weekday: 'long', month: 'short', day: 'numeric'} : {weekday: 'short', day: 'numeric'});
 const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).toISOString();
-const words = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2));
-/** How alike two titles are: shared words over the shorter title's words. */
-const alike = (a: string, b: string) => { const x = words(a), y = words(b); if (!x.size || !y.size) return 0; let n = 0; for (const w of x) if (y.has(w)) n++; return n / Math.min(x.size, y.size); };
+import {matchScore} from './match.ts';
 
 export function DayPlanner({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [date, setDate] = useState(localDate);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [time, setTime] = useState<TimeEntry[]>([]);
   const [line, setLine] = useState('');
-  const [matches, setMatches] = useState<Record<string, string> | null>(null);
   const [space, setSpace] = useState(() => localStorage.getItem('day-space') ?? '');
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -47,21 +44,35 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const isOpen = (k: string) => openSecs[k] ?? true;
   const setOpen = (k: string, v: boolean) => setOpenSecs(o => { const n = {...o, [k]: v}; localStorage.setItem('day-open', JSON.stringify(n)); return n; });
   const dayRef = useRef<HTMLDivElement>(null), scrolled = useRef('');
+  const [matchOn, setMatchOn] = useState(false);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [showEarly, setShowEarly] = useState(() => localStorage.getItem('day-early') === '1');
+  const [over, setOver] = useState<{list: 'top' | 'dump'; id: string | null; after: boolean} | null>(null);
+  const [dropGhost, setDropGhost] = useState<{m: number; len: number} | null>(null);
+  const [editText, setEditText] = useState<string | null>(null);
+  const dragging = useRef<DragData | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  // Undo for the planner: earlier plans, and tasks a step created (removed again on undo).
+  const history = useRef<{plan: Plan; created: string[]}[]>([]);
   const setDesign = (id: string) => { setDesignState(id); localStorage.setItem('day-design', id); };
   const pickDesign = (step: number) => { const i = DESIGNS.findIndex(x => x.id === design); setDesign(DESIGNS[(i + step + DESIGNS.length) % DESIGNS.length].id); };
-  const pending = useRef<number | null>(null), latest = useRef<Plan | null>(null), dirty = useRef(false);
+  const pending = useRef<number | null>(null), latest = useRef<Plan | null>(null), dirty = useRef(false), version = useRef(0);
   latest.current = plan;
 
   const load = useCallback(() => {
     if (!me || dirty.current) return;
-    api<Plan>(`/day/${date}?person=${me}`).then(setPlan).catch(e => store.fail(e));
+    // A reply that comes back after a newer local change is dropped, so it cannot undo that change.
+    const v = version.current;
+    api<Plan>(`/day/${date}?person=${me}`).then(p => { if (v === version.current && !dirty.current) setPlan(p); }).catch(e => store.fail(e));
     api<TimeEntry[]>(`/time?person=${me}`).then(setTime).catch(() => {});
     api<CalEv[]>(`/meetings?from=${addDays(date, -1)}&to=${addDays(date, 1)}&mine=1`).then(l => setEvents(l.filter(e => !e.allDay && localDate(new Date(e.start)) === date))).catch(() => setEvents([]));
   }, [date, me]);
   useEffect(load, [load, store.tick]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
 
-  const save = (next: Plan) => {
+  const save = (next: Plan, created: string[] = []) => {
+    if (latest.current && latest.current.date === next.date) { history.current.push({plan: latest.current, created}); if (history.current.length > 100) history.current.shift(); }
+    version.current++;
     setPlan(next); latest.current = next; dirty.current = true;
     if (pending.current) clearTimeout(pending.current);
     pending.current = window.setTimeout(async () => {
@@ -71,6 +82,25 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       dirty.current = false;
     }, 400);
   };
+  // Ctrl+Z undoes the last planner change (and removes tasks it made). Falls back to the app's undo when there is none.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      const t = e.target as HTMLElement;
+      if ((t.matches('input, textarea') && (t as HTMLInputElement).value) || t.isContentEditable) return;
+      const last = history.current.pop();
+      if (!last) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      for (const id of last.created) store.deleteItem(id, false);
+      setPlan(last.plan); latest.current = last.plan; dirty.current = true;
+      if (pending.current) clearTimeout(pending.current);
+      pending.current = window.setTimeout(async () => { const p = latest.current!; try { await api(`/day/${p.date}?person=${me}`, {method: 'PUT', body: {top: p.top, dump: p.dump, blocks: p.blocks, dayStart: p.dayStart, dayEnd: p.dayEnd, slot: p.slot}}); } catch (err) { store.fail(err); } dirty.current = false; }, 300);
+      store.flash(last.created.length ? `Undone: removed ${last.created.length} task${last.created.length === 1 ? '' : 's'}` : 'Undone');
+    };
+    addEventListener('keydown', onKey, true);
+    return () => removeEventListener('keydown', onKey, true);
+  }, [me]);
+  useEffect(() => { history.current = []; }, [date]);
   // Scroll the day to an hour before now (or the first box) once per day shown.
   useEffect(() => {
     const el = dayRef.current;
@@ -78,11 +108,19 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     scrolled.current = date;
     const target = date === localDate() ? new Date().getHours() * 60 - 60 : plan.blocks.length ? Math.min(...plan.blocks.map(b => mins(b.start))) - 30 : plan.dayStart * 60;
     const grid = el.querySelector('.dp-grid') as HTMLElement | null;
-    if (grid) el.scrollTop = Math.max(0, grid.offsetTop + (target - plan.dayStart * 60) * 1.4);
+    if (grid) el.scrollTop = Math.max(0, grid.offsetTop + (target - (localStorage.getItem('day-early') === '1' ? 0 : Math.min(6, plan.dayStart) * 60)) * 1.4);
   });
   if (!me) return <p className="muted">Pick who you are first.</p>;
   if (!plan) return <div className="loading">Loading...</div>;
 
+  /** Change the newest plan (never a stale copy from before an await). */
+  const update = (fn: (p: Plan) => Plan, created: string[] = []) => save(fn(latest.current!), created);
+  /** A line became a task: every line, priority and box with the same text points at it too. */
+  const linkText = (p: Plan, text: string, itemId: string, title: string): Plan => {
+    const same = (e: Entry) => !e.itemId && e.text.trim().toLowerCase() === text.trim().toLowerCase();
+    const set = <T extends Entry>(e: T): T => same(e) ? {...e, itemId, text: title} : e;
+    return {...p, top: p.top.map(set), dump: p.dump.map(set), blocks: p.blocks.map(set)};
+  };
   const item = (e: Entry) => e.itemId ? store.items.get(e.itemId) : undefined;
   const isDone = (e: Entry) => { const it = item(e); return it ? !!it.completed : !!e.done; };
   const boxedIds = new Set(plan.blocks.map(b => b.itemId).filter(Boolean)), boxedText = new Set(plan.blocks.map(b => b.text.toLowerCase()));
@@ -90,7 +128,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const toggleEntry = (list: 'top' | 'dump' | 'blocks', e: Entry) => {
     const it = item(e);
     if (it) { const p = store.projects.find(x => x.id === it.projectId)!; const doneS = p.statuses.find(s => s.category === 'done')?.id, todoS = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id; store.updateItem(it.id, {status: it.completed ? todoS : doneS ?? todoS}); return; }
-    save({...plan, [list]: (plan[list] as Entry[]).map(x => x.id === e.id ? {...x, done: !x.done} : x)});
+    update(p => ({...p, [list]: (p[list] as Entry[]).map(x => x.id === e.id ? {...x, done: !x.done} : x)}));
   };
   const listSpaces = new Set(store.projects.filter(p => p.settings.records).map(p => p.id));
   const mine = [...store.items.values()].filter(i => !listSpaces.has(i.projectId) && i.assignees.includes(me) && !i.completed && i.due && i.due <= date && !i.recur?.paused && !i.recur?.waiting && !(i.fields as {archived?: unknown}).archived)
@@ -100,24 +138,30 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   // ---- Brain dump ----
   const addLines = (text: string) => {
     const lines = text.split(/\r?\n/).map(l => l.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
-    if (lines.length) save({...plan, dump: [...plan.dump, ...lines.map(t => ({id: rid(), text: t}))]});
+    if (lines.length) update(p => ({...p, dump: [...p.dump, ...lines.map(t => ({id: rid(), text: t}))]}));
   };
-  const findMatches = () => {
-    const open = [...store.items.values()].filter(i => !i.completed && !i.recur?.spawned);
-    const out: Record<string, string> = {};
-    for (const e of plan.dump.filter(e => !e.itemId)) {
-      let best: Item | null = null, score = 0;
-      for (const i of open) { const s = alike(e.text, i.title) + (i.assignees.includes(me) ? 0.05 : 0); if (s > score) { score = s; best = i; } }
-      if (best && score >= 0.6) out[e.id] = best.id;
-    }
-    setMatches(out);
+  // Suggestions per brain dump line: the 3 best open tasks, only when Match is on.
+  const linked = new Set([...plan.top, ...plan.dump, ...plan.blocks].map(e => e.itemId).filter(Boolean));
+  const pool = matchOn ? [...store.items.values()].filter(i => !i.completed && !i.recur?.spawned && !listSpaces.has(i.projectId) && !linked.has(i.id) && !(i.fields as {archived?: unknown}).archived) : [];
+  const suggest = (e: Entry): {item: Item; score: number}[] => {
+    if (!matchOn || e.itemId || e.done || dismissed.has(e.id)) return [];
+    return pool.map(i => ({item: i, score: matchScore(e.text, i.title, itemKey(i, store.projects)) + (i.assignees.includes(me) ? 0.08 : 0) + (i.due && i.due <= date ? 0.04 : 0)}))
+      .filter(x => x.score >= 0.45).sort((x, y) => y.score - x.score).slice(0, 3);
   };
-  const useMatch = (e: Entry, itemId: string) => { save({...plan, dump: plan.dump.map(x => x.id === e.id ? {...x, itemId, text: store.items.get(itemId)?.title ?? x.text} : x)}); setMatches(m => { const n = {...m}; delete n[e.id]; return n; }); };
+  const useMatch = (e: Entry, it: Item) => {
+    update(p => linkText(p, e.text, it.id, it.title));
+    // The task now belongs to your day: you are on it, and it is due today if it had no date.
+    const patch: Partial<Item> = {};
+    if (!it.assignees.includes(me)) patch.assignees = [...it.assignees, me];
+    if (!it.due) patch.due = date;
+    if (Object.keys(patch).length) store.updateItem(it.id, patch);
+  };
   const createTasks = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
     if (!pid) { alert('Make a space first.'); return; }
-    const todo = plan.dump.filter(e => !e.itemId && !e.done && !matches?.[e.id]);
-    if (!todo.length) { alert(matches && Object.keys(matches).length ? 'Every new line has a suggested match. Use or dismiss the matches first.' : 'Every line is already a task.'); return; }
+    const todo = latest.current!.dump.filter(e => !e.itemId && !e.done);
+    if (!todo.length) { store.flash('Every line is already a task'); return; }
+    if (!confirm(`Make ${todo.length} new task${todo.length === 1 ? '' : 's'} in ${realProjects(store.projects).find(p => p.id === pid)?.name}, assigned to you?${matchOn ? '' : ' Tip: turn on Match first to tie lines to tasks you already have.'}`)) return;
     setBusy(true);
     const made = new Map<string, string>();
     for (const e of todo) {
@@ -125,31 +169,45 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       if (!it) continue;
       if (!it.assignees.length) store.updateItem(it.id, {assignees: [me]});
       made.set(e.id, it.id);
+      update(p => linkText(p, e.text, it.id, it.title), [it.id]);
     }
-    const p = latest.current!;
-    save({...p, dump: p.dump.map(x => made.has(x.id) ? {...x, itemId: made.get(x.id), text: store.items.get(made.get(x.id)!)?.title ?? x.text} : x)});
+    (document.activeElement as HTMLElement | null)?.blur();
     setBusy(false);
   };
 
   // ---- Time boxes ----
-  const startM = plan.dayStart * 60, endM = plan.dayEnd * 60;
+  // The day shows midnight to midnight; the hours before 6am (or the planning start) fold away unless opened.
+  const foldEnd = Math.min(6, plan.dayStart) * 60;
+  const earlyBoxes = plan.blocks.filter(b => mins(b.start) < foldEnd).length;
+  const startM = showEarly ? 0 : foldEnd, endM = 24 * 60;
+  const planStart = plan.dayStart * 60, planEnd = plan.dayEnd * 60;
   const snapTo = Math.min(plan.slot, 15);
   const lenFor = (e: {itemId?: string | null}) => { const est = e.itemId ? store.items.get(e.itemId)?.estimate : null; return est ? Math.max(15, Math.min(240, Math.round(est * 60 / 15) * 15)) : 30; };
   /** Put something dragged at minute m: move a box, or make a new box from a line or a task. */
   const placeDrop = (d: DragData, m: number) => {
     const start = hhmm(m);
-    if (d.from === 'block') { save({...plan, blocks: plan.blocks.map(b => b.id === d.id ? {...b, start, at: atOf(plan.date, start)} : b)}); return; }
-    save({...plan, blocks: [...plan.blocks, {id: rid(), text: d.text, ...(d.itemId ? {itemId: d.itemId} : {}), start, minutes: lenFor(d), at: atOf(plan.date, start), remind: false}]});
+    if (d.from === 'block') { update(p => ({...p, blocks: p.blocks.map(b => b.id === d.id ? {...b, start, at: atOf(p.date, start)} : b)})); return; }
+    update(p => ({...p, blocks: [...p.blocks, {id: rid(), text: d.text, ...(d.itemId ? {itemId: d.itemId} : {}), start, minutes: lenFor(d), at: atOf(p.date, start), remind: false}]}));
   };
   /** The first free time from now (or the start of the day) that fits len minutes. */
   const nextFree = (len: number) => {
-    const n = date === localDate() ? now.getHours() * 60 + now.getMinutes() : startM;
-    let m = Math.max(startM, Math.ceil(n / snapTo) * snapTo);
+    const n = date === localDate() ? now.getHours() * 60 + now.getMinutes() : planStart;
+    let m = Math.max(planStart, Math.ceil(n / snapTo) * snapTo);
     while (m + len <= endM && plan.blocks.some(b => m < mins(b.start) + b.minutes && m + len > mins(b.start))) m += snapTo;
     return Math.min(m, endM - snapTo);
   };
-  const removeBlock = (id: string) => save({...plan, blocks: plan.blocks.filter(b => b.id !== id)});
-  const patchBlock = (id: string, p: Partial<Block>) => save({...plan, blocks: plan.blocks.map(b => b.id === id ? {...b, ...p} : b)});
+  const removeBlock = (id: string) => update(p => ({...p, blocks: p.blocks.filter(b => b.id !== id)}));
+  const patchBlock = (id: string, patch: Partial<Block>) => update(p => ({...p, blocks: p.blocks.map(b => b.id === id ? {...b, ...patch} : b)}));
+  /** A plain box gets a timer: it becomes a task (in the chosen space) first. */
+  const timeBox = async (b: Block) => {
+    const pid = realProjects(store.projects).find(p => p.id === space && !p.settings.records)?.id ?? realProjects(store.projects).find(p => !p.settings.records)?.id;
+    if (!pid || !b.text.trim()) { setEditing(b.id); return; }
+    const it = await store.quickAdd(pid, b.text);
+    if (!it) return;
+    if (!it.assignees.length) store.updateItem(it.id, {assignees: [me]});
+    update(p => linkText({...p, blocks: p.blocks.map(x => x.id === b.id ? {...x, itemId: it.id, text: it.title} : x)}, b.text, it.id, it.title), [it.id]);
+    store.startTimer(it.id);
+  };
   const auto = async () => {
     const isToday = date === localDate();
     const from = isToday ? hhmm(now.getHours() * 60 + now.getMinutes()) : hhmm(plan.dayStart * 60);
@@ -176,26 +234,63 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const lanes = lanesOf([...plan.blocks, ...dayEvents.map(e => ({id: 'ev:' + e.id, text: e.title, start: hhmm(Math.max(0, e.s)), minutes: e.len}))]);
   const nowM = date === localDate(now) ? now.getHours() * 60 + now.getMinutes() : null;
 
-  const dragProps = (d: DragData) => ({draggable: true, onDragStart: (e: React.DragEvent) => { e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }});
-  const EntryRow = ({e, list}: {e: Entry; list: 'top' | 'dump'}) => {
-    const it = item(e), done = isDone(e), m = matches?.[e.id] ? store.items.get(matches[e.id]) : undefined;
-    return <div className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '')} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}>
+  const dragProps = (d: DragData) => ({draggable: true,
+    onDragStart: (e: React.DragEvent) => { dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; setTimeout(() => setDragActive(true), 0); },
+    onDragEnd: () => { dragging.current = null; setOver(null); setDropGhost(null); setDragActive(false); }});
+  /** Leave events also fire when moving onto a child (and browsers often leave relatedTarget empty), so check the pointer. */
+  const stillIn = (e: React.DragEvent) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientX > r.left && e.clientX < r.right && e.clientY > r.top && e.clientY < r.bottom; };
+  const readDrag = (ev: React.DragEvent) => (JSON.parse(ev.dataTransfer.getData('application/x-plan') || 'null') as DragData | null) ?? dragging.current;
+  /** Drop on a list (Top 3 or Brain dump), before or after a row, or at the end. Reorders within the list. */
+  const dropOnList = (ev: React.DragEvent, list: 'top' | 'dump') => {
+    ev.preventDefault(); ev.stopPropagation();
+    const d = readDrag(ev), at = over;
+    setOver(null); dragging.current = null; setDragActive(false);
+    if (!d) return;
+    update(p => {
+      const cur = [...p[list]];
+      let entry: Entry;
+      if (d.from === list) { const i = cur.findIndex(x => x.id === d.id); if (i < 0) return p; entry = cur.splice(i, 1)[0]; }
+      else entry = {id: rid(), text: d.text, ...(d.itemId ? {itemId: d.itemId} : {})};
+      if (list === 'top' && d.from !== 'top' && cur.length >= 3) { store.flash('Top 3 is full. Drag one out first'); return p; }
+      if (d.from !== list && cur.some(x => (entry.itemId && x.itemId === entry.itemId) || (!entry.itemId && x.text.toLowerCase() === entry.text.toLowerCase()))) return p;
+      let i = at?.list === list && at.id ? cur.findIndex(x => x.id === at.id) : cur.length;
+      if (i < 0) i = cur.length; else if (at?.after) i++;
+      cur.splice(i, 0, entry);
+      // Moving a line from the dump into the top 3 takes it out of the dump.
+      const moved = d.from === 'dump' && list === 'top' ? {dump: p.dump.filter(x => x.id !== d.id)} : d.from === 'top' && list === 'dump' ? {top: p.top.filter(x => x.id !== d.id)} : {};
+      return {...p, ...moved, [list]: cur};
+    });
+  };
+  const listOver = (ev: React.DragEvent, list: 'top' | 'dump', id: string | null) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(), after = id ? ev.clientY > r.top + r.height / 2 : true;
+    if (over?.list !== list || over.id !== id || over.after !== after) setOver({list, id, after});
+  };
+  const renameEntry = (list: 'top' | 'dump', e: Entry, text: string) => {
+    setEditText(null);
+    const it = item(e), t = text.trim();
+    if (!t) return;
+    if (it) { if (t !== it.title) store.updateItem(it.id, {title: t}); return; }
+    if (t !== e.text) update(p => ({...p, [list]: p[list].map(x => x.id === e.id ? {...x, text: t} : x), blocks: p.blocks.map(b => !b.itemId && b.text === e.text ? {...b, text: t} : b)}));
+  };
+  const entryRow = (e: Entry, list: 'top' | 'dump') => {
+    const it = item(e), done = isDone(e), sug = list === 'dump' ? suggest(e) : [];
+    const mark = over?.list === list && over.id === e.id ? (over.after ? ' drop-after' : ' drop-before') : '';
+    return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '') + mark} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
+      onDragOver={ev => listOver(ev, list, e.id)} onDrop={ev => dropOnList(ev, list)}>
       <GripVertical size={12} className="dp-grip" />
       <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(list, e)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
-      {it ? <button className="dp-text link" onClick={() => open(it.id)} title="Open the task"><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button> : <span className="dp-text">{e.text}</span>}
+      {editText === e.id ? <input className="plain-input dp-text" autoFocus defaultValue={it?.title ?? e.text} onBlur={ev => renameEntry(list, e, ev.target.value)} onKeyDown={ev => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); if (ev.key === 'Escape') setEditText(null); }} />
+        : it ? <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Click the key to open the task; double-click to rename"><button className="dp-key link" onClick={() => open(it.id)}>{itemKey(it, store.projects)}</button> {it.title}</span>
+        : <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Double-click to edit">{e.text}</span>}
       {boxed(e) && <Clock size={11} className="muted" aria-label="On the day" />}
-      <button className="icon dp-x" title="Remove" onClick={() => save({...plan, [list]: plan[list].filter(x => x.id !== e.id)})}><X size={12} /></button>
-      {m && <div className="dp-match small">Same as <b>{itemKey(m, store.projects)}</b> {m.title}? <button className="btn ghost small" onClick={() => useMatch(e, m.id)}>Use it</button>
-        <button className="btn ghost small" onClick={() => setMatches(x => { const n = {...x}; delete n[e.id]; return n; })}>New</button></div>}
+      <button className="icon dp-x" title="Edit" onClick={() => setEditText(e.id)}><Pencil size={11} /></button>
+      <button className="icon dp-x" title="Remove from the list (the task stays)" onClick={() => update(p => ({...p, [list]: p[list].filter(x => x.id !== e.id)}))}><X size={12} /></button>
+      {sug.length > 0 && <div className="dp-sugs">{sug.map(x => <button key={x.item.id} className="dp-sug" title={`Tie this line to ${x.item.title} (${Math.round(Math.min(1, x.score) * 100)}% match). It joins your day.`} onClick={() => useMatch(e, x.item)}>
+        <GitMerge size={10} /> <span className="dp-key">{itemKey(x.item, store.projects)}</span> {x.item.title}</button>)}
+        <button className="dp-sug none" title="None of these: keep it as a new line" onClick={() => setDismissed(d => new Set(d).add(e.id))}>New</button></div>}
     </div>;
   };
-  const dropOnTop = (ev: React.DragEvent) => {
-    ev.preventDefault();
-    const d = JSON.parse(ev.dataTransfer.getData('application/x-plan') || 'null') as DragData | null;
-    if (!d || d.from === 'top' || plan.top.length >= 3) return;
-    save({...plan, top: [...plan.top, {id: rid(), text: d.text, ...(d.itemId ? {itemId: d.itemId} : {})}]});
-  };
-
   // ---- Pieces each design arranges differently ----
   const D = DESIGNS.find(x => x.id === design) ?? DESIGNS[0];
   const horiz = D.id === 'horizontal';
@@ -219,30 +314,33 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       <label className="small muted" title="Color boxes by where they came from: top 3, tasks, brain dump"><input type="checkbox" checked={bySource} onChange={e => { setBySource(e.target.checked); localStorage.setItem('day-bysource', e.target.checked ? '1' : ''); }} /> Color by source</label>
     </span>
     <button className="btn primary small" disabled={busy} onClick={auto} title="Put the top 3, today's and overdue tasks, then the brain dump into the next free times, from now"><Wand2 size={13} /> Plan my day from now</button>
-    <label className="small muted">From <select className="plain-select" value={plan.dayStart} onChange={e => Number(e.target.value) < plan.dayEnd && save({...plan, dayStart: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h}>{label(h * 60)}</option>)}</select></label>
-    <label className="small muted">to <select className="plain-select" value={plan.dayEnd} onChange={e => Number(e.target.value) > plan.dayStart && save({...plan, dayEnd: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h + 1}>{label((h + 1) * 60)}</option>)}</select></label>
+    <label className="small muted" title="Plan my day from now fills only these hours; the day shows all 24">Plan between <select className="plain-select" value={plan.dayStart} onChange={e => Number(e.target.value) < plan.dayEnd && save({...plan, dayStart: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h}>{label(h * 60)}</option>)}</select></label>
+    <label className="small muted">and <select className="plain-select" value={plan.dayEnd} onChange={e => Number(e.target.value) > plan.dayStart && save({...plan, dayEnd: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h + 1}>{label((h + 1) * 60)}</option>)}</select></label>
     <label className="small muted">Slots <select className="plain-select" value={plan.slot} onChange={e => save({...plan, slot: Number(e.target.value)})}><option value={15}>15m</option><option value={30}>30m</option><option value={60}>1h</option></select></label>
   </header>;
-  const topSec = <section className="dp-sec dp-top" onDragOver={e => e.preventDefault()} onDrop={dropOnTop}>
+  const topSec = <section className={'dp-sec dp-top' + (over?.list === 'top' ? ' drop-on' : '')} onDragOver={e => listOver(e, 'top', null)} onDragLeave={e => { if (!stillIn(e)) setOver(o => o?.list === 'top' ? null : o); }} onDrop={e => dropOnList(e, 'top')}>
     <h4>Top 3</h4>
-    {plan.top.map((e, i) => <div key={e.id} className="dp-topcell"><span className="dp-num">{i + 1}</span><EntryRow e={e} list="top" /></div>)}
-    {plan.top.length < 3 && <input className="plain-input dp-add" placeholder={`Priority ${plan.top.length + 1} (or drag one here)`} onKeyDown={e => {
+    {plan.top.map((e, i) => <div key={e.id} className="dp-topcell"><span className="dp-num">{i + 1}</span>{entryRow(e, 'top')}</div>)}
+    {over?.list === 'top' && !over.id && <div className="dp-dropline" />}
+    {plan.top.length < 3 && dragActive && dragging.current?.from !== 'top' && <div className={'dp-dropzone' + (over?.list === 'top' ? ' on' : '')}>Drop here for priority {plan.top.length + 1}</div>}
+    {plan.top.length < 3 && !dragActive && <input className="plain-input dp-add" placeholder={`Priority ${plan.top.length + 1} (or drag one here)`} onKeyDown={e => {
       const v = (e.target as HTMLInputElement).value.trim();
-      if (e.key === 'Enter' && v) { save({...plan, top: [...plan.top, {id: rid(), text: v}]}); (e.target as HTMLInputElement).value = ''; }
+      if (e.key === 'Enter' && v) { update(p => ({...p, top: [...p.top, {id: rid(), text: v}]})); (e.target as HTMLInputElement).value = ''; }
     }} />}
   </section>;
-  const dumpSec = <section className="dp-sec dp-dumpsec">
+  const dumpSec = <section className={'dp-sec dp-dumpsec' + (over?.list === 'dump' ? ' drop-on' : '')} onDragOver={e => listOver(e, 'dump', null)} onDragLeave={e => { if (!stillIn(e)) setOver(o => o?.list === 'dump' ? null : o); }} onDrop={e => dropOnList(e, 'dump')}>
     <h4>Brain dump <span className="count">{plan.dump.filter(e => !isDone(e)).length}</span></h4>
     <textarea className="plain-input dp-dump" rows={2} placeholder="Get it all out. Enter adds a line; paste many lines at once." value={line} onChange={e => setLine(e.target.value)}
       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLines(line); setLine(''); } }}
       onPaste={e => { const t = e.clipboardData.getData('text/plain'); if (t.includes('\n')) { e.preventDefault(); addLines(t); } }} />
-    {plan.dump.map(e => <EntryRow key={e.id} e={e} list="dump" />)}
-    {plan.dump.some(e => !e.itemId) && <div className="dp-actions">
-      <button className="btn small" onClick={findMatches} title="Find tasks that already exist for these lines"><GitMerge size={12} /> Match to tasks</button>
-      <button className="btn small" disabled={busy} onClick={createTasks} title="Make a task for each line with no match. Quick-add works: @name due:fri ~1h"><ListPlus size={12} /> Create tasks</button>
-      <select className="plain-select small" value={space} onChange={e => { setSpace(e.target.value); localStorage.setItem('day-space', e.target.value); }} title="Space for new tasks">
-        {realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      {matches && !Object.keys(matches).length && <span className="muted small">No matches found.</span>}
+    {plan.dump.map(e => entryRow(e, 'dump'))}
+    {over?.list === 'dump' && !over.id && <div className="dp-dropline" />}
+    {plan.dump.some(e => !e.itemId && !e.done) && <div className="dp-actions">
+      <button className={'btn small' + (matchOn ? ' on' : '')} onClick={() => { setMatchOn(m => !m); setDismissed(new Set()); }} title="Show the closest existing tasks under each line, so you can tie a line to a task you already have"><GitMerge size={12} /> Match {matchOn ? 'on' : 'off'}</button>
+      <button className="btn small" disabled={busy} onClick={createTasks} title="Make a task, assigned to you, for each line not tied to a task yet. Quick-add works in a line: @name due:fri ~1h"><ListPlus size={12} /> Create tasks</button>
+      <label className="small muted">in <select className="plain-select small" value={realProjects(store.projects).some(p => p.id === space) ? space : realProjects(store.projects)[0]?.id} onChange={e => { setSpace(e.target.value); localStorage.setItem('day-space', e.target.value); }} title="The space new tasks go in">
+        {realProjects(store.projects).filter(p => !p.settings.records).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      {matchOn && !plan.dump.some(e => suggest(e).length) && <span className="muted small">No close tasks found.</span>}
     </div>}
   </section>;
   const mineSec = <section className="dp-sec dp-minesec">
@@ -273,6 +371,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const blockTools = (b: Block, it: Item | undefined, done: boolean, running: boolean) => <>
     <button className="icon" title="Edit this box: time, note, tasks tied to it, calendar invite" onClick={() => setEditing(b.id)}><Pencil size={11} /></button>
     {it && !done && (running ? <button className="icon" title="Stop timer" onClick={() => store.stopTimer()}><Square size={11} /></button> : <button className="icon" title="Start timer" onClick={() => store.startTimer(it.id)}><Play size={11} /></button>)}
+    {!it && !b.done && <button className="icon" title="Start a timer (makes this box a task first, so the time is logged)" onClick={() => timeBox(b)}><Play size={11} /></button>}
     {it && actualOf(it.id).length > 0 && <button className="icon" title="Fit this box to the time you logged" onClick={() => adapt(b)}><Clock size={11} /></button>}
     <button className={'icon' + (b.remind ? ' on' : '')} title={b.remind ? 'Reminder on: you get a notification when it starts' : 'Remind me when it starts (phone and desktop)'} onClick={() => patchBlock(b.id, {remind: !b.remind, at: atOf(plan.date, b.start)})}>{b.remind ? <Bell size={11} /> : <BellOff size={11} />}</button>
     <button className="icon" title="Take off the day" onClick={() => removeBlock(b.id)}><X size={11} /></button>
@@ -282,13 +381,24 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     ? {left: (s - startM) * px, width: Math.max(18, len * px - 2), top: `calc(26px + (100% - 30px) * ${lane.i / lane.n})`, height: `calc((100% - 30px) / ${lane.n} - 4px)`}
     : {top: (s - startM) * px, height: Math.max(18, len * px - 2), left: `calc(56px + (100% - 60px) * ${lane.i / lane.n})`, width: `calc((100% - 60px) / ${lane.n} - 4px)`};
   const span = (s: number, len: number): React.CSSProperties => horiz ? {left: (s - startM) * px, width: len * px} : {top: (s - startM) * px, height: len * px};
-  const dropAt = (ev: React.DragEvent) => {
-    ev.preventDefault();
-    const d = JSON.parse(ev.dataTransfer.getData('application/x-plan') || 'null') as DragData | null;
-    if (!d) return;
+  const minuteAt = (ev: React.DragEvent, d: DragData) => {
     const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
     const offset = horiz ? ev.clientX - r.left - (d.grabX ?? 0) : ev.clientY - r.top - (d.grab ?? 0);
-    placeDrop(d, Math.max(startM, Math.min(endM - snapTo, startM + Math.round(offset / px / snapTo) * snapTo)));
+    return Math.max(startM, Math.min(endM - snapTo, startM + Math.round(offset / px / snapTo) * snapTo));
+  };
+  const lenOfDrag = (d: DragData) => d.from === 'block' ? plan.blocks.find(b => b.id === d.id)?.minutes ?? 30 : lenFor(d);
+  const overGrid = (ev: React.DragEvent) => {
+    ev.preventDefault();
+    const d = dragging.current; if (!d) return;
+    const m = minuteAt(ev, d), len = lenOfDrag(d);
+    if (dropGhost?.m !== m || dropGhost.len !== len) setDropGhost({m, len});
+  };
+  const dropAt = (ev: React.DragEvent) => {
+    ev.preventDefault();
+    const d = readDrag(ev);
+    setDropGhost(null); dragging.current = null;
+    if (!d) return;
+    placeDrop(d, minuteAt(ev, d));
   };
   const dayGrid = <div className={'dp-day' + (horiz ? ' horiz' : '')} ref={dayRef}>
     {!horiz && <div className="dp-daynav">
@@ -296,10 +406,13 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       <b>{dayName(date, true)}</b>{date !== localDate() && <button className="btn small" onClick={() => setDate(localDate())}>Today</button>}
       <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))}>{dayName(addDays(date, 1))} <ChevronRight size={14} /></button>
     </div>}
-    <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={e => e.preventDefault()} onDrop={dropAt}
+    {!horiz && foldEnd > 0 && <button className="dp-early" onClick={() => { const v = !showEarly; setShowEarly(v); localStorage.setItem('day-early', v ? '1' : ''); }}>
+      {showEarly ? <ChevronDown size={13} /> : <ChevronRight size={13} />} 12am to {label(foldEnd)}{earlyBoxes ? ` (${earlyBoxes} box${earlyBoxes === 1 ? '' : 'es'})` : ''}</button>}
+    <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={overGrid} onDragLeave={e => { if (!stillIn(e)) setDropGhost(null); }} onDrop={dropAt}
       onMouseDown={e => {
-        // Like a calendar: press on an empty time and drag down to make a box.
-        if (horiz || e.button !== 0 || !(e.target as HTMLElement).matches('.dp-grid, .dp-slot, .dp-hour, .dp-half')) return;
+        // Like a calendar: press on an empty time and drag down to make a box. With an editor or a task panel open, a click only closes it.
+        if (horiz || e.button !== 0 || !(e.target as HTMLElement).matches('.dp-grid, .dp-slot, .dp-hour, .dp-half, .dp-plan')) return;
+        if (editing || document.querySelector('.panel')) { setEditing(null); return; }
         const grid = e.currentTarget, r = grid.getBoundingClientRect();
         const at = (y: number) => Math.max(startM, Math.min(endM, startM + Math.round((y - r.top) / px / snapTo) * snapTo));
         const a = Math.min(at(e.clientY), endM - snapTo);
@@ -307,14 +420,17 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         setGhost({a, b: b2});
         const move = (ev: MouseEvent) => { b2 = Math.max(a + snapTo, at(ev.clientY)); setGhost({a, b: b2}); };
         const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); setGhost(null);
-          const id = rid(), start = hhmm(a); save({...plan, blocks: [...plan.blocks, {id, text: '', start, minutes: Math.max(snapTo, b2 - a), at: atOf(plan.date, start), remind: false}]}); setEditing(id); };
+          const id = rid(), start = hhmm(a); update(p => ({...p, blocks: [...p.blocks, {id, text: '', start, minutes: Math.max(snapTo, b2 - a), at: atOf(p.date, start), remind: false}]})); setEditing(id); };
         addEventListener('mousemove', move); addEventListener('mouseup', up);
       }}>
       {ghost && <div className="dp-ghost" style={{top: (ghost.a - startM) * px, height: (ghost.b - ghost.a) * px}}>{label(ghost.a)} to {label(ghost.b)}</div>}
+      {dropGhost && <div className="dp-ghost drop" style={horiz ? {left: (dropGhost.m - startM) * px, width: dropGhost.len * px, top: 26, bottom: 4} : {top: (dropGhost.m - startM) * px, height: dropGhost.len * px}}>{label(dropGhost.m)} to {label(dropGhost.m + dropGhost.len)}</div>}
+      {!horiz && planStart > startM && <div className="dp-plan" style={{top: 0, height: (planStart - startM) * px}} title="Before your planning hours" />}
+      {!horiz && planEnd < endM && <div className="dp-plan" style={{top: (planEnd - startM) * px, height: (endM - planEnd) * px}} title="After your planning hours" />}
       {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; return <div key={ev.id + ev.start} className="dp-event" style={place(ev.s, ev.len, lane)} title={`${ev.source === 'google' ? 'Google Calendar' : 'Calendar'}: ${ev.title}`}>
         <div className="dp-brow"><CalendarClock size={11} /><span className="dp-btitle">{ev.title || '(no title)'}</span><span className="dp-btime">{label(ev.s)} to {label(ev.s + ev.len)}</span>
           {ev.meetUrl && <a className="icon" href={ev.meetUrl} target="_blank" rel="noreferrer" title="Join"><Video size={11} /></a>}
-          <button className="icon" title="Plan in this event: make it a box so you can tie tasks to it" onClick={() => { const id = rid(), start = hhmm(Math.max(startM, ev.s)); save({...plan, blocks: [...plan.blocks, {id, text: ev.title || 'Meeting', start, minutes: ev.len, at: ev.start, remind: false, eventId: ev.id, ...(ev.itemId ? {links: [ev.itemId]} : {})}]}); setEditing(id); }}><Plus size={11} /></button></div>
+          <button className="icon" title="Plan in this event: make it a box so you can tie tasks to it" onClick={() => { const id = rid(), start = hhmm(Math.max(startM, ev.s)); update(p => ({...p, blocks: [...p.blocks, {id, text: ev.title || 'Meeting', start, minutes: ev.len, at: ev.start, remind: false, eventId: ev.id, ...(ev.itemId ? {links: [ev.itemId]} : {})}]})); setEditing(id); }}><Plus size={11} /></button></div>
       </div>; })}
       {Array.from({length: (endM - startM) / plan.slot}, (_, k) => { const m = startM + k * plan.slot; return <div key={m} className={'dp-slot' + (m % 60 === 0 ? ' hour' : '')} style={span(m, plan.slot)}>
         {m % 60 === 0 && <span className="dp-hour">{label(m)}</span>}{D.id === 'paper' && m % 60 === 30 && <span className="dp-half">:30</span>}</div>; })}
@@ -323,22 +439,23 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         if (em < startM || sm > endM) return null;
         const a = Math.max(sm, startM), len = Math.max(2, Math.min(em, endM) - a);
         return <div key={t.id} className="dp-actual" style={horiz ? {left: (a - startM) * px, width: len * px} : {top: (a - startM) * px, height: len * px}} title={`Timer: ${store.items.get(t.itemId)?.title ?? ''} ${s.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})} to ${t.end ? e.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : 'now'}`} />; })}
-      {plan.blocks.map(b => {
-        const s = mins(b.start), it = item(b), done = isDone(b), lane = lanes.get(b.id) ?? {i: 0, n: 1};
+      {plan.blocks.filter(b => mins(b.start) + b.minutes > startM).map(b => {
+        const s = Math.max(startM, mins(b.start)), it = item(b), done = isDone(b), lane = lanes.get(b.id) ?? {i: 0, n: 1};
         const running = !!it && store.running?.itemId === it.id;
         return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '')} draggable
-          onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); e.dataTransfer.setData('application/x-plan', JSON.stringify({from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left})); }}
+          onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }}
+          onDragEnd={() => { dragging.current = null; setDropGhost(null); }}
           style={place(s, b.minutes, lane)}
-          onClick={e => { if ((e.target as HTMLElement).closest('button, a')) return; if (it) open(it.id); else setEditing(b.id); }}>
+          onClick={e => { if ((e.target as HTMLElement).closest('button, a, .dp-btitle-link')) return; setEditing(b.id); }}>
           <div className="dp-brow">
             <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry('blocks', b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
-            <span className="dp-btitle">{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? (b.text || <span className="muted">(untitled)</span>)}</span>
-            <span className="dp-btime">{label(s)} to {label(s + b.minutes)}</span>
+            <span className="dp-btitle">{it ? <button className="dp-btitle-link" title="Open the task" onClick={() => open(it.id)}><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button> : (b.text || <span className="muted">(untitled)</span>)}</span>
+            <span className="dp-btime">{label(mins(b.start))} to {label(mins(b.start) + b.minutes)}</span>
             {b.eventId && <span title="On your calendar"><CalendarClock size={11} className="muted" /></span>}
             {blockTools(b, it, done, running)}
           </div>
           {(it || b.links?.length || b.note) && b.minutes * px >= 40 && <div className="dp-bmore">{it && taskInfo(it)}{linkChips(b)}{b.note && <span className="dp-note">{b.note}</span>}</div>}
-          <span className={'dp-resize' + (horiz ? ' x' : '')} onMouseDown={e => startResize(e, b, plan, save, px, horiz)} onClick={e => e.stopPropagation()} />
+          <span className={'dp-resize' + (horiz ? ' x' : '')} onMouseDown={e => startResize(e, b, m => patchBlock(b.id, {minutes: m}), px, horiz)} onClick={e => e.stopPropagation()} />
         </div>;
       })}
     </div>
@@ -415,12 +532,12 @@ export const DESIGNS: {id: string; name: string; hint: string; px?: number}[] = 
   {id: 'horizontal', name: 'Timeline across', hint: 'Hours run left to right; lists underneath', px: 3.4},
 ];
 
-function startResize(e: React.MouseEvent, b: Block, plan: Plan, save: (p: Plan) => void, px: number, horiz: boolean) {
+function startResize(e: React.MouseEvent, b: Block, done: (minutes: number) => void, px: number, horiz: boolean) {
   e.preventDefault(); e.stopPropagation();
   const y0 = horiz ? e.clientX : e.clientY, m0 = b.minutes, el = (e.currentTarget as HTMLElement).parentElement!;
   let minutes = m0;
   const move = (ev: MouseEvent) => { minutes = Math.max(15, Math.round((m0 + ((horiz ? ev.clientX : ev.clientY) - y0) / px) / 15) * 15); el.style[horiz ? 'width' : 'height'] = `${minutes * px - 2}px`; };
-  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); if (minutes !== m0) save({...plan, blocks: plan.blocks.map(x => x.id === b.id ? {...x, minutes} : x)}); };
+  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); if (minutes !== m0) done(minutes); };
   addEventListener('mousemove', move); addEventListener('mouseup', up);
 }
 
@@ -466,8 +583,9 @@ function BoxEditor({store, b, date, space, open, patch, remove, close}: {store: 
   };
   return <div className="dp-editor" onMouseDown={e => e.stopPropagation()}>
     <div className="row"><b className="grow">Time box</b><button className="icon" onClick={close} title="Close"><X size={14} /></button></div>
-    {it ? <button className="btn small" onClick={() => open(it.id)}><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button>
-      : <input className="plain-input" autoFocus placeholder="What is it? (Lunch, Call Tim, Team meeting)" defaultValue={b.text} onBlur={e => e.target.value !== b.text && patch({text: e.target.value})} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />}
+    <input className="plain-input dp-etitle" autoFocus={!it} placeholder="What is it? (Lunch, Call Tim, Team meeting)" defaultValue={it?.title ?? b.text}
+      onBlur={e => { const v = e.target.value.trim(); if (it) { if (v && v !== it.title) store.updateItem(it.id, {title: v}); } else if (v !== b.text) patch({text: v}); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+    {it && <button className="btn ghost small" onClick={() => open(it.id)} title="Open the full task"><span className="dp-key">{itemKey(it, store.projects)}</span> Open task</button>}
     <div className="row">
       <input type="time" className="plain-input" value={b.start} step={300} onChange={e => e.target.value && patch({start: e.target.value, at: new Date(`${date}T${e.target.value}:00`).toISOString()})} />
       <select className="plain-select" value={b.minutes} onChange={e => patch({minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v} min` : `${v / 60} h`}</option>)}</select>
