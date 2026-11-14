@@ -29,12 +29,27 @@ export type BoardNode = {
   assignees?: string[]; worker?: 'human' | 'ai' | 'either'; sop?: string | null; estimate?: number | null;
   /** task: quick-add repeat, like week, 2w, month or weekdays, used by Create tasks. */
   repeat?: string | null;
-  shape?: 'rect' | 'ellipse' | 'diamond';
+  shape?: Shape;
+  /** Fill: a palette name (yellow, peach, pink, green, blue, purple, white) or #rrggbb. */
+  fill?: string | null;
+  /** Text size: small 14, body 16, large 28, title 48, huge 96. */
+  size?: TextSize;
+  align?: 'left' | 'center' | 'right';
+  /** table: column widths in board units. */
+  colW?: number[];
   /** table: rows of cells; the first row is the header. */
   table?: string[][];
   trigger?: {on: TriggerOn; tag?: string | null; every?: 'day' | 'week' | 'month' | null};
 };
-export type BoardEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link'};
+export const SHAPES = ['rect', 'rounded', 'ellipse', 'diamond', 'pill', 'hexagon', 'parallelogram', 'database', 'document', 'cloud'] as const;
+export type Shape = typeof SHAPES[number];
+export const TEXT_SIZES = ['small', 'body', 'large', 'title', 'huge'] as const;
+export type TextSize = typeof TEXT_SIZES[number];
+export const PALETTE = ['yellow', 'peach', 'pink', 'green', 'blue', 'purple', 'white'] as const;
+/** route: elbow (right angles, the default for new arrows) or straight. heads: where arrowheads go. */
+export type BoardEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link';
+  dash?: boolean; color?: string | null; route?: 'elbow' | 'straight'; heads?: 'end' | 'both' | 'none';
+  fromSide?: 'top' | 'right' | 'bottom' | 'left' | null; toSide?: 'top' | 'right' | 'bottom' | 'left' | null};
 export type BoardHook = {id: string; url: string; events: string[]};
 export type Board = {id: string; projectId: string | null; name: string; description: string;
   /** The SOP this board maps (one board per SOP), so routines link to it. */
@@ -145,7 +160,11 @@ function cleanNode(tasks: Tasks, n: Partial<BoardNode>, people: Set<string>): Bo
     if (n.estimate != null) out.estimate = num(n.estimate, 0, 0, 10000);
     if (n.repeat) out.repeat = str(n.repeat, 20);
   }
-  if (kind === 'shape') out.shape = n.shape === 'ellipse' || n.shape === 'diamond' ? n.shape : 'rect';
+  if (kind === 'shape') out.shape = (SHAPES as readonly string[]).includes(n.shape as string) ? n.shape : 'rect';
+  if (n.fill) out.fill = (PALETTE as readonly string[]).includes(n.fill) || /^#[0-9a-f]{3,8}$/i.test(n.fill) ? n.fill : null;
+  if (n.size && (TEXT_SIZES as readonly string[]).includes(n.size)) out.size = n.size;
+  if (n.align === 'left' || n.align === 'center' || n.align === 'right') out.align = n.align;
+  if (kind === 'table' && Array.isArray(n.colW)) out.colW = n.colW.slice(0, 12).map(w => num(w, 120, 30, 2000));
   if (kind === 'table') {
     const rows = Array.isArray(n.table) ? n.table : [['Name', 'Notes'], ['', '']];
     out.table = rows.slice(0, 50).map(r => (Array.isArray(r) ? r : []).slice(0, 12).map(c => String(c ?? '').slice(0, 500)));
@@ -173,7 +192,11 @@ function cleanGraph(tasks: Tasks, nodes: unknown, edges: unknown) {
     if (e.from === e.to) continue;
     const fromKind = ns.find(n => n.id === e.from)!.kind, toKind = ns.find(n => n.id === e.to)!.kind;
     const kind = e.kind === 'link' || NON_FLOW.has(fromKind) || NON_FLOW.has(toKind) ? 'link' : 'flow';
-    es.push({id: str(e.id, 40) || rid(), from: e.from, to: e.to, label: str(e.label, 200) || null, kind});
+    const side = (v: unknown) => ['top', 'right', 'bottom', 'left'].includes(v as string) ? v as BoardEdge['fromSide'] : null;
+    es.push({id: str(e.id, 40) || rid(), from: e.from, to: e.to, label: str(e.label, 200) || null, kind,
+      ...(e.dash !== undefined ? {dash: !!e.dash} : {}), ...(e.color && /^#[0-9a-f]{3,8}$|^(ink|terracotta|blue|green|purple)$/i.test(e.color) ? {color: e.color} : {}),
+      ...(e.route === 'straight' || e.route === 'elbow' ? {route: e.route} : {}), ...(e.heads === 'both' || e.heads === 'none' || e.heads === 'end' ? {heads: e.heads} : {}),
+      ...(side(e.fromSide) ? {fromSide: side(e.fromSide)} : {}), ...(side(e.toSide) ? {toSide: side(e.toSide)} : {})});
   }
   return {nodes: ns, edges: es};
 }
@@ -567,4 +590,55 @@ export function boardByKey(tasks: Tasks, key: string): Board | null {
   migrateBoards(tasks);
   const r = tasks.db.prepare('select * from boards where hook_key = ?').get(key);
   return r ? toBoard(r) : null;
+}
+
+/**
+ * Bring in a board made with Claude Whiteboards (its elements: shape, text, container, table, arrow, link).
+ * Pen strokes, pictures, embeds and stickers have no Cadence card and are skipped and counted.
+ */
+type CwEl = Record<string, any> & {id?: string; type?: string};
+export function importClaudeBoard(tasks: Tasks, input: {name?: string; projectId?: string | null; elements: CwEl[] | Record<string, CwEl>; title?: string}, actor: string | null) {
+  const list: CwEl[] = Array.isArray(input.elements) ? input.elements.map(e => e?.data ? {id: e.id, ...e.data} : e)
+    : Object.entries(input.elements ?? {}).map(([id, e]) => ({id, ...(e?.data ?? e)}));
+  if (!list.length) throw new Invalid('No elements to bring in');
+  const PX: Record<string, number> = {small: 14, body: 16, large: 28, title: 48, huge: 96};
+  const shapeOf: Record<string, Shape> = {rect: 'rect', rounded: 'rounded', ellipse: 'ellipse', diamond: 'diamond', pill: 'pill', hexagon: 'hexagon', parallelogram: 'parallelogram',
+    database: 'database', queue: 'database', document: 'document', cloud: 'cloud', person: 'rounded'};
+  const nodes: BoardNode[] = [], edges: BoardEdge[] = [], skipped: Record<string, number> = {};
+  const ids = new Set<string>();
+  const fillOf = (c: unknown) => typeof c === 'string' && ((PALETTE as readonly string[]).includes(c) || /^#[0-9a-f]{6}$/i.test(c)) ? c : null;
+  for (const e of list) {
+    const id = String(e.id ?? rid()).slice(0, 40);
+    if (e.type === 'container') nodes.push({id, kind: 'frame', x: e.x ?? 0, y: e.y ?? 0, w: e.w ?? 600, h: e.h ?? 400, text: String(e.text ?? ''), ...(fillOf(e.color) ? {fill: fillOf(e.color)} : {})});
+    else if (e.type === 'shape') nodes.push({id, kind: 'shape', x: e.x ?? 0, y: e.y ?? 0, w: e.w ?? 200, h: e.h ?? 100, text: String(e.text ?? ''), shape: shapeOf[e.kind] ?? 'rounded',
+      fill: e.hollow ? null : fillOf(e.color) ?? 'green', ...(e.size ? {size: e.size} : {}), ...(e.textAlign ? {align: e.textAlign} : {})});
+    else if (e.type === 'text') {
+      const size: TextSize = (TEXT_SIZES as readonly string[]).includes(e.size) ? e.size : 'body', px = PX[size];
+      const lines = String(e.text ?? '').split('\n');
+      const wrap = e.wrap ? Number(e.wrap) : null, longest = Math.max(...lines.map(l => l.replace(/\*\*|`/g, '').length));
+      const w = Math.round(wrap ?? Math.max(60, longest * px * 0.55)), perLine = Math.max(1, Math.floor(w / (px * 0.55)));
+      const rows = lines.reduce((a, l) => a + Math.max(1, Math.ceil(l.length / perLine)), 0);
+      nodes.push({id, kind: 'text', x: e.x ?? 0, y: e.y ?? 0, w, h: Math.round(rows * px * 1.5 + 8), text: String(e.text ?? ''), size, ...(e.textAlign ? {align: e.textAlign} : {})});
+    } else if (e.type === 'table') {
+      const cols = Object.entries(e.cols ?? {}).sort((a: any, b: any) => a[1].at - b[1].at);
+      const rows = Object.values(e.rows ?? {}).sort((a: any, b: any) => a.at - b.at) as Record<string, any>[];
+      const colW = cols.map(([, c]: any) => Number(c.w) || 120);
+      nodes.push({id, kind: 'table', x: e.x ?? 0, y: e.y ?? 0, w: colW.reduce((a, b) => a + b, 0), h: rows.length * 32 + 4, text: '', colW,
+        table: rows.map(r => cols.map(([cid]) => String(r[cid] ?? '')))});
+    } else if (e.type === 'link') nodes.push({id, kind: 'link', x: e.x ?? 0, y: e.y ?? 0, w: 320, h: 56, text: String(e.title ?? e.href ?? ''), url: /^https?:\/\//.test(String(e.href)) ? String(e.href) : null});
+    else if (e.type === 'arrow') {
+      if (typeof e.from !== 'string' || typeof e.to !== 'string') { skipped['free arrow'] = (skipped['free arrow'] ?? 0) + 1; continue; }
+      edges.push({id, from: e.from, to: e.to, label: e.label ?? null, dash: !!e.dash, route: 'elbow', heads: e.head === 'both' ? 'both' : e.head === 'none' ? 'none' : 'end',
+        fromSide: e.fromSide ?? null, toSide: e.toSide ?? null, ...(e.color ? {color: e.color} : {})});
+      continue;
+    } else { skipped[String(e.type ?? 'unknown')] = (skipped[String(e.type ?? 'unknown')] ?? 0) + 1; continue; }
+    ids.add(id);
+  }
+  const kept = edges.filter(e => ids.has(e.from) && ids.has(e.to));
+  if (kept.length < edges.length) skipped['arrow to a skipped item'] = edges.length - kept.length;
+  // Frames go to the back so what they hold stays clickable.
+  nodes.sort((a, b) => Number(b.kind === 'frame') - Number(a.kind === 'frame'));
+  const name = input.name || input.title || String(list.find(e => e.type === 'text' && (e.size === 'title' || e.size === 'huge'))?.text ?? 'Imported board').slice(0, 200);
+  const board = createBoard(tasks, {name, projectId: input.projectId ?? null, nodes, edges: kept}, actor);
+  return {board, imported: nodes.length + kept.length, skipped};
 }

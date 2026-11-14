@@ -64,6 +64,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     fitDayToLogged: (person) => self(person, 'plan days'),
     createSubspace: (pid) => need(pid, 'settings'),
     boardsBySop: (o) => { if (o) o.visible = tasks.listProjects().filter(p => sees(p.id) && caps(p.id).has('edit')).map(p => p.id); else throw new Forbidden('Pass options'); },
+    importBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
     createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
     updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
     deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },
@@ -153,7 +154,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     listBoards: (r: any[]) => r.filter(seesBoard).map(boardOut),
     boardsBySop: (r: any) => ({made: r.made.map(boardOut), kept: r.kept.filter(seesBoard).map(boardOut)}),
     board: (b: any) => { if (!seesBoard(b)) throw new Forbidden('Not found'); return boardOut(b); },
-    createBoard: boardOut, updateBoard: boardOut, boardFromItems: boardOut,
+    createBoard: boardOut, updateBoard: boardOut, boardFromItems: boardOut, importBoard: (r: any) => ({...r, board: boardOut(r.board)}),
     listBoardRuns: (r: any[]) => r.filter(x => { try { return seesBoard(boardOf(x.boardId)); } catch { return false; } }),
     // Admins see the full setup; everyone else sees job role names and their own job roles.
     jobRoles: (r: any) => isAdmin() ? r : {levels: r.levels.map((l: any) => ({id: l.id, name: l.name})), jobRoles: r.jobRoles.map((j: any) => ({id: j.id, name: j.name})), people: r.people.filter((p: any) => p.id === actor), domainJoin: null},

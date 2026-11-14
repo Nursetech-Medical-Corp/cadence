@@ -1737,3 +1737,21 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 
 .ev-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; }
 .ev-color.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg) inset; }
+
+/* Whiteboards: formatted text, imported boards */
+.wb-md ul, .wb-md ol { margin: 2px 0; padding-left: 18px; }
+.wb-md li { margin: 1px 0; }
+.wb-md code, .wb-table code { font-size: .9em; background: var(--hover); border-radius: 3px; padding: 0 3px; }
+.wb-line { min-height: 1em; }
+.wb-node.k-shape .wb-text { overflow: hidden; width: 100%; }
+.wb-node.k-shape.s-rounded { border-radius: 14px; align-items: center; justify-content: center; text-align: center; }
+.wb-node.k-shape.s-pill { border-radius: 999px; align-items: center; justify-content: center; text-align: center; }
+.wb-node.k-shape.s-hexagon, .wb-node.k-shape.s-parallelogram, .wb-node.k-shape.s-database, .wb-node.k-shape.s-document, .wb-node.k-shape.s-cloud { background: transparent; border: 0; box-shadow: none; align-items: center; justify-content: center; text-align: center; padding: 14px 22px; }
+.wb-node.k-text { font-size: 16px; font-weight: 400; }
+.wb-node.k-text .wb-text { overflow: visible; }
+.wb-node.k-frame .wb-frame-title { font-size: 15px; }
+.wb-table td, .wb-table th { white-space: normal; height: auto; }
+.wb-import { display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin-bottom: 16px; }
+/* Section titles sit just above their frame, as in Claude Whiteboards, so they never collide with what is inside. */
+.wb-node.k-frame { overflow: visible; }
+.wb-node.k-frame .wb-frame-title { position: absolute; left: 4px; bottom: calc(100% + 6px); font-size: 20px; font-weight: 700; color: var(--text); white-space: nowrap; }

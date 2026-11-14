@@ -106,6 +106,31 @@ test('whiteboards: one board per SOP with a title and its document; flowchart ki
   assert.deepEqual(run.steps.map(x => x.node), ['y'], 'start, decision and notes are not steps');
 });
 
+test('whiteboards: import a Claude Whiteboards board with sections, blocks, text, tables, arrows and links', () => {
+  const {t, david, p} = setup();
+  const r = t.importBoard({projectId: p.id, elements: [
+    {id: 'e5', data: {type: 'text', x: 0, y: 0, size: 'title', text: 'How work reaches agents'}},
+    {id: 'e1', data: {type: 'container', x: -40, y: 220, w: 1600, h: 520, text: '1. How it connects'}},
+    {id: 'e8', data: {type: 'shape', kind: 'rounded', x: 0, y: 248, w: 260, h: 96, color: 'white', text: '**Gmail**: new email'}},
+    {id: 'e12', data: {type: 'shape', kind: 'rounded', x: 324, y: 248, w: 240, h: 456, color: 'blue', text: '**Cadence**'}},
+    {id: 'e17', data: {type: 'arrow', from: 'e8', to: 'e12', fromSide: 'right', toSide: 'left', label: 'W1', dash: true}},
+    {id: 'e26', data: {type: 'table', x: 0, y: 844, cols: {c1: {at: 1, w: 60}, c2: {at: 2, w: 300}}, rows: {r2: {at: 2, c1: 'W1', c2: 'New email'}, r1: {at: 1, c1: '#', c2: 'When'}}}},
+    {id: 'e115', data: {type: 'link', x: 0, y: 4400, href: 'https://docs.google.com/document/d/x', title: 'SOP doc', kind: 'doc'}},
+    {id: 's1', data: {type: 'stroke', x: 0, y: 0, points: [0, 0, 10, 10]}},
+  ]}, david.id);
+  const b = r.board, n = (id: string) => b.nodes.find(x => x.id === id)!;
+  assert.equal(b.name, 'How work reaches agents', 'the title names the board');
+  assert.equal(b.nodes[0].kind, 'frame', 'sections go to the back');
+  assert.deepEqual([n('e8').kind, n('e8').shape, n('e8').fill], ['shape', 'rounded', 'white']);
+  assert.equal(n('e5').size, 'title');
+  assert.deepEqual(n('e26').table, [['#', 'When'], ['W1', 'New email']], 'rows keep their order, the header first');
+  assert.deepEqual(n('e26').colW, [60, 300]);
+  assert.equal(n('e115').url, 'https://docs.google.com/document/d/x');
+  const e = b.edges[0];
+  assert.deepEqual([e.label, e.dash, e.route, e.fromSide], ['W1', true, 'elbow', 'right']);
+  assert.deepEqual(r.skipped, {stroke: 1});
+});
+
 test('whiteboards: a run makes tasks in order, fires webhooks when steps are done, logs and finishes', async () => {
   const {t, david, p, done, posts} = setup();
   const linked = t.createItem({projectId: p.id, title: 'Existing check'}, david.id);

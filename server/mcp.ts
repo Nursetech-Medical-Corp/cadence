@@ -249,11 +249,16 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     color: z.string().optional(), item: z.string().optional().describe('task: link to an existing item (id or key)'), url: z.string().optional().describe('link: the document (Google Drive SOP); webhook: where it POSTs'),
     assignees: z.array(z.string()).optional().describe('task: person names or ids (or none)'), worker: z.enum(['human', 'ai', 'either']).optional(), sop: z.string().optional().describe('SOP code like SOP-07.2'),
     estimate: z.number().optional().describe('Hours'), repeat: z.string().optional().describe('task: repeat for Create tasks, like week, 2w, month, weekdays'),
-    shape: z.enum(['rect', 'ellipse', 'diamond']).optional(),
+    shape: z.enum(['rect', 'rounded', 'ellipse', 'diamond', 'pill', 'hexagon', 'parallelogram', 'database', 'document', 'cloud']).optional(),
+    fill: z.string().optional().describe('Fill: yellow, peach, pink, green, blue, purple, white or #rrggbb. Things of one kind share a fill; at most four on a board'),
+    size: z.enum(['small', 'body', 'large', 'title', 'huge']).optional().describe('Text size'), align: z.enum(['left', 'center', 'right']).optional(),
+    colW: z.array(z.number()).optional().describe('table: column widths'),
     table: z.array(z.array(z.string())).optional().describe('table: rows of cells, first row is the header'),
     trigger: z.object({on: z.enum(['manual', 'webhook', 'completed', 'schedule']), tag: z.string().optional().describe('completed: tag or item key that starts a run when finished'), every: z.enum(['day', 'week', 'month']).optional()}).optional(),
   });
-  const edgeShape = z.object({id: z.string().optional(), from: z.string(), to: z.string(), label: z.string().optional(), kind: z.enum(['flow', 'link']).optional().describe('flow: order of work (default); link: just related')});
+  const edgeShape = z.object({id: z.string().optional(), from: z.string(), to: z.string(), label: z.string().optional(), kind: z.enum(['flow', 'link']).optional().describe('flow: order of work (default); link: just related'),
+    dash: z.boolean().optional(), color: z.string().optional(), route: z.enum(['elbow', 'straight']).optional().describe('elbow: right angles (default)'), heads: z.enum(['end', 'both', 'none']).optional(),
+    fromSide: z.enum(['top', 'right', 'bottom', 'left']).optional(), toSide: z.enum(['top', 'right', 'bottom', 'left']).optional()});
   const toNode = (n: any) => { const {item, assignees, ...rest} = n; return {...rest, ...(item ? {itemId: tasks.findItem(item).id} : {}), ...(assignees ? {assignees: assignees.map(personId)} : {})}; };
   const boardSummary = (b: any) => ({id: b.id, name: b.name, space: b.projectId ? (() => { try { return tasks.project(b.projectId).key; } catch { return b.projectId; } })() : null, description: b.description,
     nodes: b.nodes.map((n: any) => { let it: any = null; if (n.itemId) { try { it = tasks.item(n.itemId); } catch { it = null; } }
@@ -284,6 +289,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('board_from_items', 'Draw a whiteboard from existing work: every routine (grouped by SOP, with its SOP document), items with a tag (like SOP-07.2), the children of an item, or a list of items. Dependencies become arrows.',
     {name: z.string().optional(), project: z.string().optional(), routines: z.boolean().optional(), tag: z.string().optional(), parent: z.string().optional(), items: z.array(z.string()).optional()}, false,
     i => { const r = tasks.boardFromItems({name: i.name, projectId: i.project ? projectId(i.project) : undefined, routines: i.routines, tag: i.tag, parentId: i.parent ? tasks.findItem(i.parent).id : undefined, itemIds: i.items?.map(x => tasks.findItem(x).id)}, actor) as any; return r?.proposal ? r : boardSummary(r); });
+  tool('import_board', 'Bring in a board made with Claude Whiteboards: pass its elements (shape, text, container, table, arrow, link, as an array or an object by id). Sections become frames, blocks keep their color and shape, text keeps its size, tables keep their columns, arrows keep labels and dashes. Pen strokes, pictures, embeds and stickers are skipped and counted.',
+    {elements: z.union([z.array(z.record(z.string(), z.any())), z.record(z.string(), z.any())]), name: z.string().optional(), project: z.string().optional()}, false,
+    i => { const r = tasks.importBoard({elements: i.elements as any, name: i.name, projectId: i.project ? projectId(i.project) : null}, actor) as any; return r?.proposal ? r : {id: r.board.id, name: r.board.name, imported: r.imported, skipped: r.skipped}; });
   tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it.', {}, false,
     () => { const r = tasks.boardsBySop({actor}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop}))}; });
   tool('board_to_tasks', 'Create real tasks from a whiteboard\'s task cards that have no item yet (in the board\'s space, or project), with arrows as dependencies and repeat as routines. Linked cards are left alone.',

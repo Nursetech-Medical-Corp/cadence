@@ -1174,6 +1174,14 @@ If you did not ask for it, ignore this email.`)
         const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
         const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
         if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), sop: q('sop'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        // Bring in a board made with Claude Whiteboards: {elements, name?, projectId?}.
+        if (b === 'import' && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const input = {elements: body.elements, name: body.name ? String(body.name) : undefined, projectId: body.projectId ?? null};
+          if (held('importBoard', [input, actor])) return send(res, 202, propose(tasks, actor!, 'importBoard', [input, actor]));
+          const r = tasks.importBoard(input, actor);
+          return send(res, 201, {...r, board: out(r.board)});
+        }
         // One board per SOP for every routine (existing SOP boards are kept).
         if (b === 'by-sop' && m === 'POST') {
           if (held('boardsBySop', [{actor}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor}]));

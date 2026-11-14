@@ -46,6 +46,10 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Arrows out of a decision are labeled Yes, then No. (e2e)
 - Tables: double-click a cell to type, Tab moves on, Enter on the last row adds one. (e2e)
 - Flow tools (start/stop, task, decision, trigger, webhook, end) and note tools (title, text, sticky, info, table, shape, frame, link). (e2e)
+- Card text understands bold, italic, code, links and lists; text sizes small to huge; fills from the Claude Whiteboards palette; shapes: rounded, box, pill, circle, decision, hexagon, input or output, database, document, cloud.
+- Arrows route in right angles by default (or straight), can be dashed or colored, with heads at the end, both ends or none; labels sit on the middle leg.
+- Import a Claude Whiteboards board (paste its elements): sections, blocks, text, tables (column widths), arrows (labels, dashes, sides), doc links; strokes and pictures are skipped and counted. (e2e)
+- Section titles sit above their frame. (e2e)
 - New boards open with a title; boards drawn from work have a title, a summary line and the SOP document.
 - One board per SOP; SOPs that have a board keep it; the Routines page links each SOP to its board.
 - Create tasks turns unlinked cards into tasks; arrows become dependencies; running it again makes nothing new.

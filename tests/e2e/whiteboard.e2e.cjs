@@ -92,6 +92,26 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     // 7. Titles: a new board opens with one.
     check('the toolbar has flow and note tools', (await page.getByRole('button', {name: /Start\/stop/}).count()) === 1 && (await page.getByRole('button', {name: /^Info$/}).count()) === 1);
 
+    // 8. Import a Claude Whiteboards board through the page: sections, colored blocks, bold text, a table, labeled dashed elbow arrows.
+    await page.goto(`${BASE}/#/boards`); await page.waitForSelector('.wb-new'); await wait(400);
+    await page.getByRole('button', {name: /^Import$/}).click();
+    await page.locator('.wb-import textarea').fill(JSON.stringify([
+      {id: 't', type: 'text', x: 0, y: 0, size: 'title', text: 'Imported flow'},
+      {id: 'f', type: 'container', x: -40, y: 120, w: 900, h: 300, text: '1. How it connects'},
+      {id: 'a', type: 'shape', kind: 'rounded', x: 0, y: 160, w: 220, h: 100, color: 'blue', text: '**Cadence**\n- tasks\n- approvals'},
+      {id: 'b', type: 'shape', kind: 'hexagon', x: 400, y: 260, w: 220, h: 100, color: 'green', text: 'Agent'},
+      {id: 'x', type: 'arrow', from: 'a', to: 'b', fromSide: 'right', toSide: 'left', label: 'wake', dash: true},
+      {id: 'tb', type: 'table', x: 0, y: 460, cols: {c1: {at: 1, w: 80}, c2: {at: 2, w: 240}}, rows: {r1: {at: 1, c1: '#', c2: 'When'}, r2: {at: 2, c1: 'W1', c2: 'New email'}}},
+      {id: 's', type: 'stroke', x: 0, y: 0, points: [0, 0, 5, 5]},
+    ]));
+    await page.locator('.wb-import').getByRole('button', {name: /^Import$/}).click(); await wait(1500);
+    check('import opens the new board', /#\/boards\/\w+/.test(page.url()) && (await page.locator('.wb-node').count()) === 5);
+    check('imported text keeps bold and lists', (await page.locator('.wb-node b', {hasText: 'Cadence'}).count()) === 1 && (await page.locator('.wb-node li').count()) === 2, `${await page.locator('.wb-node b', {hasText: 'Cadence'}).count()} bold, ${(await page.locator('.wb-node li').allInnerTexts()).join('|')} items`);
+    check('imported tables keep their header and column widths', (await page.locator('.wb-table th').count()) === 2 && (await page.locator('.wb-table col').count()) === 2);
+    const d = await page.locator('.wb-edges path[stroke-dasharray]').first().getAttribute('d');
+    check('imported arrows are dashed right-angle lines with their label', /H/.test(d || '') && (await page.locator('.wb-elabel', {hasText: 'wake'}).count()) === 1, d);
+    check('section titles sit above their frame', await page.locator('.wb-node.k-frame .wb-frame-title').evaluate(el => el.getBoundingClientRect().bottom <= el.parentElement.getBoundingClientRect().top + 1));
+
     check('no page errors', !errors.length, errors.join('; '));
   } catch (e) {
     check('scenario run finished', false, e.message);

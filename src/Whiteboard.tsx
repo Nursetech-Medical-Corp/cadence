@@ -2,7 +2,7 @@
 // open documents (Google Drive SOPs), triggers and webhooks show where automations start and what they call.
 // Saved to /api/boards; runs to /api/boards/:id/run. Agents reach the same through MCP (server/boards.ts).
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {CirclePlay, Diamond, Heading, Info, Table2, MousePointer2, Hand, Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
+import {Download, CirclePlay, Diamond, Heading, Info, Table2, MousePointer2, Hand, Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
 import type {Item, Person, Project} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Avatars, itemKey} from './components.tsx';
@@ -10,9 +10,72 @@ import {Avatars, itemKey} from './components.tsx';
 type Kind = 'task' | 'sticky' | 'text' | 'shape' | 'frame' | 'link' | 'trigger' | 'webhook' | 'end' | 'terminal' | 'decision' | 'info' | 'table' | 'title';
 type TriggerOn = 'manual' | 'webhook' | 'completed' | 'schedule';
 export type WbNode = {id: string; kind: Kind; x: number; y: number; w: number; h: number; text: string; color?: string | null; itemId?: string | null; url?: string | null;
-  assignees?: string[]; worker?: 'human' | 'ai' | 'either'; sop?: string | null; estimate?: number | null; repeat?: string | null; shape?: 'rect' | 'ellipse' | 'diamond'; table?: string[][];
+  assignees?: string[]; worker?: 'human' | 'ai' | 'either'; sop?: string | null; estimate?: number | null; repeat?: string | null; shape?: ShapeKind; table?: string[][]; fill?: string | null; size?: 'small' | 'body' | 'large' | 'title' | 'huge'; align?: 'left' | 'center' | 'right'; colW?: number[];
   trigger?: {on: TriggerOn; tag?: string | null; every?: 'day' | 'week' | 'month' | null}};
-export type WbEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link'};
+type Side = 'top' | 'right' | 'bottom' | 'left';
+export type WbEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link'; dash?: boolean; color?: string | null; route?: 'elbow' | 'straight'; heads?: 'end' | 'both' | 'none'; fromSide?: Side | null; toSide?: Side | null};
+type ShapeKind = 'rect' | 'rounded' | 'ellipse' | 'diamond' | 'pill' | 'hexagon' | 'parallelogram' | 'database' | 'document' | 'cloud';
+const SHAPE_KINDS: [ShapeKind, string][] = [['rounded', 'Rounded box'], ['rect', 'Box'], ['pill', 'Pill'], ['ellipse', 'Circle'], ['diamond', 'Decision'], ['hexagon', 'Hexagon'], ['parallelogram', 'Input or output'], ['database', 'Database'], ['document', 'Document'], ['cloud', 'Cloud']];
+/** The same fills and ink colors as Claude Whiteboards, so imported boards look the same. */
+const FILLS: Record<string, string> = {yellow: '#fdf0c2', peach: '#fde3d0', pink: '#fbe0ea', green: '#dcf2df', blue: '#dbe8fb', purple: '#e9e2fb', white: 'var(--card)'};
+const INKS: Record<string, string> = {ink: 'var(--text)', terracotta: '#c2502b', blue: '#2563eb', green: '#15803d', purple: '#7c3aed'};
+const fillOf = (f?: string | null) => f ? FILLS[f] ?? f : undefined;
+const inkOf = (c?: string | null) => c ? INKS[c] ?? c : undefined;
+const TEXT_PX: Record<string, number> = {small: 14, body: 16, large: 28, title: 48, huge: 96};
+/** Card text: **bold**, *italic*, `code`, [label](https://...), and lines starting "- " or "1. " as lists. */
+function md(text: string, opts: {noLists?: boolean} = {}): ReactNode {
+  const inline = (t: string, k: string): ReactNode[] => {
+    const out: ReactNode[] = []; let rest = t, i = 0;
+    const re = /\*\*([^*]+)\*\*|\*([^*]+)\*|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/;
+    for (let m = re.exec(rest); m; m = re.exec(rest)) {
+      if (m.index) out.push(rest.slice(0, m.index));
+      const key = `${k}-${i++}`;
+      out.push(m[1] ? <b key={key}>{m[1]}</b> : m[2] ? <i key={key}>{m[2]}</i> : m[3] ? <code key={key}>{m[3]}</code> : <a key={key} href={m[5]} target="_blank" rel="noreferrer" onMouseDown={e => e.stopPropagation()}>{m[4]}</a>);
+      rest = rest.slice(m.index + m[0].length);
+    }
+    if (rest) out.push(rest);
+    return out;
+  };
+  const lines = text.split('\n'), out: ReactNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i], bullet = opts.noLists ? null : /^- (.*)/.exec(l), num = opts.noLists ? null : /^(\d+)\. (.*)/.exec(l);
+    if (bullet || num) {
+      const items: ReactNode[] = []; const ordered = !!num;
+      while (i < lines.length && (ordered ? /^\d+\. /.test(lines[i]) : /^- /.test(lines[i]))) { items.push(<li key={i}>{inline(lines[i].replace(/^(- |\d+\. )/, ''), 'l' + i)}</li>); i++; }
+      i--;
+      out.push(ordered ? <ol key={'o' + i}>{items}</ol> : <ul key={'u' + i}>{items}</ul>);
+    } else out.push(<div key={i} className="wb-line">{l ? inline(l, 'p' + i) : '\u00a0'}</div>);
+  }
+  return out;
+}
+/** The middle of a side of a card. */
+const sidePoint = (n: WbNode, s: Side) => s === 'top' ? {x: n.x + n.w / 2, y: n.y} : s === 'bottom' ? {x: n.x + n.w / 2, y: n.y + n.h} : s === 'left' ? {x: n.x, y: n.y + n.h / 2} : {x: n.x + n.w, y: n.y + n.h / 2};
+/** Sides an arrow leaves and enters by, when not set: the ones facing each other. */
+function facing(a: WbNode, b: WbNode): [Side, Side] {
+  const dx = (b.x + b.w / 2) - (a.x + a.w / 2), dy = (b.y + b.h / 2) - (a.y + a.h / 2);
+  const gapX = Math.max(b.x - (a.x + a.w), a.x - (b.x + b.w)), gapY = Math.max(b.y - (a.y + a.h), a.y - (b.y + b.h));
+  return gapX >= gapY ? (dx >= 0 ? ['right', 'left'] : ['left', 'right']) : (dy >= 0 ? ['bottom', 'top'] : ['top', 'bottom']);
+}
+/** An arrow's path: right-angle legs (elbow) between the chosen sides, or a straight line. Returns the path and where its label goes. */
+function routeOf(a: WbNode, b: WbNode, e: WbEdge): {d: string; mid: {x: number; y: number}} {
+  if (e.route === 'straight') {
+    const p1 = edgePoint(a, b.x + b.w / 2, b.y + b.h / 2), p2 = edgePoint(b, a.x + a.w / 2, a.y + a.h / 2);
+    return {d: `M${p1.x},${p1.y} L${p2.x},${p2.y}`, mid: {x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2}};
+  }
+  const [fs, ts] = facing(a, b), s1 = e.fromSide ?? fs, s2 = e.toSide ?? ts;
+  const p1 = sidePoint(a, s1), p2 = sidePoint(b, s2), horiz = (s: Side) => s === 'left' || s === 'right';
+  if (horiz(s1) && horiz(s2)) {
+    if (Math.abs(p1.y - p2.y) < 2) return {d: `M${p1.x},${p1.y} L${p2.x},${p2.y}`, mid: {x: (p1.x + p2.x) / 2, y: p1.y}};
+    const mx = (p1.x + p2.x) / 2;
+    return {d: `M${p1.x},${p1.y} H${mx} V${p2.y} H${p2.x}`, mid: {x: mx, y: (p1.y + p2.y) / 2}};
+  }
+  if (!horiz(s1) && !horiz(s2)) {
+    if (Math.abs(p1.x - p2.x) < 2) return {d: `M${p1.x},${p1.y} L${p2.x},${p2.y}`, mid: {x: p1.x, y: (p1.y + p2.y) / 2}};
+    const my = (p1.y + p2.y) / 2;
+    return {d: `M${p1.x},${p1.y} V${my} H${p2.x} V${p2.y}`, mid: {x: (p1.x + p2.x) / 2, y: my}};
+  }
+  return horiz(s1) ? {d: `M${p1.x},${p1.y} H${p2.x} V${p2.y}`, mid: {x: p2.x, y: p1.y}} : {d: `M${p1.x},${p1.y} V${p2.y} H${p2.x}`, mid: {x: p1.x, y: p2.y}};
+}
 type Hook = {id: string; url: string; events: string[]};
 export type Board = {id: string; projectId: string | null; name: string; description: string; sop?: string | null; nodes: WbNode[]; edges: WbEdge[]; webhooks: Hook[]; hookKey?: string; hookUrl?: string; createdBy: string | null; updated: string};
 type Step = {node: string; kind: Kind; title: string; itemId: string | null; state: string; at: string | null; note: string | null};
@@ -70,6 +133,21 @@ function BoardList({store}: {store: Store}) {
     try { const b = await api<Board>(path, {method: 'POST', body}); location.hash = `/boards/${b.id}`; } catch (e) { store.fail(e); } finally { setBusy(false); }
   };
   const spaces = store.projects.filter(p => !p.settings.rollup);
+  const [importing, setImporting] = useState(false);
+  const [paste, setPaste] = useState('');
+  const doImport = async () => {
+    // Takes the elements as JSON: an array, an object by id, or one document per line (as Claude's artifact tools list them).
+    let elements: unknown;
+    try { elements = JSON.parse(paste); } catch {
+      try { elements = paste.split('\n').map(l => l.trim()).filter(l => l.startsWith('{')).map(l => JSON.parse(l)); } catch { alert('That is not JSON. Paste the board\'s elements.'); return; }
+    }
+    if (elements && typeof elements === 'object' && !Array.isArray(elements) && 'elements' in (elements as object)) elements = (elements as {elements: unknown}).elements;
+    setBusy(true);
+    try { const r = await api<{board: Board; imported: number; skipped: Record<string, number>}>('/boards/import', {method: 'POST', body: {elements, projectId: spaces[0]?.id ?? null}});
+      const sk = Object.entries(r.skipped).map(([k, n]) => `${n} ${k}`).join(', ');
+      store.flash(`Brought in ${r.imported} items${sk ? `; skipped ${sk}` : ''}`); location.hash = `/boards/${r.board.id}`; }
+    catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
   const bySop = async () => {
     setBusy(true);
     try { const r = await api<{made: Board[]; kept: Board[]}>('/boards/by-sop', {method: 'POST', body: {}}); store.flash(r.made.length ? `Made ${r.made.length} SOP board${r.made.length === 1 ? '' : 's'}${r.kept.length ? `, ${r.kept.length} already had one` : ''}` : r.kept.length ? 'Every SOP already has a board' : 'No routines have an SOP tag yet'); setBoards(await api<Board[]>('/boards')); }
@@ -80,9 +158,16 @@ function BoardList({store}: {store: Store}) {
       <p className="muted small space-note">Map how work flows: routines, automations, webhooks and who does each step, person or AI. Link cards to tasks and SOP documents, turn ideas into tasks, and run a board to make its tasks in order.</p></header>
     <div className="wb-new">
       <button className="btn primary" disabled={busy} onClick={() => make('/boards', {name: 'Untitled board', projectId: spaces[0]?.id ?? null, nodes: [titleNode('Untitled board')]})}><Plus size={14} /> New whiteboard</button>
+      <button className="btn ghost" disabled={busy} onClick={() => setImporting(true)} title="Bring in a board made with Claude Whiteboards"><Download size={14} /> Import</button>
       <button className="btn" disabled={busy} onClick={bySop} title="One board for each SOP: its routines in order, a title and the SOP document. SOPs that have a board keep it"><Repeat size={14} /> One board per SOP</button>
       <button className="btn ghost" disabled={busy} onClick={() => make('/boards/from-items', {routines: true})} title="Every routine on one big board, a frame per SOP"><MapIcon size={14} /> All routines on one board</button>
     </div>
+    {importing && <div className="wb-import">
+      <b>Import a Claude Whiteboards board</b>
+      <p className="muted small">Paste the board's elements as JSON (shape, text, container, table, arrow and link come in; pen lines, pictures and embeds are skipped). Ask Claude for "the elements of my whiteboard as JSON".</p>
+      <textarea className="plain-input" rows={8} value={paste} onChange={e => setPaste(e.target.value)} placeholder='[{"id": "e1", "type": "shape", "x": 0, "y": 0, "w": 200, "h": 100, "text": "Step"}]' />
+      <div className="row"><button className="btn primary" disabled={busy || !paste.trim()} onClick={doImport}>Import</button><button className="btn ghost" onClick={() => setImporting(false)}>Cancel</button></div>
+    </div>}
     {!boards ? <div className="loading">Loading...</div> : !boards.length ? <p className="muted">No whiteboards yet.</p> :
       <div className="wb-cards">{boards.map(b => {
         const sp = store.projects.find(p => p.id === b.projectId);
@@ -292,7 +377,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
       const tid = drag.target ?? snapTarget(toWorld(e.clientX, e.clientY), drag.from);
       const target = tid ? nodes.find(n => n.id === tid) : undefined;
       if (target && !edges.some(x => x.from === drag.from && x.to === target.id)) {
-        const e2: WbEdge = {id: rid(), from: drag.from, to: target.id, ...(nodes.find(n => n.id === drag.from)?.kind === 'decision' ? {label: edges.some(x => x.from === drag.from) ? 'No' : 'Yes'} : {})};
+        const e2: WbEdge = {id: rid(), from: drag.from, to: target.id, route: 'elbow', ...(nodes.find(n => n.id === drag.from)?.kind === 'decision' ? {label: edges.some(x => x.from === drag.from) ? 'No' : 'Yes'} : {})};
         setGraph(nodes, [...edges, e2]); setSelEdge(e2.id); setSel(new Set());
       }
     }
@@ -374,20 +459,24 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
         <div className="wb-world" style={{transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`}}>
           <svg className="wb-edges">
             <defs>
-              <marker id="wb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--text2)" /></marker>
+              <marker id="wb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke" /></marker>
               <marker id="wb-arrow-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)" /></marker>
             </defs>
             {edges.map(e => {
               const a = byId.get(e.from), b = byId.get(e.to);
               if (!a || !b) return null;
-              const p1 = edgePoint(a, b.x + b.w / 2, b.y + b.h / 2), p2 = edgePoint(b, a.x + a.w / 2, a.y + a.h / 2);
+              const {d, mid} = routeOf(a, b, e);
+              // Old "only related" links stay dashed with no head, unless the arrow says otherwise.
               const isLink = e.kind === 'link' || NOTE_KINDS.has(a.kind) || NOTE_KINDS.has(b.kind);
+              const dashed = e.dash ?? (isLink && !e.heads && !e.route), heads = e.heads ?? (isLink && !e.route ? 'none' : 'end');
               const on = selEdge === e.id, st = stepOf(e.from);
-              const color = on ? 'var(--accent)' : st && (st.state === 'done' || st.state === 'fired') ? STATE_COLOR.done : 'var(--text2)';
+              const color = on ? 'var(--accent)' : st && (st.state === 'done' || st.state === 'fired') ? STATE_COLOR.done : inkOf(e.color) ?? 'var(--text2)';
+              const mk = on ? 'wb-arrow-on' : 'wb-arrow';
               return <g key={e.id} onMouseDown={ev => { ev.stopPropagation(); setSelEdge(e.id); setSel(new Set()); canvas.current?.focus(); }}>
-                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="transparent" strokeWidth={14} style={{cursor: 'pointer'}} />
-                <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={color} strokeWidth={on ? 2.5 : 1.6} strokeDasharray={isLink ? '5 5' : undefined} markerEnd={isLink ? undefined : `url(#${on ? 'wb-arrow-on' : 'wb-arrow'})`} />
-                {e.label && <text x={(p1.x + p2.x) / 2} y={(p1.y + p2.y) / 2 - 6} className="wb-elabel" textAnchor="middle">{e.label}</text>}
+                <path d={d} fill="none" stroke="transparent" strokeWidth={14} style={{cursor: 'pointer'}} />
+                <path d={d} fill="none" stroke={color} strokeWidth={on ? 2.5 : 1.6} strokeDasharray={dashed ? '6 5' : undefined} strokeLinejoin="round"
+                  markerEnd={heads !== 'none' ? `url(#${mk})` : undefined} markerStart={heads === 'both' ? `url(#${mk})` : undefined} style={e.color && !on ? {color} : undefined} />
+                {e.label && <text x={mid.x} y={mid.y - 6} className="wb-elabel" textAnchor="middle">{e.label}</text>}
               </g>;
             })}
             {drag?.mode === 'connect' && byId.get(drag.from) && (() => {
@@ -416,6 +505,12 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
         {sideMode === 'node' && edge && <div className="wb-insp">
           <h4>Connection</h4>
           <label>Label<input className="plain-input" defaultValue={edge.label ?? ''} key={edge.id} onBlur={e => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, label: e.target.value || null} : x))} placeholder="yes, no, then..." /></label>
+          <div className="row">
+            <label>Route<select className="plain-input" value={edge.route ?? 'straight'} onChange={e => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, route: e.target.value as 'elbow'} : x))}><option value="elbow">Right angles</option><option value="straight">Straight</option></select></label>
+            <label>Heads<select className="plain-input" value={edge.heads ?? 'end'} onChange={e => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, heads: e.target.value as 'end'} : x))}><option value="end">At the end</option><option value="both">Both ends</option><option value="none">None</option></select></label>
+          </div>
+          <label className="row"><input type="checkbox" checked={!!edge.dash} onChange={e => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, dash: e.target.checked} : x))} /> Dashed</label>
+          <div className="row">{Object.entries(INKS).map(([k, v]) => <button key={k} className={'wb-swatch' + ((edge.color ?? 'ink') === k ? ' on' : '')} title={k} style={{background: v}} onClick={() => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, color: k === 'ink' ? null : k} : x))} />)}</div>
           <label className="row"><input type="checkbox" checked={edge.kind === 'link'} onChange={e => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, kind: e.target.checked ? 'link' : 'flow'} : x))} /> Only related (not the order of work)</label>
           <div className="row"><button className="btn small" onClick={() => setGraph(nodes, edges.map(x => x.id === edge.id ? {...x, from: x.to, to: x.from} : x))}>Reverse</button>
             <button className="btn small danger" onClick={removeSel}><Trash2 size={12} /> Delete</button></div>
@@ -435,6 +530,12 @@ function NodeView({store, n, sops, selected, editing, step, open, onDown, onEdit
   const style: React.CSSProperties = {left: n.x, top: n.y, width: n.w, height: n.h};
   if (n.kind === 'sticky') style.background = n.color ?? STICKY[0];
   else if (n.color && n.kind !== 'text') style.borderColor = n.color;
+  const fill = fillOf(n.fill);
+  const svgShape = n.kind === 'shape' && ['diamond', 'hexagon', 'parallelogram', 'database', 'document', 'cloud'].includes(n.shape ?? '');
+  if (fill && !svgShape) style.background = fill;
+  if (n.size) { style.fontSize = TEXT_PX[n.size]; if (n.size === 'title' || n.size === 'huge' || n.size === 'large') style.fontWeight = 700; }
+  if (n.align) style.textAlign = n.align;
+  if (n.kind === 'table') { style.height = undefined; style.minHeight = 40; }
   if (step) style.boxShadow = `0 0 0 3px ${STATE_COLOR[step.state] ?? 'transparent'}`;
   const text = n.text || (item?.title ?? '');
   const sopUrl = n.sop ? sops[n.sop] ?? sops['*'] : undefined;
@@ -463,15 +564,16 @@ function NodeView({store, n, sops, selected, editing, step, open, onDown, onEdit
   else if (n.kind === 'trigger') body = <div className="wb-iconbody"><Zap size={14} /> <span><b>{n.text || 'Start'}</b><br /><span className="muted small">{triggerText(n)}</span></span></div>;
   else if (n.kind === 'webhook') body = <div className="wb-iconbody"><Webhook size={14} /> <span><b>{n.text || 'Webhook'}</b><br /><span className="muted small">{n.url ? new URL(n.url).hostname : 'Set the URL'}</span>{step && <><br /><span className="wb-step" style={{background: STATE_COLOR[step.state]}}>{step.state}</span></>}</span></div>;
   else if (n.kind === 'end') body = <div className="wb-iconbody center"><Flag size={14} /> {n.text || 'Done'}</div>;
-  else if (n.kind === 'frame') body = <div className="wb-frame-title">{n.text}</div>;
+  else if (n.kind === 'frame') body = <div className="wb-frame-title">{md(n.text, {noLists: true})}</div>;
   else if (n.kind === 'title') { const [h, ...rest] = n.text.split('\n'); body = <div className="wb-titlebody"><div className="wb-h1">{h}</div>{rest.length > 0 && <div className="wb-sub">{rest.join(' ')}</div>}</div>; }
   else if (n.kind === 'terminal') body = <div className="wb-iconbody center">{/stop|end|done|finish/i.test(n.text) ? <Square size={13} /> : <CirclePlay size={14} />} <b>{n.text || 'Start'}</b></div>;
   else if (n.kind === 'decision') body = <div className="wb-decision-text">{n.text || 'Yes or no?'}</div>;
-  else if (n.kind === 'info') body = <div className="wb-infobody"><Info size={14} className="wb-info-ico" /><div className="wb-text">{n.text}</div></div>;
-  else if (n.kind === 'table') body = <TableBody rows={n.table ?? [['']]} onChange={onTable} />;
-  else body = <div className="wb-text">{n.text}</div>;
+  else if (n.kind === 'info') body = <div className="wb-infobody"><Info size={14} className="wb-info-ico" /><div className="wb-text wb-md">{md(n.text)}</div></div>;
+  else if (n.kind === 'table') body = <TableBody rows={n.table ?? [['']]} colW={n.colW} onChange={onTable} />;
+  else body = <div className="wb-text wb-md">{md(n.text)}</div>;
   return <div className={`wb-node k-${n.kind}${n.kind === 'shape' ? ' s-' + (n.shape ?? 'rect') : ''}${selected ? ' sel' : ''}${snapping ? ' snap' : ''}`} style={style} onMouseDown={onDown} onDoubleClick={e => { e.stopPropagation(); onEdit(); }} data-node={n.id}>
-    {((n.kind === 'shape' && n.shape === 'diamond') || n.kind === 'decision') && <svg className="wb-diamond" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,2 98,50 50,98 2,50" fill={n.kind === 'decision' ? 'color-mix(in srgb, #f59e0b 12%, var(--card))' : 'var(--card)'} stroke={n.color ?? (n.kind === 'decision' ? '#f59e0b' : 'var(--text2)')} strokeWidth={1.6} vectorEffect="non-scaling-stroke" /></svg>}
+    {svgShape && n.shape !== 'diamond' && <svg className="wb-diamond" viewBox="0 0 100 100" preserveAspectRatio="none">{shapeSvg(n.shape!, fill ?? 'var(--card)', n.color ?? 'var(--text2)')}</svg>}
+    {((n.kind === 'shape' && n.shape === 'diamond') || n.kind === 'decision') && <svg className="wb-diamond" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,2 98,50 50,98 2,50" fill={n.kind === 'decision' ? 'color-mix(in srgb, #f59e0b 12%, var(--card))' : fill ?? 'var(--card)'} stroke={n.color ?? (n.kind === 'decision' ? '#f59e0b' : 'var(--text2)')} strokeWidth={1.6} vectorEffect="non-scaling-stroke" /></svg>}
     {body}
     {/* Connection dots on all four sides: drag from any to another card. While connecting, the card it will join lights up. */}
     {!editing && (['t', 'r', 'b', 'l'] as const).map(side => <span key={side} className={`wb-port p-${side}`} title="Drag to another card to connect" onMouseDown={onConnect} />)}
@@ -526,7 +628,15 @@ function NodeInspector({store, n, space, sops, patch, remove, duplicate, open}: 
       <button className="btn small" disabled={(n.table?.length ?? 0) <= 1} onClick={() => patch({table: (n.table ?? []).slice(0, -1), h: Math.max(60, n.h - 32)})}><Minus size={12} /> Row</button>
       <button className="btn small" disabled={(n.table?.[0]?.length ?? 0) <= 1} onClick={() => patch({table: (n.table ?? []).map(r => r.slice(0, -1)), w: Math.max(120, n.w - 110)})}><Minus size={12} /> Column</button>
       <span className="muted small">Double-click a cell to type; Tab moves on; Enter on the last row adds one.</span></div>}
-    {n.kind === 'shape' && <label>Shape<select className="plain-input" value={n.shape ?? 'rect'} onChange={e => patch({shape: e.target.value as 'rect'})}><option value="rect">Box</option><option value="ellipse">Circle</option><option value="diamond">Decision</option></select></label>}
+    {n.kind === 'shape' && <label>Shape<select className="plain-input" value={n.shape ?? 'rect'} onChange={e => patch({shape: e.target.value as ShapeKind})}>{SHAPE_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>}
+    {['shape', 'frame', 'info', 'text', 'task', 'link'].includes(n.kind) && <div className="wb-field"><span className="muted small">Fill</span><div className="row">
+      {Object.entries(FILLS).map(([k, v]) => <button key={k} className={'wb-swatch' + (n.fill === k ? ' on' : '')} title={k} style={{background: v}} onClick={() => patch({fill: k})} />)}
+      <button className="btn ghost small" onClick={() => patch({fill: null})}>None</button></div></div>}
+    {['shape', 'text', 'sticky', 'info', 'frame'].includes(n.kind) && <div className="row">
+      <label>Text size<select className="plain-input" value={n.size ?? 'body'} onChange={e => patch({size: e.target.value as 'body'})}><option value="small">Small</option><option value="body">Body</option><option value="large">Large</option><option value="title">Title</option><option value="huge">Huge</option></select></label>
+      <label>Align<select className="plain-input" value={n.align ?? (n.kind === 'shape' ? 'center' : 'left')} onChange={e => patch({align: e.target.value as 'left'})}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+    </div>}
+    {['shape', 'text', 'sticky', 'info', 'frame', 'table'].includes(n.kind) && <p className="muted small">Text understands **bold**, *italic*, `code`, [label](https://...) and lines starting "- " or "1. ".</p>}
     {n.kind !== 'text' && <div className="wb-field"><span className="muted small">Color</span><div className="row">{(n.kind === 'sticky' ? STICKY : ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#64748b']).map(c => <button key={c} className={'wb-swatch' + ((n.color ?? '') === c ? ' on' : '')} style={{background: c}} onClick={() => patch({color: c})} />)}
       {n.kind !== 'sticky' && <button className="btn ghost small" onClick={() => patch({color: null})}>None</button>}</div></div>}
     <div className="row" style={{marginTop: 12}}><button className="btn small" onClick={duplicate}><Copy size={12} /> Duplicate</button><button className="btn small danger" onClick={remove}><Trash2 size={12} /> Delete</button></div>
@@ -591,11 +701,24 @@ export function ItemBoards({store, item}: {store: Store; item: Item}) {
 }
 
 /** A table card: the first row is the header. Double-click a cell to edit; Tab moves to the next cell, Enter on the last row adds one. */
-function TableBody({rows, onChange}: {rows: string[][]; onChange: (t: string[][]) => void}) {
+function shapeSvg(shape: ShapeKind, fill: string, stroke: string): ReactNode {
+  const p = {fill, stroke, strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke' as const};
+  switch (shape) {
+    case 'hexagon': return <polygon points="12,2 88,2 98,50 88,98 12,98 2,50" {...p} />;
+    case 'parallelogram': return <polygon points="16,2 98,2 84,98 2,98" {...p} />;
+    case 'database': return <><path d="M2,12 C2,-2 98,-2 98,12 L98,88 C98,102 2,102 2,88 Z" {...p} /><path d="M2,12 C2,26 98,26 98,12" fill="none" stroke={stroke} strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></>;
+    case 'document': return <path d="M2,2 L98,2 L98,86 C74,74 50,100 26,92 C16,89 8,86 2,88 Z" {...p} />;
+    case 'cloud': return <path d="M25,82 C8,82 2,66 12,56 C4,40 20,26 34,32 C38,14 64,10 72,26 C88,22 100,38 92,52 C102,62 94,82 78,82 Z" {...p} />;
+    default: return null;
+  }
+}
+
+function TableBody({rows, onChange, colW}: {rows: string[][]; onChange: (t: string[][]) => void; colW?: number[]}) {
   const [cell, setCell] = useState<[number, number] | null>(null);
   const set = (r: number, c: number, v: string) => onChange(rows.map((row, i) => i === r ? row.map((x, j) => j === c ? v : x) : row));
   const cols = Math.max(1, ...rows.map(r => r.length));
   return <table className="wb-table" onMouseDown={e => { if (cell) e.stopPropagation(); }}>
+    {colW?.length ? <colgroup>{colW.map((w, i) => <col key={i} style={{width: w}} />)}</colgroup> : null}
     <tbody>{rows.map((row, r) => <tr key={r}>{Array.from({length: cols}, (_, c) => {
       const Tag = r === 0 ? 'th' : 'td';
       const on = cell?.[0] === r && cell[1] === c;
@@ -607,7 +730,7 @@ function TableBody({rows, onChange}: {rows: string[][]; onChange: (t: string[][]
             if (e.key === 'Escape') setCell(null);
             if (e.key === 'Tab') { e.preventDefault(); const v = (e.target as HTMLInputElement).value; if (v !== (row[c] ?? '')) set(r, c, v); const n = r * cols + c + (e.shiftKey ? -1 : 1); if (n >= 0 && n < rows.length * cols) setCell([Math.floor(n / cols), n % cols]); else setCell(null); }
             if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; const next = rows.map((x, i) => i === r ? x.map((y, j) => j === c ? v : y) : x); if (r === rows.length - 1) next.push(Array(cols).fill('')); onChange(next); setCell([r + 1, c]); }
-          }} /> : (row[c] || <span className="wb-cell-empty">{r === 0 ? 'Column' : ''}</span>)}
+          }} /> : (row[c] ? md(row[c]) : <span className="wb-cell-empty">{r === 0 ? 'Column' : ''}</span>)}
       </Tag>; })}</tr>)}</tbody>
   </table>;
 }

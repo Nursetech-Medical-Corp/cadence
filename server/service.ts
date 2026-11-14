@@ -1628,6 +1628,7 @@ export class Tasks {
   createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
   updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }
   deleteBoard(ref: string) { return boards.deleteBoard(this, ref); }
+  importBoard(input: Parameters<typeof boards.importClaudeBoard>[1], actor: string | null = null) { return boards.importClaudeBoard(this, input, actor); }
   boardFromItems(q: Parameters<typeof boards.boardFromItems>[1], actor: string | null = null, canSee?: (projectId: string) => boolean) { return boards.boardFromItems(this, q, actor, canSee); }
   boardToTasks(ref: string, actor: string | null = null, opts: {projectId?: string; parentId?: string | null} = {}) { return boards.boardToTasks(this, ref, actor, opts); }
   runBoard(ref: string, actor: string | null = null, opts: {trigger?: string; input?: unknown; title?: string} = {}) { return boards.runBoard(this, ref, actor, opts); }
