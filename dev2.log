@@ -1,0 +1,13 @@
+ WARN  Unsupported engine: wanted: {"node":">=24"} (current: {"node":"v22.23.4","pnpm":"10.28.0"})
+
+> cadence@0.1.0 demo /home/user/cadence
+> vite --mode demo --port 5191
+
+(node:458) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+  VITE v8.3.0   demo   ready in 522 ms
+
+  ➜  Local:   http://127.0.0.1:5191/
+3:48:34 AM [vite] (client) page reload src/DayPlanner.tsx
+3:48:34 AM [vite] (client) hmr update /src/styles.css
