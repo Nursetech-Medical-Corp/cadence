@@ -10,7 +10,7 @@ import {Avatars, Check, Popover, PriorityIcon, itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
 type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
-type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean};
+type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean; color?: string | null};
 type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number; added: number; upTo: string | null};
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
 type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null; color?: string | null};
@@ -485,12 +485,14 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         if (editing || document.querySelector('.panel')) { setEditing(null); return; }
         const grid = e.currentTarget, r = grid.getBoundingClientRect();
         const at = (y: number) => Math.max(startM, Math.min(endM, startM + Math.round((y - r.top) / px / snapTo) * snapTo));
+        e.preventDefault();
         const a = Math.min(at(e.clientY), endM - snapTo);
-        let b2 = a + 30;
-        setGhost({a, b: b2});
-        const move = (ev: MouseEvent) => { b2 = Math.max(a + snapTo, at(ev.clientY)); setGhost({a, b: b2}); };
+        let from = a, to = a + 30, moved = false;
+        setGhost({a: from, b: to});
+        // Drag down or up from where you pressed; a plain click makes a 30 minute box.
+        const move = (ev: MouseEvent) => { const m = at(ev.clientY); if (Math.abs(m - a) >= snapTo) moved = true; if (!moved) return; from = Math.min(a, m); to = Math.max(a + snapTo, m); setGhost({a: from, b: to}); };
         const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); setGhost(null);
-          const id = rid(), start = hhmm(a); update(p => ({...p, blocks: [...p.blocks, {id, text: '', start, minutes: Math.max(snapTo, b2 - a), at: atOf(p.date, start), remind: false}]})); setEditing(id); };
+          const id = rid(), start = hhmm(from); update(p => ({...p, blocks: [...p.blocks, {id, text: '', start, minutes: Math.max(snapTo, to - from), at: atOf(p.date, start), remind: false}]})); setEditing(id); };
         addEventListener('mousemove', move); addEventListener('mouseup', up);
       }}>
       {ghost && <div className="dp-ghost" style={{top: (ghost.a - startM) * px, height: (ghost.b - ghost.a) * px}}>{label(ghost.a)} to {label(ghost.b)}</div>}
@@ -518,10 +520,11 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {plan.blocks.filter(b => mins(b.start) + b.minutes > startM).map(b => {
         const s = Math.max(startM, mins(b.start)), it = item(b), done = isDone(b), lane = lanes.get(b.id) ?? {i: 0, n: 1};
         const running = !!it && store.running?.itemId === it.id;
-        return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '')} draggable
+        const bc = b.color ? GCAL_COLORS[b.color]?.[1] : undefined;
+        return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '') + (bc ? ' colored' : '')} draggable
           onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }}
           onDragEnd={() => { dragging.current = null; setDropGhost(null); }}
-          style={place(s, b.minutes, lane)}
+          style={{...place(s, b.minutes, lane), ...(bc && !done ? {'--bc': bc} as React.CSSProperties : {})}}
           onClick={e => { if ((e.target as HTMLElement).closest('button, a, .dp-btitle-link')) return; if (it) open(it.id); else setEditing(b.id); }}
           title={it ? 'Click to open the task (notes, status, people). The clock opens this time slot' : 'Click to edit this time slot'}>
           <div className="dp-brow">
@@ -574,7 +577,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const openCalendar = async (b: Block) => {
     if (b.eventId) { try { setEvEdit({event: await api<FullEvent>(`/meetings/${b.eventId}`), boxId: b.id}); return; } catch { /* the event is gone: make a new one */ } }
     const it = item(b), s0 = new Date(b.at ?? atOf(date, b.start));
-    setEvEdit({boxId: b.id, draft: {title: it?.title ?? b.text, start: s0.toISOString(), end: new Date(s0.getTime() + b.minutes * 60000).toISOString(), itemId: b.itemId ?? null,
+    setEvEdit({boxId: b.id, draft: {color: b.color ?? null, title: it?.title ?? b.text, start: s0.toISOString(), end: new Date(s0.getTime() + b.minutes * 60000).toISOString(), itemId: b.itemId ?? null,
       body: [b.note, ...(b.links ?? []).map(id => store.items.get(id)).filter(Boolean).map(x => `- ${itemKey(x!, store.projects)} ${x!.title}`)].filter(Boolean).join('\n')}});
   };
   const editor = eb && <BoxEditor key={eb.id} store={store} b={eb} date={date} space={space} open={open} onCalendar={() => openCalendar(eb)}
@@ -655,16 +658,22 @@ function BoxEditor({store, b, date, space, open, patch, remove, close, onCalenda
   const found = q.trim().length < 2 ? [] : [...store.items.values()].filter(i => !i.recur?.spawned && i.id !== b.itemId && !(b.links ?? []).includes(i.id) &&
     (itemKey(i, store.projects).toLowerCase() === q.trim().toLowerCase() || i.title.toLowerCase().includes(q.trim().toLowerCase()))).sort((a, c) => Number(!!a.completed) - Number(!!c.completed)).slice(0, 8);
   const s = mins(b.start);
+  const [title, setTitle] = useState(it?.title ?? b.text);
   const makeTask = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
-    if (!pid || !b.text.trim()) return;
-    const made = await store.quickAdd(pid, b.text);
+    if (!pid || !title.trim()) return;
+    const made = await store.quickAdd(pid, title.trim());
     if (made) { if (!made.assignees.length) store.updateItem(made.id, {assignees: [store.me]}); patch({itemId: made.id, text: made.title}); }
   };
   return <div className="dp-editor" onMouseDown={e => e.stopPropagation()}>
     <div className="row"><b className="grow">Time box</b><button className="icon" onClick={close} title="Close"><X size={14} /></button></div>
-    <input className="plain-input dp-etitle" autoFocus={!it} placeholder="What is it? (Lunch, Call Tim, Team meeting)" defaultValue={it?.title ?? b.text}
-      onBlur={e => { const v = e.target.value.trim(); if (it) { if (v && v !== it.title) store.updateItem(it.id, {title: v}); } else if (v !== b.text) patch({text: v}); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+    <input className="plain-input dp-etitle" autoFocus={!it} placeholder="What is it? (Lunch, Call Tim, Team meeting)" value={title}
+      onChange={e => { setTitle(e.target.value); if (!it) patch({text: e.target.value}); }}
+      onBlur={e => { const v = e.target.value.trim(); if (it && v && v !== it.title) store.updateItem(it.id, {title: v}); }} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+    <div className="row"><span className="muted small">Color</span>
+      <button className={'ev-color' + (!b.color ? ' on' : '')} title="Default" onClick={() => patch({color: null})} style={{background: 'var(--accent)'}} />
+      {Object.entries(GCAL_COLORS).map(([id, [name, hex]]) => <button key={id} className={'ev-color' + (b.color === id ? ' on' : '')} title={name} onClick={() => patch({color: id})} style={{background: hex}} />)}
+    </div>
     {it && <button className="btn ghost small" onClick={() => open(it.id)} title="Open the full task"><span className="dp-key">{itemKey(it, store.projects)}</span> Open task</button>}
     <div className="row">
       <input type="time" className="plain-input" value={b.start} step={300} onChange={e => e.target.value && patch({start: e.target.value, at: new Date(`${date}T${e.target.value}:00`).toISOString()})} />
@@ -684,7 +693,7 @@ function BoxEditor({store, b, date, space, open, patch, remove, close, onCalenda
       {found.map(i => <button key={i.id} className="pop-row small" onClick={() => { patch({links: [...(b.links ?? []), i.id]}); setQ(''); }}>{itemKey(i, store.projects)} {i.title}{i.completed ? ' (done)' : ''}</button>)}
     </div>
     <div className="row">
-      {!it && <button className="btn small" disabled={!b.text.trim()} onClick={makeTask} title="Make this box a task (quick-add works)"><ListPlus size={12} /> Make it a task</button>}
+      {!it && <button className="btn small" disabled={!title.trim()} onClick={makeTask} title="Make this box a task (quick-add works)"><ListPlus size={12} /> Make it a task</button>}
       <button className="btn small" onClick={onCalendar} title="The full calendar editor: guests, Google Meet link, repeats, color, and Open in Google Calendar">{b.eventId ? <><CalendarClock size={12} /> Calendar event</> : <><CalendarPlus size={12} /> Add to calendar</>}</button>
       <span className="spacer" />
       <button className="btn small danger" onClick={remove}><Trash2 size={12} /> Remove</button>

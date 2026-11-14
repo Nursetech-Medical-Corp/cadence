@@ -19,7 +19,9 @@ export type Block = Entry & {start: string; minutes: number; at?: string | null;
   /** Where the box was planned before it was fitted to logged time, so the plan stays visible and can come back. */
   planned?: {start: string; minutes: number} | null;
   /** Fitted to time logged with timers. */
-  fitted?: boolean};
+  fitted?: boolean;
+  /** Box color: a Google Calendar color id, 1 to 11 (kept when the box becomes a calendar event). */
+  color?: string | null};
 /** tz: the time zone the day is planned in (IANA, like America/Denver). Box times are wall-clock times there. */
 export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; tz: string; updated: string | null};
 
@@ -88,7 +90,7 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
       return {...e, start: b.start, minutes, at: momentOf(b.start), remind: !!b.remind, ...(notified ? {notified: true} : {}),
         ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {}),
-        ...(b.planned && TIME.test(String(b.planned.start)) && Number(b.planned.minutes) > 0 ? {planned: {start: b.planned.start, minutes: Math.round(Number(b.planned.minutes))}} : {}), ...(b.fitted ? {fitted: true} : {})};
+        ...(b.planned && TIME.test(String(b.planned.start)) && Number(b.planned.minutes) > 0 ? {planned: {start: b.planned.start, minutes: Math.round(Number(b.planned.minutes))}} : {}), ...(b.fitted ? {fitted: true} : {}), ...(b.color && /^([1-9]|1[01])$/.test(String(b.color)) ? {color: String(b.color)} : {})};
     });
   }
   if (patch.dayStart !== undefined || patch.dayEnd !== undefined) {

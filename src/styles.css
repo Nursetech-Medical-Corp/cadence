@@ -1755,3 +1755,8 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 /* Section titles sit just above their frame, as in Claude Whiteboards, so they never collide with what is inside. */
 .wb-node.k-frame { overflow: visible; }
 .wb-node.k-frame .wb-frame-title { position: absolute; left: 4px; bottom: calc(100% + 6px); font-size: 20px; font-weight: 700; color: var(--text); white-space: nowrap; }
+
+/* Day planner: no text selection on the day (no stray text cursor), colored boxes */
+.dp-grid, .dp-hour, .dp-half, .dp-ghost, .dp-dayhead { user-select: none; -webkit-user-select: none; }
+.dp-hour { cursor: default; pointer-events: none; }
+.dp-block.colored:not(.done) { background: color-mix(in srgb, var(--bc) 20%, var(--card)); border-color: color-mix(in srgb, var(--bc) 55%, transparent); border-left-color: var(--bc); }

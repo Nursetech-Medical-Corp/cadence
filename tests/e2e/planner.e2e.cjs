@@ -200,6 +200,27 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     check('clicking a calendar event opens it in the full editor', await page.locator('.ev-editor').isVisible() && (await page.locator('.ev-editor .ev-color.on[title="Tomato"]').count()) === 1);
     await page.keyboard.press('Escape'); await wait(200);
 
+    // 16. Making a box by dragging: up or down, title enables Make it a task while typing, colors carry to the calendar; no text cursor on the hours.
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(700);
+    check('the hours cannot be selected like text', await page.locator('.dp-grid').evaluate(el => getComputedStyle(el).userSelect === 'none'));
+    const g16 = await page.locator('.dp-grid').boundingBox();
+    const n16 = (await plan()).blocks.length;
+    const yAt = async m => { const top = await page.locator('.dp-slot').first().evaluate(el => el.getBoundingClientRect().top); const first = await page.locator('.dp-slot').first().evaluate(el => el.getAttribute('style')); void first; return top; };
+    void yAt;
+    const box20 = await page.locator('.dp-hour', {hasText: /^8pm$/}).boundingBox();
+    await page.mouse.move(g16.x + 400, box20.y + 30); await page.mouse.down(); await page.mouse.move(g16.x + 400, box20.y - 60, {steps: 8}); await page.mouse.up(); await wait(600);
+    const made16 = (await plan()).blocks.slice(n16)[0];
+    check('dragging upward makes a box that ends where you pressed', made16 && made16.minutes >= 60 && mins(made16.start) < 20 * 60, JSON.stringify(made16));
+    await page.locator('.dp-editor .dp-etitle').fill('Laundry'); await wait(150);
+    check('Make it a task turns on while you type the title', await page.locator('.dp-editor').getByRole('button', {name: /Make it a task/}).isEnabled());
+    await page.locator('.dp-editor .ev-color[title="Tomato"]').click(); await wait(900);
+    const col16 = (await plan()).blocks.find(b => b.id === made16.id);
+    check('a box takes a color', col16?.color === '11' && col16?.text === 'Laundry', JSON.stringify(col16));
+    check('the colored box shows it', (await page.locator('.dp-block.colored', {hasText: 'Laundry'}).count()) === 1);
+    await page.locator('.dp-editor').getByRole('button', {name: /Add to calendar/}).click(); await wait(400);
+    check('its color carries into the calendar editor', (await page.locator('.ev-editor .ev-color.on[title="Tomato"]').count()) === 1);
+    await page.keyboard.press('Escape'); await wait(200);
+
     // 14. Each view keeps the week row, Today and the day arrows (they stay put while the hours scroll).
     for (const view of ['columns', 'horizontal', 'focus']) {
       await page.evaluate(v => localStorage.setItem('day-design', v), view); await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);
