@@ -83,6 +83,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
 | Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
 | SOP links | `list_sop_links`, `set_sop_links` (admins) |
+| Sub-spaces | `create_subspace` (tasks, pipeline or contact list under a space); `update_project` takes `parent` and `records` |
 | Day planner | `get_day_plan`, `update_day_plan` (top 3, brain dump, time boxes with reminders), `schedule_day` (fill the day from a time) |
 | Whiteboards | `list_boards`, `get_board`, `create_board`, `update_board` (add, change, remove nodes and connections), `delete_board`, `board_from_items` (routines by SOP, a tag, a parent, items), `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` (cancel, retry, skip) |
 | Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |

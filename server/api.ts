@@ -863,6 +863,8 @@ If you did not ask for it, ignore this email.`)
           if (body.personal) { if (!actor) throw new Denied('Sign in first'); return send(res, 201, tasks.createProject({...body, settings: {...body.settings, access: personalAccess(actor)}})); }
           needAdmin(); return send(res, 201, tasks.createProject(body));
         }
+        // Sub-spaces: the parent's settings permission is enough; the new space starts with the parent's access.
+        if (b && c === 'subspaces' && m === 'POST') { need(b, 'settings'); return send(res, 201, tasks.createSubspace(b, {name: String(body.name ?? ''), kind: body.kind, key: body.key})); }
         if (b && c === 'files' && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.projectFiles(b)); }
         if (b && c === 'file-tasks' && m === 'POST') { need(b, 'create'); return send(res, 201, tasks.fileTask(b, actor, {name: String(body.name ?? 'file'), mime: String(body.mime ?? ''), data: String(body.data ?? ''), parentId: body.parentId ?? null, status: body.status})); }
         if (b && !c && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.project(b)); }

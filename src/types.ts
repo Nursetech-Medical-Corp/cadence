@@ -64,6 +64,11 @@ export type ProjectSettings = {
    *  scope makes it a built-in space that is always there: 'routines' (every repeating item, paused and waiting ones too)
    *  or 'parked' (archived and snoozed items). Built-in spaces cannot be deleted. */
   rollup?: {include: string[] | null; scope?: 'routines' | 'parked'};
+  /** Sub-space: shown under this parent space in the sidebar. */
+  parent?: string | null;
+  /** A list space (a pipeline of investors, a contact list): its entries are records, not tasks, so they stay out of
+   *  All spaces and other rollups (unless a rollup picks the space by name), My work, the day planner and due reminders. */
+  records?: boolean;
 };
 
 export type TypeRule = {

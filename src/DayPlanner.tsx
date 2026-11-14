@@ -92,7 +92,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     if (it) { const p = store.projects.find(x => x.id === it.projectId)!; const doneS = p.statuses.find(s => s.category === 'done')?.id, todoS = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id; store.updateItem(it.id, {status: it.completed ? todoS : doneS ?? todoS}); return; }
     save({...plan, [list]: (plan[list] as Entry[]).map(x => x.id === e.id ? {...x, done: !x.done} : x)});
   };
-  const mine = [...store.items.values()].filter(i => i.assignees.includes(me) && !i.completed && i.due && i.due <= date && !i.recur?.paused && !i.recur?.waiting && !(i.fields as {archived?: unknown}).archived)
+  const listSpaces = new Set(store.projects.filter(p => p.settings.records).map(p => p.id));
+  const mine = [...store.items.values()].filter(i => !listSpaces.has(i.projectId) && i.assignees.includes(me) && !i.completed && i.due && i.due <= date && !i.recur?.paused && !i.recur?.waiting && !(i.fields as {archived?: unknown}).archived)
     .sort((a, b) => (a.due ?? '').localeCompare(b.due ?? '') || (a.priority || 9) - (b.priority || 9));
   const doneToday = [...store.items.values()].filter(i => i.assignees.includes(me) && i.completed?.slice(0, 10) === date);
 

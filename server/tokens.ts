@@ -61,6 +61,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     dayPlan: (person) => self(person, 'read day plans'),
     updateDayPlan: (person) => self(person, 'plan days'),
     autoSchedule: (person) => self(person, 'plan days'),
+    createSubspace: (pid) => need(pid, 'settings'),
     createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
     updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
     deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },

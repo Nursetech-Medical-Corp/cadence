@@ -258,6 +258,34 @@ export class Tasks {
     this.event('project.created', {projectId: p.id});
     return p;
   }
+  /**
+   * A space under another space. kind 'tasks' is a normal space nested in the sidebar. 'pipeline' and 'contacts' are list
+   * spaces (records, not tasks) with stages, contact columns and Board, Table and Calendar views; the parent gets a
+   * relation column so its tasks can point at the records (which investor a task is about).
+   */
+  createSubspace(parentId: string, input: {name: string; kind?: 'tasks' | 'pipeline' | 'contacts'; key?: string}) {
+    const parent = this.project(parentId);
+    if (parent.settings.rollup) throw new Invalid('A rollup cannot hold sub-spaces');
+    const kind = input.kind ?? 'tasks';
+    if (!['tasks', 'pipeline', 'contacts'].includes(kind)) throw new Invalid('kind must be tasks, pipeline or contacts');
+    const settings: Partial<ProjectSettings> = {parent: parent.id, ...(parent.settings.access ? {access: parent.settings.access} : {}), ...(kind !== 'tasks' ? {records: true, icon: kind === 'pipeline' ? 'lucide:Target' : 'lucide:Users'} : {})};
+    if (kind === 'tasks') return this.createProject({name: input.name, key: input.key, settings});
+    const st = (id: string, name: string, category: Status['category'], color: string): Status => ({id, name, category, color});
+    const statuses = kind === 'pipeline'
+      ? [st('lead', 'To contact', 'todo', '#94a3b8'), st('contacted', 'Contacted', 'doing', '#3b82f6'), st('meeting', 'Meeting', 'doing', '#a855f7'), st('committed', 'Committed', 'done', '#22c55e'), st('passed', 'Passed', 'done', '#ef4444')]
+      : [st('new', 'New', 'todo', '#94a3b8'), st('reached', 'Reached', 'doing', '#3b82f6'), st('following', 'Following up', 'doing', '#f59e0b'), st('closed', 'Closed', 'done', '#22c55e')];
+    const fields: FieldDef[] = [{id: 'company', name: 'Company', kind: 'text'}, {id: 'email', name: 'Email', kind: 'email'}, {id: 'phone', name: 'Phone', kind: 'phone'},
+      ...(kind === 'pipeline' ? [{id: 'amount', name: 'Amount', kind: 'money', currency: 'USD'} as FieldDef] : []),
+      {id: 'last', name: 'Last contact', kind: 'date'}, {id: 'next', name: 'Next step', kind: 'text'}, {id: 'touches', name: 'Times contacted', kind: 'number'}];
+    const p = this.createProject({name: input.name, key: input.key, statuses, types: [kind === 'pipeline' ? 'Contact' : 'Person'], fields, settings, noViews: true});
+    ([[kind === 'pipeline' ? 'Pipeline' : 'Board', 'board', {groupBy: 'status', hideDone: false}], ['Table', 'table', {calcs: kind === 'pipeline' ? {'f:amount': 'sum'} : {}}], ['Calendar', 'calendar', {}]] as [string, ViewKind, ViewConfig][])
+      .forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config, sort: i}));
+    // The parent's tasks can point at these records.
+    if (!parent.fields.some(f => f.id === `rel-${p.id}`)) this.updateProject(parent.id, {fields: [...parent.fields, {id: `rel-${p.id}`, name: p.name, kind: 'relation'}]});
+    return p;
+  }
+  /** Spaces whose entries are records, not tasks. */
+  recordSpaces() { return new Set(this.listProjects().filter(p => p.settings.records).map(p => p.id)); }
   /** A project whose views show work from other projects together (All projects, or the ones chosen in its settings). */
   createRollup(name = 'All spaces') {
     const min = Math.min(0, ...this.listProjects().map(p => p.sort));
@@ -296,6 +324,13 @@ export class Tasks {
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
+    if (patch.settings && 'parent' in patch.settings && p.settings.parent) {
+      if (p.settings.parent === pid) throw new Invalid('A space cannot sit under itself');
+      const par = this.project(p.settings.parent);
+      if (par.settings.rollup) throw new Invalid('A space cannot sit under a rollup');
+      if (par.settings.parent) throw new Invalid(`${par.name} is already a sub-space. Sub-spaces go one level deep.`);
+      if (this.listProjects().some(x => x.settings.parent === pid)) throw new Invalid(`${cur.name} has sub-spaces of its own, so it cannot move under another space`);
+    }
     if (patch.key !== undefined) {
       p.key = String(p.key).toUpperCase();
       if (!/^[A-Z][A-Z0-9]{1,9}$/.test(p.key)) throw new Invalid('A space key is 2 to 10 letters or digits, starting with a letter, like GEN');
@@ -909,7 +944,8 @@ export class Tasks {
   // My Work: open items assigned to a person, bucketed by due date.
   myWork(person: string) {
     const today = this.today(), week = addUnit(today, 7, 'day');
-    const items = this.listItems({assignee: person, open: true});
+    const rec = this.recordSpaces();
+    const items = this.listItems({assignee: person, open: true}).filter(i => !rec.has(i.projectId));
     const bucket = (i: Item) => !i.due ? 'noDate' : i.due < today ? 'overdue' : i.due === today ? 'today' : i.due <= week ? 'thisWeek' : 'later';
     const out: Record<string, Item[]> = {overdue: [], today: [], thisWeek: [], later: [], noDate: []};
     for (const i of items) out[bucket(i)].push(i);
@@ -1061,8 +1097,9 @@ export class Tasks {
     const ref = (i: Item) => `${keys.get(i.projectId)}-${i.number}: ${i.title}`;
     if (now.getHours() >= 8 && now.getHours() < 20) {
       const today = this.today(), tomorrow = addUnit(today, 1, 'day');
+      const rec = this.recordSpaces();
       for (const i of this.listItems({open: true})) {
-        if (!i.due || i.due > tomorrow) continue;
+        if (!i.due || i.due > tomorrow || rec.has(i.projectId)) continue;
         const [kind, text, since] = i.due < today ? ['overdue', `${ref(i)} is overdue (due ${i.due})`, ''] : ['due', `${ref(i)} is due ${i.due === today ? 'today' : 'tomorrow'}`, today];
         for (const a of i.assignees) if (!sent(a, i.id, kind, since)) this.notify(a, null, i.id, kind, text);
       }

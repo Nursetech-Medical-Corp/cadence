@@ -1682,3 +1682,7 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-field { display: flex; flex-direction: column; gap: 4px; }
 .d-focus .dp-left details > summary { margin-top: 14px; }
 .d-focus .dp-left details .dp-sec h4 { display: none; }
+
+/* Sub-spaces sit indented under their parent in the sidebar. */
+.proj-row[data-sub] { padding-left: 14px; position: relative; }
+.proj-row[data-sub]::before { content: ''; position: absolute; left: 14px; top: 0; bottom: 50%; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); border-bottom-left-radius: 4px; }

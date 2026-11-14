@@ -61,6 +61,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Views (list, table, board, timeline, calendar, backlog, sprint, files) | Tabs under each space; double-click a tab name in the sidebar to rename it | `list_views`, `create_view`, `update_view` (name, filters, sorts, grouping, columns, color rules), `reorder_views`, `delete_view` |
 | Routines | Built-in Routines space: Routines view (by SOP, switches, skip, delay, wait), plus Table, Board, Timeline, Calendar and Workload. A "Routine" chip in a task's header and a repeat mark on its type open it there | `list_routines`, `set_routine` |
 | Archive and later | Built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
+| Sub-spaces and list spaces | Space ... menu: Add a sub-space (Tasks, Pipeline, Contact list); Settings: Sub-space and list card | `create_subspace`, `update_project` (`parent`, `records`) |
 | Day planner | Day planner page, right under My work: top 3, brain dump, today and overdue, a day of time boxes | `get_day_plan`, `update_day_plan`, `schedule_day` |
 | Whiteboards | Whiteboards page (Workspace section), a Whiteboard view in any space (the Routines space can draw every routine), Whiteboards row in a task | `list_boards`, `get_board`, `create_board`, `update_board`, `delete_board`, `board_from_items`, `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` |
 | SOP links | SOP chips on tagged tasks; SOP column on Routines | `list_sop_links`, `set_sop_links` (admins) |
@@ -112,6 +113,14 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `snooze_item` with `until` (YYYY-MM-DD): hidden until that day, then back in its lists. Use it to "decide later".
 - `list_parked` shows archived and snoozed items; `restore_item` brings one back. Stored in `fields.archived` and `fields.snooze`.
 - Never delete an idea someone may want later: archive it.
+
+## Sub-spaces and list spaces
+
+- A sub-space is a space with `settings.parent` set: it shows under its parent in the sidebar. One level deep.
+- A list space (`settings.records: true`) holds records, not tasks: investors in a pipeline, distributors or leads to reach once or a few times. It has its own views and statuses, but is left out of All spaces (and other rollups that take every space), My work, the day planner and due reminders. A rollup that names the space still shows it. The built-in Routines space still shows routines from it.
+- `create_subspace` with `kind`: `tasks` (a normal nested space), `pipeline` (stages To contact, Contacted, Meeting, Committed, Passed; Amount; Board, Table with a total, Calendar) or `contacts` (New, Reached, Following up, Closed). Both list kinds get Company, Email, Phone, Last contact, Next step and Times contacted columns.
+- The parent space gets a relation column named after the list, so a task there ("Send deck") can point at the records it is about. A routine (like a weekly pipeline check) lives in the parent space as a normal task.
+- Move a space with `update_project` `parent` (null for top level); turn list mode on or off with `records`.
 
 ## Day planner
 
@@ -187,6 +196,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - Day planner (your own): `GET /api/day/:date`, `PUT /api/day/:date` `{top?, dump?, blocks?, dayStart?, dayEnd?, slot?}`, `POST /api/day/:date/auto` `{from?, offsetMinutes?, include?}`
 - Whiteboards: `GET /api/boards?projectId=&itemId=`, `POST /api/boards` `{name, projectId?, nodes, edges, webhooks?}`, `GET|PATCH|DELETE /api/boards/:id` (PATCH also takes `addNodes`, `updateNodes`, `removeNodes`, `addEdges`, `removeEdges`, `rotateKey`), `POST /api/boards/from-items` `{routines?|tag?|parentId?|itemIds?, name?, projectId?}`, `POST /api/boards/:id/to-tasks` `{projectId?, parentId?}`, `POST /api/boards/:id/run` `{input?, title?}`, `GET /api/boards/:id/runs`, `GET /api/boards/runs/:runId`, `POST /api/boards/runs/:runId/act` `{action: cancel|retry|skip, node?}`, inbound `POST /api/hooks/<hookKey>?ws=` (no sign-in; the key is the secret)
 - `GET /api/sops`; `PUT /api/sops` `{links: [{code, url, title}]}` (admins)
+- `POST /api/projects/:id/subspaces` `{name, kind: tasks|pipeline|contacts}` (needs settings permission on the parent)
 - `PATCH /api/projects/:id` `{name?, key?, statuses?, types?, fields?}`
 - `GET /api/calendar.ics?person=|project=` calendar feed; `GET /api/export` full JSON without personal spaces (admins)
 - `GET /api/team` people (with `jobRoles`), levels, `jobRoles`, `domainJoin` (admins; others get names); `PUT /api/workspace` `{jobRoles: [{id?, name, spaces: {spaceId: levelId|none}, others}], domainJoin: {domains, level, jobRoles}}` (admins); `PATCH /api/team/:id` `{jobRoles: [ids]}` (admins); `POST /api/invites` `{email, role, jobRoles?}`

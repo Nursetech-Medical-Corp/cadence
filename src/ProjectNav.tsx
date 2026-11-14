@@ -2,7 +2,7 @@
 // and the rollup project that shows work from many projects together.
 import {projectsFor, saveMode} from './customize.ts';
 import {useMemo, useState} from 'react';
-import {GripVertical, LayoutTemplate, Layers, MoreHorizontal, Search, Settings, X, type LucideIcon} from 'lucide-react';
+import {GripVertical, LayoutTemplate, Layers, MoreHorizontal, Plus, Search, Settings, X, type LucideIcon} from 'lucide-react';
 // Only the icons offered in the kit are bundled (importing the whole icon set would add about 1 MB).
 import {Rocket, Briefcase, House, Heart, Star, Flag, Target, Megaphone, ShoppingCart, Truck, Package, Wrench, Code, Cpu, Database, Shield, Stethoscope, HeartPulse, Pill, Syringe, FlaskConical, BookOpen, GraduationCap, Users, DollarSign, PiggyBank, Scale, Gavel, FileText, ClipboardList, Calendar, Camera, Music, Palette, Plane, Leaf, Lightbulb, Zap, Globe, Bot, Sparkles, Coffee} from 'lucide-react';
 import type {Project} from './types.ts';
@@ -77,12 +77,13 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     const grip = !q && !fav ? <span className="proj-grip" title="Drag to reorder"><GripVertical size={12} /></span> : <span className="proj-grip blank" />;
     const star = <button className={'proj-star' + (favs.includes(p.id) ? ' on' : '')} title={favs.includes(p.id) ? 'Remove from favorites' : 'Add to favorites'} onClick={e => { e.stopPropagation(); toggleFav(p.id); }} onKeyDown={e => e.stopPropagation()}><Star size={12} /></button>;
     const icon = <IconKit store={store} project={p} index={n} />;
-    const menu = <ProjectMenu project={p} />;
+    const menu = <ProjectMenu store={store} project={p} />;
     return (
       <div key={(fav ? 'f' : '') + p.id} className={'proj-row' + (drag === p.id ? ' dragging' : '') + (over?.id === p.id ? (over.after ? ' drop-after' : ' drop-before') : '') + (p.id === activeId ? ' current' : '')}
         draggable={!q && !fav} onDragStart={e => { setDrag(p.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => { setDrag(null); setOver(null); }}
         onDragOver={e => { if (!drag || fav) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setOver({id: p.id, after: e.clientY > r.top + Math.min(r.height, 32) / 2}); }}
-        onDrop={e => { e.preventDefault(); if (over) drop(over.id, over.after); setDrag(null); setOver(null); }}>
+        onDrop={e => { e.preventDefault(); if (over) drop(over.id, over.after); setDrag(null); setOver(null); }}
+        data-sub={!fav && !q && p.settings.parent && store.projects.some(x => x.id === p.settings.parent) ? '1' : undefined}>
         {render(p, n, {grip, star, icon, menu})}
       </div>
     );
@@ -97,7 +98,10 @@ export function ProjectList({store, activeId, render}: {store: Store; activeId: 
     {(() => {
       // Shared spaces first, then the ones only you (and people you share with) can see, like Google Drive.
       // Built-in spaces (Routines, Archive and later) are reached from the Workspace section, not listed here.
-      const rest = shown.filter(p => !p.settings.rollup?.scope);
+      // Sub-spaces sit right under their parent (while searching, every match is listed flat).
+      const all = shown.filter(p => !p.settings.rollup?.scope);
+      const ids = new Set(all.map(p => p.id));
+      const rest = q ? all : all.filter(p => !p.settings.parent || !ids.has(p.settings.parent)).flatMap(p => [p, ...all.filter(c => c.settings.parent === p.id)]);
       const priv = rest.filter(p => p.settings.access?.private), team = rest.filter(p => !p.settings.access?.private);
       if (q || !priv.length) return rest.map(p => row(p, false));
       return <>{team.map(p => row(p, false))}<div className="nav-subhead" title="Personal spaces: only you and the people you share them with">Private to me</div>{priv.map(p => row(p, false))}</>;
@@ -118,8 +122,7 @@ export function rollupProject(rollup: Project, included: Project[]): Project {
   const fields = [...new Map([rollup, ...included].flatMap(p => p.fields).map(f => [f.id, f])).values()];
   return {...rollup, statuses, types, fields};
 }
-export const includedIn = (rollup: Project, all: Project[]) =>
-  all.filter(p => p.id !== rollup.id && !isRollup(p) && (!rollup.settings.rollup!.include || rollup.settings.rollup!.include.includes(p.id)));
+export {includedIn} from './rollup.ts';
 
 /** Settings card: which projects a rollup shows. */
 export function RollupCard({store, project}: {store: Store; project: Project}) {
@@ -141,8 +144,14 @@ export function RollupCard({store, project}: {store: Store; project: Project}) {
 }
 
 /** Project ... menu in the sidebar: settings and Save as template (setup only, or with its items). */
-function ProjectMenu({project}: {project: Project}) {
+function ProjectMenu({store, project}: {store: Store; project: Project}) {
   const [open, setOpen] = useState(false);
+  const sub = async (kind: 'tasks' | 'pipeline' | 'contacts') => {
+    setOpen(false);
+    const name = prompt(kind === 'pipeline' ? 'Name the pipeline (like Investors)' : kind === 'contacts' ? 'Name the list (like Distributors)' : 'Name the sub-space');
+    if (!name?.trim()) return;
+    try { const p = await api<Project>(`/projects/${project.id}/subspaces`, {method: 'POST', body: {name: name.trim(), kind}}); location.hash = `/p/${p.id}/`; } catch (e) { store.fail(e); }
+  };
   const save = async (includeItems: boolean) => {
     setOpen(false);
     try {
@@ -157,10 +166,33 @@ function ProjectMenu({project}: {project: Project}) {
         <button className="pop-row" onClick={() => { setOpen(false); location.hash = `/p/${project.id}/settings`; }}><Settings size={14} /> Settings</button>
         {!isRollup(project) && <>
           <div className="pop-sep" />
+          {!project.settings.parent && <>
+            <div className="pop-label">Add a sub-space</div>
+            <button className="pop-row" onClick={() => sub('tasks')} title="A normal space with tasks, shown under this one"><Plus size={14} /> Tasks</button>
+            <button className="pop-row" onClick={() => sub('pipeline')} title="Records, not tasks: stages from To contact to Committed, amount, contact columns. Kept out of All spaces and My work"><Target size={14} /> Pipeline (investors, deals)</button>
+            <button className="pop-row" onClick={() => sub('contacts')} title="Records, not tasks: people or companies to reach once or a few times. Kept out of All spaces and My work"><Users size={14} /> Contact list (distributors, leads)</button>
+            <div className="pop-sep" />
+          </>}
           <button className="pop-row" onClick={() => save(false)}><LayoutTemplate size={14} /> Save as template (setup only)</button>
           <button className="pop-row" onClick={() => save(true)}><LayoutTemplate size={14} /> Save as template with its items</button>
         </>}
       </Popover>
     </span>
+  );
+}
+
+/** Settings card: put this space under another one, and whether its entries are tasks or records (a list). */
+export function SubspaceCard({store, project}: {store: Store; project: Project}) {
+  const set = (patch: Partial<Project['settings']>) => store.updateProject(project.id, {settings: {...project.settings, ...patch}});
+  const hasKids = store.projects.some(p => p.settings.parent === project.id);
+  const parents = store.projects.filter(p => p.id !== project.id && !isRollup(p) && !p.settings.parent);
+  return (
+    <section className="set-card">
+      <div className="set-card-head"><h3>Sub-space and list</h3><span className="muted small">Put this space under another one in the sidebar. A list space holds records (investors, distributors, leads), not tasks.</span></div>
+      <label className="row">Under <select className="plain-select" disabled={hasKids} value={project.settings.parent ?? ''} onChange={e => set({parent: e.target.value || null})} title={hasKids ? 'This space has sub-spaces, so it stays at the top' : ''}>
+        <option value="">Top level</option>{parents.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!!project.settings.records} onChange={e => set({records: e.target.checked})} />
+        <span>List space: entries are records, not tasks <span className="muted small">(left out of All spaces, My work, the day planner and due reminders; routines and tasks elsewhere can still point at them)</span></span></label>
+    </section>
   );
 }

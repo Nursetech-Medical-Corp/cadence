@@ -92,7 +92,7 @@ export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoo
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes', 'triggerHook', 'setWebhooks',
-  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule']);
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'createSubspace']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {
   if (!isAgent(tasks, actor)) return false;

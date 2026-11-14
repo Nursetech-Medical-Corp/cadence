@@ -165,7 +165,14 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     statuses: z.array(z.object({id: z.string(), name: z.string(), category: z.enum(['todo', 'doing', 'done']), color: z.string()})).optional(),
     types: z.array(z.string()).optional(),
     fields: z.array(z.object({id: z.string(), name: z.string(), kind: z.enum(['text', 'number', 'select', 'multi', 'date', 'checkbox', 'person', 'url']), options: z.array(z.string()).optional()})).optional(),
-  }, false, i => { const {project, ...rest} = i; return tasks.updateProject(projectId(project), rest); });
+    parent: z.string().nullable().optional().describe('Put this space under another space (sub-space), or null for top level'),
+    records: z.boolean().optional().describe('true: a list space; its entries are records, not tasks, and stay out of All spaces, My work and reminders'),
+  }, false, i => { const {project, parent, records, ...rest} = i; const pid = projectId(project); const cur = tasks.project(pid);
+    const settings = parent !== undefined || records !== undefined ? {settings: {...cur.settings, ...(parent !== undefined ? {parent: parent ? projectId(parent) : null} : {}), ...(records !== undefined ? {records} : {})}} : {};
+    return tasks.updateProject(pid, {...rest, ...settings}); });
+  tool('create_subspace', 'Make a space under another space. kind tasks: a normal space nested in the sidebar. kind pipeline or contacts: a list space (investors, distributors, leads) whose entries are records, not tasks: stages, contact columns, Board, Table and Calendar views; kept out of All spaces, My work and reminders. The parent gets a relation column so its tasks can point at the records.',
+    {parent: z.string().describe('Parent space'), name: z.string(), kind: z.enum(['tasks', 'pipeline', 'contacts']).optional(), key: z.string().optional()}, false,
+    i => tasks.createSubspace(projectId(i.parent), {name: i.name, kind: i.kind, key: i.key}));
   tool('calendar_events', 'Events from the Google calendars this person connected (Team page, Google connections), between two dates. Use it to plan around meetings.', {from: z.string(), to: z.string()}, true,
     async i => { if (!actor) throw new Error('Run as a person to read their calendar'); return events(tasks.db, actor, i.from, i.to); });
   // ---- Meetings and calendar events (synced with Google Calendar when the organizer connected one) ----
