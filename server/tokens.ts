@@ -48,6 +48,8 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const isAdmin = () => !!(tasks.db.prepare('select admin from people where id = ?').get(actor) as {admin: number} | undefined)?.admin;
   const self = (person: string, what: string) => { if (person !== actor) throw new Forbidden(`You can only ${what} your own`); };
   const selfOrAdmin = (person: string, what: string) => { if (person !== actor && !isAdmin()) throw new Forbidden(`Only admins ${what} for others`); };
+  // Workspace endpoints hear every space, so they are for admins; a space's own need the settings permission there.
+  const hooks = (scope: string) => { if (scope === 'workspace') { if (!isAdmin()) throw new Forbidden('Only admins manage workspace webhooks'); } else need(scope, 'settings'); };
   const checks: Record<string, (...a: any[]) => void> = {
     createItem: (i) => { need(i.projectId, 'create'); for (const d of i.deps ?? []) need(projOfItem(d), 'view'); },
     quickAdd: (i) => need(i.projectId, 'create'),
@@ -110,6 +112,11 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     fileTask: (pid) => need(pid, 'create'),
     projectFiles: (pid) => need(pid, 'view'),
     workLog: (id) => need(projOfItem(id), 'view'),
+    workArtifacts: (id) => need(projOfItem(id), 'view'),
+    workFeedback: (id) => need(projOfItem(id), 'view'),
+    confirmCleanup: (id) => need(projOfItem(id), 'comment'),
+    triggerHook: (pid, _key, opts) => { need(pid, 'edit'); if (opts?.item) need(projOfItem(opts.item), 'view'); },
+    webhooks: (scope) => hooks(scope), setWebhooks: (scope) => hooks(scope), testWebhook: (scope) => hooks(scope), hookDeliveries: (scope) => hooks(scope),
     itemFiles: (id) => need(projOfItem(id), 'view'),
     listComments: (id) => need(projOfItem(id), 'view'),
     approvalState: (id) => need(projOfItem(id), 'view'),

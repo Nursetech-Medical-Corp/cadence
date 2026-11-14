@@ -1,4 +1,5 @@
 // Shared by server, MCP and UI.
+import type {Hook} from './hooks.ts';
 
 export type StatusCategory = 'todo' | 'doing' | 'done';
 export type Status = {id: string; name: string; category: StatusCategory; color: string; wip?: number | null};
@@ -46,7 +47,8 @@ export type ProjectSettings = {
   cover?: Cover | null;
   inherit: InheritKey[];
   automations: Rule[];
-  webhooks: {id: string; url: string; events: string[]}[];
+  /** Endpoints that receive this space's events (src/hooks.ts). Older ones are {id, url, events} only. */
+  webhooks: (Partial<Hook> & {id: string; url: string; events: string[]})[];
   autoRollover: boolean;           // move unfinished work when a sprint ends
   /** Who can do what here: a default role for everyone (or 'inherit' their workspace role, or 'none'), plus per-person roles. */
   access?: {default: string; members: Record<string, string>; private?: boolean};
@@ -77,7 +79,16 @@ export type Trigger =
   | {kind: 'status'; to: string}            // status changes to
   | {kind: 'assigned'}                      // someone is added as assignee
   | {kind: 'completed'}
-  | {kind: 'due-passed'};                   // checked hourly
+  | {kind: 'due-passed'}                    // checked hourly, once per due date
+  | {kind: 'due-soon'; days: number}        // due within this many days (hourly, once per due date)
+  | {kind: 'due-today'}
+  | {kind: 'overdue-by'; days: number}      // this many days past due
+  | {kind: 'start-reached'}                 // start date is today or earlier
+  | {kind: 'unassigned'}                    // someone is removed as assignee
+  | {kind: 'comment-added'}
+  | {kind: 'review'; to: string}            // AI review state reached: claimed, accepted, submitted, changes, redo, approved, declined, discarded
+  | {kind: 'routine-resumed'}               // a waiting or paused routine starts again
+  | {kind: 'webhook-received'; key: string}; // POST /api/hooks/in/trigger with this key
 export type Condition = {field: 'type' | 'priority' | 'tag' | 'assignee' | 'parent-type'; value: string};
 export type Action =
   | {kind: 'status'; value: string}
@@ -88,7 +99,9 @@ export type Action =
   | {kind: 'due'; value: number}            // days from today
   | {kind: 'notify'; value: string}         // person id, or "assignees" / "creator"
   | {kind: 'template'; value: string}       // add subitems from an item template
-  | {kind: 'parent-status'; value: string}; // set the parent's status (e.g. close story when all tasks close)
+  | {kind: 'parent-status'; value: string}  // set the parent's status (e.g. close story when all tasks close)
+  | {kind: 'webhook'; value: string; secret?: string; hasSecret?: boolean} // POST the item to a URL (signed when a secret is set)
+  | {kind: 'routine-resume'};               // start a waiting or paused routine now
 export type Rule = {id: string; name: string; enabled: boolean; trigger: Trigger; conditions: Condition[]; actions: Action[]; allChildrenDone?: boolean};
 
 export type Template = {id: string; kind: 'item' | 'project' | 'view'; name: string; projectId: string | null; data: unknown; created: string};
