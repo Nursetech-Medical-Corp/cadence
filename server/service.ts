@@ -15,6 +15,7 @@ export {Invalid, NotFound};
 import * as planner from './planner.ts';
 import * as ai from './aiwork.ts';
 import * as approvals from './approvals.ts';
+import * as boards from './boards.ts';
 import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateData} from './packs.ts';
 import {apply as applyRule, matches as ruleMatches, type RuleHost} from './automations.ts';
 import {PRIORITIES} from '../src/types.ts';
@@ -252,7 +253,7 @@ export class Tasks {
   ensureSystemSpaces() {
     const made: Project[] = [];
     const spaces: [NonNullable<NonNullable<ProjectSettings['rollup']>['scope']>, string, string, string, [string, ViewKind, ViewConfig?][]][] = [
-      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}]]],
+      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}], ['Whiteboard', 'whiteboard']]],
       ['parked', 'Archive and later', 'ARC', 'lucide:Archive', [['Table', 'table'], ['List', 'list'], ['Board', 'board', {groupBy: 'assignee'}]]],
     ];
     for (const [scope, name, key0, icon, views] of spaces) {
@@ -264,6 +265,14 @@ export class Tasks {
       views.forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config: config ?? {}, sort: i}));
       made.push(this.updateProject(p.id, {sort: max + 1}));
     }
+    // Routines spaces made before whiteboards get a Whiteboard view, once (deleting it is respected).
+    const rt = this.listProjects().find(p => p.settings.rollup?.scope === 'routines');
+    try {
+      if (rt && !this.db.prepare("select 1 from workspace where key = 'routines-whiteboard'").get()) {
+        if (!this.listViews(rt.id).some(v => v.kind === 'whiteboard')) this.createView({projectId: rt.id, name: 'Whiteboard', kind: 'whiteboard', config: {}});
+        this.db.prepare("insert into workspace (key, value) values ('routines-whiteboard', '1') on conflict(key) do nothing").run();
+      }
+    } catch { /* no workspace table yet (tests without auth) */ }
     return made;
   }
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
@@ -924,6 +933,7 @@ export class Tasks {
       if (p.settings.autoRollover) for (const s of this.listSprints(p.id).filter(s => s.end < today))
         if (this.listItems({projectId: p.id, open: true}).some(i => i.sprint === s.id)) this.rolloverSprint(s.id);
     }
+    try { boards.boardsPeriodic(this); } catch (e) { console.error('Whiteboard schedules failed', (e as Error).message); }
     this.reminders();
   }
 
@@ -1431,6 +1441,19 @@ export class Tasks {
   listApprovals(q: {itemId?: string; approver?: string; pending?: boolean}) { return approvals.listApprovals(this, q); }
   approvalState(itemId: string) { return approvals.approvalState(this, itemId); }
   notifyPublic(person: string, actor: string | null, itemId: string | null, kind: string, text: string) { this.notify(person, actor, itemId, kind, text); }
+
+  // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
+  listBoards(q: {projectId?: string; itemId?: string} = {}) { return boards.listBoards(this, q); }
+  board(ref: string) { return boards.getBoard(this, ref); }
+  createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
+  updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }
+  deleteBoard(ref: string) { return boards.deleteBoard(this, ref); }
+  boardFromItems(q: Parameters<typeof boards.boardFromItems>[1], actor: string | null = null, canSee?: (projectId: string) => boolean) { return boards.boardFromItems(this, q, actor, canSee); }
+  boardToTasks(ref: string, actor: string | null = null, opts: {projectId?: string; parentId?: string | null} = {}) { return boards.boardToTasks(this, ref, actor, opts); }
+  runBoard(ref: string, actor: string | null = null, opts: {trigger?: string; input?: unknown; title?: string} = {}) { return boards.runBoard(this, ref, actor, opts); }
+  listBoardRuns(boardRef?: string, limit = 50) { return boards.listRuns(this, boardRef ? boards.getBoard(this, boardRef).id : undefined, limit); }
+  boardRun(runId: string) { return boards.advance(this, runId); }
+  boardRunAction(runId: string, action: 'cancel' | 'retry' | 'skip', node?: string) { return boards.runAction(this, runId, action, node); }
 
   // ---- Human and AI workers (see aiwork.ts) ----
   claimTask(itemId: string, agent: string, note = '') { return ai.claim(this, itemId, agent, note); }

@@ -43,6 +43,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Views (list, table, board, timeline, calendar, backlog, sprint, files) | Tabs under each space; double-click a tab name in the sidebar to rename it | `list_views`, `create_view`, `update_view` (name, filters, sorts, grouping, columns, color rules), `reorder_views`, `delete_view` |
 | Routines | Built-in Routines space: Routines view (by SOP, switches, skip, delay, wait), plus Table, Board, Timeline, Calendar and Workload. A "Routine" chip in a task's header and a repeat mark on its type open it there | `list_routines`, `set_routine` |
 | Archive and later | Built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
+| Whiteboards | Whiteboards page (Workspace section), a Whiteboard view in any space (the Routines space can draw every routine), Whiteboards row in a task | `list_boards`, `get_board`, `create_board`, `update_board`, `delete_board`, `board_from_items`, `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` |
 | SOP links | SOP chips on tagged tasks; SOP column on Routines | `list_sop_links`, `set_sop_links` (admins) |
 | Spaces | Sidebar: shared spaces, then "Private to me" | `create_project`, `update_project` (name, key, statuses, types, fields), `create_rollup`, `delete_project` |
 | Sprints and planning | Sprint view, Plan and forecast | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report`, `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
@@ -88,6 +89,20 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `snooze_item` with `until` (YYYY-MM-DD): hidden until that day, then back in its lists. Use it to "decide later".
 - `list_parked` shows archived and snoozed items; `restore_item` brings one back. Stored in `fields.archived` and `fields.snooze`.
 - Never delete an idea someone may want later: archive it.
+
+## Whiteboards (design and run workflows)
+
+- A whiteboard is a canvas of nodes and connections. Node kinds: `task` (a step), `sticky`, `text`, `shape` (rect, ellipse, diamond), `frame` (a group area), `link` (a document, such as a Google Drive SOP), `trigger`, `webhook`, `end`.
+- A task card can link to a real item (`item` in the tools, `itemId` in REST): a routine, a task, anything. A linked routine follows its live copy after it repeats. A card can also carry `assignees` (or none), `worker` (human, ai, either), `sop` (code like `SOP-07.2`, shows its document), `estimate` and `repeat` (quick-add repeat like `week`, `2w`, `month`).
+- Connections between steps (task, webhook, end, through triggers) are the order of work (`flow`). Connections to stickies, text, shapes, frames and links are only `link`. A link node joined to a task card puts that document in the task it makes.
+- Draw from existing work: `board_from_items` with `routines: true` (every routine, a frame per SOP with its SOP document), `tag`, `parent` or `items`. Dependencies become arrows, later steps sit to the right.
+- Design new work: add task cards and arrows, then `board_to_tasks` creates items in the board's space for cards without one. Arrows become dependencies, `repeat` makes a routine, `worker: ai` marks it for agents. Cards already linked are left alone, so it is safe to run again.
+- Run it: `run_board` (or the Run button) makes one run task in the board's space with a subtask per unlinked task card, each waiting on the cards before it. Linked cards are tracked as they are. A `webhook` card POSTs `{event: "board.step", board, space, run, step, after}` once every step before it is done. The run ends when every step is done, and its run task closes.
+- Triggers: `manual`; `webhook` (POST any JSON to the board's hook link `/api/hooks/<hookKey>?ws=<workspace>`; the body becomes the run's input); `completed` with `tag` (a tag or an item key: finishing a matching item starts a run); `schedule` with `every` day, week or month (checked hourly).
+- Board webhooks (`webhooks: [{url, events}]`) hear `run.started`, `step.done`, `run.done`, `run.failed`. Webhooks only reach public addresses.
+- Runs are logged: `list_board_runs` shows each step's state (`waiting`, `open`, `done`, `fired`, `failed`, `skipped`) and the log. `board_run_action`: `cancel`, `retry` a failed webhook, `skip` a step.
+- Permissions: a board in a space follows that space (view to read, edit to change, create to run or make tasks). A board without a space is seen by everyone and changed by its maker or an admin. The hook link is shown only to people who can edit.
+- Layout tip for agents: steps left to right in order, about 280 apart; parallel steps stacked about 130 apart.
 
 ## SOP links
 
@@ -135,6 +150,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `GET /api/changes?since=ISO`, `PUT /api/external/:source/:id` `{projectId, title, ...}`
 - `GET /api/routines`; `POST /api/routines/act` `{ids, action, to?, on?}` (action: skip, delay, wait, pause, resume, end)
 - `GET /api/parked`; `POST /api/park/:id` `{action: archive|restore|snooze, kind?, reason?, until?}`
+- Whiteboards: `GET /api/boards?projectId=&itemId=`, `POST /api/boards` `{name, projectId?, nodes, edges, webhooks?}`, `GET|PATCH|DELETE /api/boards/:id` (PATCH also takes `addNodes`, `updateNodes`, `removeNodes`, `addEdges`, `removeEdges`, `rotateKey`), `POST /api/boards/from-items` `{routines?|tag?|parentId?|itemIds?, name?, projectId?}`, `POST /api/boards/:id/to-tasks` `{projectId?, parentId?}`, `POST /api/boards/:id/run` `{input?, title?}`, `GET /api/boards/:id/runs`, `GET /api/boards/runs/:runId`, `POST /api/boards/runs/:runId/act` `{action: cancel|retry|skip, node?}`, inbound `POST /api/hooks/<hookKey>?ws=` (no sign-in; the key is the secret)
 - `GET /api/sops`; `PUT /api/sops` `{links: [{code, url, title}]}` (admins)
 - `PATCH /api/projects/:id` `{name?, key?, statuses?, types?, fields?}`
 - `GET /api/calendar.ics?person=|project=` calendar feed; `GET /api/export` full JSON without personal spaces (admins)

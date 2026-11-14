@@ -8,6 +8,7 @@ import type {Comment, Item} from './types.ts';
 import {api, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
 import {RoutineBadge, RoutineControls, SopLinks, peopleFor} from './RoutineControls.tsx';
+import {ItemBoards} from './Whiteboard.tsx';
 import {ParkButtons} from './Parked.tsx';
 import {BlockEditor} from './BlockEditor.tsx';
 import {WorkSection} from './AIWork.tsx';
@@ -189,7 +190,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
             <option value="">None</option>
             {all.filter(i => i.projectId === project.id && i.id !== item.id && project.types.indexOf(i.type) < Math.max(project.types.indexOf(item.type), 1)).map(i => <option key={i.id} value={i.id}>{i.type}: {i.title.slice(0, 50)}</option>)}
           </select>],
-          ['tags', 'Tags', <div className="tags-cell"><TagEditor tags={item.tags} onChange={tags => up({tags})} /><SopLinks store={store} item={item} /></div>],
+          ['tags', 'Tags', <div className="tags-cell"><TagEditor tags={item.tags} onChange={tags => up({tags})} /><SopLinks store={store} item={item} /><ItemBoards store={store} item={item} /></div>],
           ['repeat', 'Repeat', <div className="repeat-cell"><RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} /><RoutineControls store={store} item={item} /></div>],
           ['project', 'Project', <select className="plain-select" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
           ...project.fields.filter(f => f.kind !== 'time').map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)

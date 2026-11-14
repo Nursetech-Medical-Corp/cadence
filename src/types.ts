@@ -144,6 +144,7 @@ export type ChangeEvent =
   | {kind: 'events'}
   | {kind: 'proposals'}
   | {kind: 'sops'}
+  | {kind: 'boards'}
   | {kind: 'refresh'};
 
 export type Sprint = {
@@ -152,7 +153,7 @@ export type Sprint = {
   created: string;
 };
 
-export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines';
+export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines' | 'whiteboard';
 export type ViewConfig = {
   text?: string; assignee?: string; hideDone?: boolean; hideRepeats?: boolean; types?: string[]; sprint?: string;
   groupBy?: 'status' | 'priority' | 'assignee' | 'type' | 'sprint';
@@ -172,6 +173,8 @@ export type ViewConfig = {
   /** List rows: the order of the priority, assignee and status fields. Time and due date keep their place. */
   rowFields?: string[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
+  /** Whiteboard view: the board it shows. */
+  board?: string;
   zoom?: 'day' | 'week' | 'month'; calHours?: 'week' | 'day' | null; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
 /** Filters: a group of rules joined by AND or OR; a rule can itself be a group (one level of nesting in the UI). */

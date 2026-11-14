@@ -48,7 +48,23 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const isAdmin = () => !!(tasks.db.prepare('select admin from people where id = ?').get(actor) as {admin: number} | undefined)?.admin;
   const self = (person: string, what: string) => { if (person !== actor) throw new Forbidden(`You can only ${what} your own`); };
   const selfOrAdmin = (person: string, what: string) => { if (person !== actor && !isAdmin()) throw new Forbidden(`Only admins ${what} for others`); };
+  // Whiteboards in a space follow that space's permissions; boards without a space are seen by everyone and changed by their maker or an admin.
+  const boardOf = (ref: string) => tasks.board(ref);
+  const seesBoard = (b: {projectId: string | null}) => !b.projectId || sees(b.projectId);
+  const editsBoard = (b: {projectId: string | null; createdBy: string | null}) => b.projectId ? caps(b.projectId).has('edit') : b.createdBy === actor || isAdmin();
+  const needBoard = (ref: string) => { const b = boardOf(ref); if (!seesBoard(b)) throw new Forbidden('Not found'); if (!editsBoard(b)) throw new Forbidden('Not allowed: you cannot change this whiteboard'); return b; };
+  const boardOut = (b: any) => editsBoard(b) ? b : {...b, hookKey: undefined};
+  const runBoardOf = (runId: string) => { const r = tasks.db.prepare('select board_id from board_runs where id = ?').get(runId) as {board_id: string} | undefined; if (!r) throw new Forbidden('Not found'); const b = boardOf(r.board_id); if (!seesBoard(b)) throw new Forbidden('Not found'); return b; };
   const checks: Record<string, (...a: any[]) => void> = {
+    createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
+    updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
+    deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },
+    boardFromItems: (q) => { if (q?.projectId) need(q.projectId, 'edit'); for (const x of q?.itemIds ?? []) if (!sees(projOfItem(x))) throw new Forbidden('Not found'); if (q?.parentId && !sees(projOfItem(q.parentId))) throw new Forbidden('Not found'); if (q) q.visible = tasks.listProjects().filter(p => sees(p.id)).map(p => p.id); },
+    boardToTasks: (ref, _a, opts) => { const b = needBoard(ref); const pid = opts?.projectId ?? b.projectId; if (pid) need(pid, 'create'); },
+    runBoard: (ref) => { const b = boardOf(ref); if (!seesBoard(b)) throw new Forbidden('Not found'); if (b.projectId) need(b.projectId, 'create'); },
+    listBoardRuns: (ref) => { if (ref && !seesBoard(boardOf(ref))) throw new Forbidden('Not found'); },
+    boardRun: (runId) => runBoardOf(runId),
+    boardRunAction: (runId) => { const b = runBoardOf(runId); if (!editsBoard(b)) throw new Forbidden('Not allowed: you cannot change this whiteboard'); },
     createItem: (i) => { need(i.projectId, 'create'); for (const d of i.deps ?? []) need(projOfItem(d), 'view'); },
     quickAdd: (i) => need(i.projectId, 'create'),
     routine: (id, _a, _actor, opts) => { need(projOfItem(id), 'edit'); for (const d of opts?.on ?? []) need(projOfItem(d), 'view'); },
@@ -121,6 +137,10 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     exportPack: (ids: string[]) => { for (const id of ids) checks.getTemplate(id); },
   };
   const filters: Record<string, (r: any) => any> = {
+    listBoards: (r: any[]) => r.filter(seesBoard).map(boardOut),
+    board: (b: any) => { if (!seesBoard(b)) throw new Forbidden('Not found'); return boardOut(b); },
+    createBoard: boardOut, updateBoard: boardOut, boardFromItems: boardOut,
+    listBoardRuns: (r: any[]) => r.filter(x => { try { return seesBoard(boardOf(x.boardId)); } catch { return false; } }),
     // Admins see the full setup; everyone else sees job role names and their own job roles.
     jobRoles: (r: any) => isAdmin() ? r : {levels: r.levels.map((l: any) => ({id: l.id, name: l.name})), jobRoles: r.jobRoles.map((j: any) => ({id: j.id, name: j.name})), people: r.people.filter((p: any) => p.id === actor), domainJoin: null},
     listProjects: (r: any[]) => r.filter(p => sees(p.id)),

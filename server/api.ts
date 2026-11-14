@@ -4,6 +4,7 @@
 // Every write is checked against the actor's role in the item's project (see auth.ts).
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {listSopLinks, migrateSops, setSopLinks} from './sops.ts';
+import {boardByKey, migrateBoards, startBoards} from './boards.ts';
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
@@ -110,6 +111,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateGoogleLinks(tasks.db);
   migrateEvents(tasks);
   migrateSops(tasks);
+  migrateBoards(tasks);
   migrateOAuth(accounts.db);
   startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
   // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
@@ -136,6 +138,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   periodic();
   setInterval(periodic, 3600 * 1000).unref();
   startWebhooks(tasks);
+  startBoards(tasks);
   tasks.onNotify(n => { sendNotificationEmail(tasks.db, n).catch(e => console.error('Email notification failed', e.message)); });
   // Push to the person's phones and desktops (every device of their linked accounts), unless they turned that kind off or it is quiet time.
   const personEmail = (id: string) => (tasks.db.prepare('select email from people where id = ? and active = 1').get(id) as {email: string | null} | undefined)?.email?.trim().toLowerCase() || null;
@@ -270,9 +273,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const origin = req.headers.origin, host = req.headers.host;
         if (!bearer && origin && origin !== `http://${host}` && origin !== `https://${host}`) return send(res, 403, {error: 'Cross-origin request refused'});
         const ct = String(req.headers['content-type'] ?? '');
-        if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout')) return send(res, 415, {error: 'Send JSON with content-type application/json'});
+        if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout') && a !== 'hooks') return send(res, 415, {error: 'Send JSON with content-type application/json'});
       }
-      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
+      const body = m === 'GET' || m === 'DELETE' ? {} : a === 'hooks' ? await readJson(req, 200_000).catch(() => ({})) : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
@@ -1085,6 +1088,74 @@ If you did not ask for it, ignore this email.`)
         const args = op === 'archiveItem' ? [it.id, {reason: body.reason, kind: body.kind}, actor] : op === 'snoozeItem' ? [it.id, (body.until as string) ?? null, actor] : [it.id, actor];
         if (held(op, args)) return send(res, 202, propose(tasks, actor!, op, args));
         return send(res, 200, (tasks[op] as (...x: unknown[]) => unknown)(...args));
+      }
+      // ---- Whiteboards: design and run workflows (boards.ts) ----
+      // Inbound webhook: anyone holding the board's secret link can start a run; the JSON body is the run's input.
+      if (a === 'hooks' && b && m === 'POST') {
+        const bd = boardByKey(tasks, b);
+        if (!bd) throw new NotFound('Unknown webhook link');
+        const r = tasks.runBoard(bd.id, bd.createdBy, {trigger: 'webhook', input: body});
+        return send(res, 202, {run: r.id, state: r.state, steps: r.steps.length});
+      }
+      if (a === 'boards') {
+        type B = ReturnType<Tasks['board']>;
+        const seesB = (bd: B) => !bd.projectId || canSee(bd.projectId);
+        const editsB = (bd: B) => bd.projectId ? caps(actor, bd.projectId, !!bearer).has('edit') : (!ws.requireLogin && !bearer) || bd.createdBy === actor || isAdmin(actor);
+        const out = (bd: B) => editsB(bd) ? {...bd, hookUrl: `${publicOrigin(req)}/api/hooks/${bd.hookKey}?ws=${info.id}`} : {...bd, hookKey: undefined};
+        const one = (ref: string) => { const bd = tasks.board(ref); if (!seesB(bd)) throw new NotFound('No such whiteboard'); return bd; };
+        const edit = (ref: string) => { const bd = one(ref); if (!editsB(bd)) throw new Denied('You cannot change this whiteboard'); return bd; };
+        const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+        const BOARD_KEYS = ['name', 'description', 'projectId', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
+        const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
+        if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        if (!b && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const input = pick(body, BOARD_KEYS);
+          if (held('createBoard', [input, actor])) return send(res, 202, propose(tasks, actor!, 'createBoard', [input, actor]));
+          return send(res, 201, out(tasks.createBoard(input, actor)));
+        }
+        if (b === 'from-items' && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const qy = pick(body, ['name', 'projectId', 'tag', 'parentId', 'itemIds', 'routines']);
+          if (held('boardFromItems', [qy, actor])) return send(res, 202, propose(tasks, actor!, 'boardFromItems', [qy, actor]));
+          return send(res, 201, out(tasks.boardFromItems(qy, actor, canSee)));
+        }
+        if (b === 'runs' && c && !parts[3] && m === 'GET') return send(res, 200, runOf(c));
+        if (b === 'runs' && c && parts[3] === 'act' && m === 'POST') {
+          const r = runOf(c); edit(r.boardId);
+          if (held('boardRunAction', [c, body.action, body.node])) return send(res, 202, propose(tasks, actor!, 'boardRunAction', [c, body.action, body.node]));
+          return send(res, 200, tasks.boardRunAction(c, body.action, body.node));
+        }
+        if (b && !c && m === 'GET') return send(res, 200, out(one(b)));
+        if (b && !c && m === 'PATCH') {
+          const bd = edit(b);
+          if (body.projectId) need(body.projectId, 'edit');
+          const patch = pick(body, BOARD_KEYS);
+          if (held('updateBoard', [bd.id, patch, actor])) return send(res, 202, propose(tasks, actor!, 'updateBoard', [bd.id, patch, actor]));
+          return send(res, 200, out(tasks.updateBoard(bd.id, patch, actor)));
+        }
+        if (b && !c && m === 'DELETE') {
+          const bd = edit(b);
+          if (bd.projectId) need(bd.projectId, 'delete');
+          if (held('deleteBoard', [bd.id])) return send(res, 202, propose(tasks, actor!, 'deleteBoard', [bd.id]));
+          return send(res, 200, tasks.deleteBoard(bd.id));
+        }
+        if (b && c === 'to-tasks' && m === 'POST') {
+          const bd = edit(b), pid = (body.projectId as string) ?? bd.projectId;
+          if (pid) need(pid, 'create');
+          const opts = pick(body, ['projectId', 'parentId']);
+          if (held('boardToTasks', [bd.id, actor, opts])) return send(res, 202, propose(tasks, actor!, 'boardToTasks', [bd.id, actor, opts]));
+          const r = tasks.boardToTasks(bd.id, actor, opts);
+          return send(res, 200, {...r, board: out(r.board)});
+        }
+        if (b && c === 'run' && m === 'POST') {
+          const bd = one(b);
+          if (bd.projectId) need(bd.projectId, 'create');
+          const opts = {trigger: 'manual', input: body.input, title: body.title ? String(body.title) : undefined};
+          if (held('runBoard', [bd.id, actor, opts])) return send(res, 202, propose(tasks, actor!, 'runBoard', [bd.id, actor, opts]));
+          return send(res, 201, tasks.runBoard(bd.id, actor, opts));
+        }
+        if (b && c === 'runs' && m === 'GET') return send(res, 200, tasks.listBoardRuns(one(b).id, num(q('limit'), 20, 200)));
       }
       if (a === 'sops') {
         if (!b && m === 'GET') return send(res, 200, listSopLinks(tasks));

@@ -91,7 +91,8 @@ export function saveAgentSettings(tasks: Tasks, agent: string, patch: Partial<Ag
 export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoozeItem', 'createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
-  'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes']);
+  'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes',
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {
   if (!isAgent(tasks, actor)) return false;
@@ -126,6 +127,13 @@ function describe(tasks: Tasks, op: string, args: unknown[]) {
     case 'event.update': return `Change meeting ${String(a0)}`;
     case 'event.delete': return `Cancel meeting ${String(a0)}`;
     case 'suggestWork': return `Suggest "${(a0 as {title?: string})?.title ?? ref((a0 as {item?: string})?.item)}" for ${nameOf(tasks, (a0 as {forPerson?: string})?.forPerson ?? null)}`;
+    case 'createBoard': return `Make whiteboard "${(a0 as {name?: string})?.name ?? 'Untitled board'}"`;
+    case 'boardFromItems': return `Draw a whiteboard from ${(a0 as {tag?: string; routines?: boolean})?.tag ?? ((a0 as {routines?: boolean})?.routines ? 'routines' : 'items')}`;
+    case 'updateBoard': case 'deleteBoard': case 'runBoard': case 'boardToTasks': {
+      const name = (() => { try { return tasks.board(String(a0)).name; } catch { return String(a0); } })();
+      return `${({updateBoard: 'Change', deleteBoard: 'Delete', runBoard: 'Run', boardToTasks: 'Create tasks from'} as Record<string, string>)[op]} whiteboard "${name}"`;
+    }
+    case 'boardRunAction': return `${String(args[1] ?? '')} a whiteboard run`;
     default: return op.replace(/([A-Z])/g, ' $1').toLowerCase();
   }
 }

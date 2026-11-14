@@ -104,7 +104,7 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
     + 'groupBy status|priority|assignee|type|sprint, swimlane, hidden [column ids], columns [{id, width}], calcs {columnId: sum|avg|count|min|max}, '
     + 'colors [{rule, color: #rrggbb}], hideDone, types [type names], text (search), zoom day|week|month, covers, locked, privateTo (your person id).';
   tool('list_views', 'List the views (tabs) of a project with their settings.', {project: z.string()}, true, i => tasks.listViews(projectId(i.project), actor));
-  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files', 'routines']).describe('routines: the routine manager view; makes sense in the built-in Routines space'),
+  tool('create_view', 'Add a view to a project. ' + VIEW_CONFIG_DOC, {project: z.string(), name: z.string(), kind: z.enum(['list', 'table', 'board', 'gantt', 'calendar', 'workload', 'backlog', 'sprint', 'files', 'routines', 'whiteboard']).describe('routines: the routine manager view; makes sense in the built-in Routines space. whiteboard: shows the board in config.board (a board id)'),
     config: z.record(z.string(), z.any()).optional()}, false, i => tasks.createView({projectId: projectId(i.project), name: i.name, kind: i.kind, config: i.config ?? {}}));
   tool('update_view', 'Change a view: rename it, or change its settings (merged into the current ones unless replace is true). Locked views must be unlocked first (config.locked false). ' + VIEW_CONFIG_DOC,
     {view: z.string().describe('View id'), name: z.string().optional(), config: z.record(z.string(), z.any()).optional(), replace: z.boolean().optional()}, false, i => {
@@ -206,6 +206,57 @@ export function createMcpServer(tasks: Tasks, actorRef: string | null) {
       if (rawTasks !== tasks && !admin) throw new Error('Only workspace admins change SOP links');
       return setSopLinks(rawTasks, i.links as {code: string; url: string}[]);
     });
+  // ---- Whiteboards: design workflows on a canvas, link cards to tasks and SOP documents, run them ----
+  const nodeShape = z.object({
+    id: z.string().optional().describe('Your own short id, so connections can refer to it'), kind: z.enum(['task', 'sticky', 'text', 'shape', 'frame', 'link', 'trigger', 'webhook', 'end']),
+    x: z.number().optional(), y: z.number().optional(), w: z.number().optional(), h: z.number().optional(), text: z.string().optional().describe('Card text; for task cards the first line is the title'),
+    color: z.string().optional(), item: z.string().optional().describe('task: link to an existing item (id or key)'), url: z.string().optional().describe('link: the document (Google Drive SOP); webhook: where it POSTs'),
+    assignees: z.array(z.string()).optional().describe('task: person names or ids (or none)'), worker: z.enum(['human', 'ai', 'either']).optional(), sop: z.string().optional().describe('SOP code like SOP-07.2'),
+    estimate: z.number().optional().describe('Hours'), repeat: z.string().optional().describe('task: repeat for Create tasks, like week, 2w, month, weekdays'),
+    shape: z.enum(['rect', 'ellipse', 'diamond']).optional(),
+    trigger: z.object({on: z.enum(['manual', 'webhook', 'completed', 'schedule']), tag: z.string().optional().describe('completed: tag or item key that starts a run when finished'), every: z.enum(['day', 'week', 'month']).optional()}).optional(),
+  });
+  const edgeShape = z.object({id: z.string().optional(), from: z.string(), to: z.string(), label: z.string().optional(), kind: z.enum(['flow', 'link']).optional().describe('flow: order of work (default); link: just related')});
+  const toNode = (n: any) => { const {item, assignees, ...rest} = n; return {...rest, ...(item ? {itemId: tasks.findItem(item).id} : {}), ...(assignees ? {assignees: assignees.map(personId)} : {})}; };
+  const boardSummary = (b: any) => ({id: b.id, name: b.name, space: b.projectId ? (() => { try { return tasks.project(b.projectId).key; } catch { return b.projectId; } })() : null, description: b.description,
+    nodes: b.nodes.map((n: any) => { let it: any = null; if (n.itemId) { try { it = tasks.item(n.itemId); } catch { it = null; } }
+      return {...n, ...(it ? {itemKey: keyOf(it), itemStatus: it.status, itemDone: !!it.completed, itemAssignees: it.assignees.map((a: string) => people().find(p => p.id === a)?.name ?? a)} : {})}; }),
+    edges: b.edges, webhooks: b.webhooks, hookKey: b.hookKey, updated: b.updated});
+  const boardRef = (ref: string) => tasks.board(ref).id;
+  tool('list_boards', 'Whiteboards: canvases that map workflows, routines and automations. Filter by space or by an item shown on them.', {project: z.string().optional(), item: z.string().optional()}, true,
+    i => tasks.listBoards({projectId: i.project ? projectId(i.project) : undefined, itemId: i.item ? tasks.findItem(i.item).id : undefined}).map(b => ({id: b.id, name: b.name, space: b.projectId, nodes: b.nodes.length, edges: b.edges.length, updated: b.updated})));
+  tool('get_board', 'Read a whiteboard (id or name): every node with its linked item\'s key and status, the connections, outbound webhooks and the inbound hook key (POST /api/hooks/<hookKey> starts a run).', {board: z.string()}, true,
+    i => boardSummary(tasks.board(i.board)));
+  tool('create_board', 'Make a whiteboard. Node kinds: task (a step; link item to an existing task or routine; worker human, ai or either), sticky, text, shape, frame (a group area), link (a document such as a Google Drive SOP), trigger (manual, webhook, completed with a tag, schedule), webhook (POSTs when the steps before it are done), end. Connections (from, to) between steps are the order of work.',
+    {name: z.string(), project: z.string().optional().describe('Space whose tasks it runs in'), description: z.string().optional(), nodes: z.array(nodeShape).optional(), edges: z.array(edgeShape).optional(),
+     webhooks: z.array(z.object({url: z.string(), events: z.array(z.enum(['run.started', 'step.done', 'run.done', 'run.failed'])).optional()})).optional()}, false,
+    i => { const r = tasks.createBoard({name: i.name, description: i.description, projectId: i.project ? projectId(i.project) : null, nodes: (i.nodes ?? []).map(toNode), edges: (i.edges ?? []) as any, webhooks: (i.webhooks ?? []).map(h => ({id: '', url: h.url, events: h.events ?? []}))}, actor) as any; return r?.proposal ? r : boardSummary(r); });
+  tool('update_board', 'Change a whiteboard: rename, move to a space, or add, change and remove nodes and connections without resending the whole board. Lay out nodes left to right in the order of work, about 280 apart.',
+    {board: z.string(), name: z.string().optional(), project: z.string().nullable().optional(), description: z.string().optional(),
+     add_nodes: z.array(nodeShape).optional(), update_nodes: z.array(nodeShape.partial().extend({id: z.string()})).optional(), remove_nodes: z.array(z.string()).optional(),
+     add_edges: z.array(edgeShape).optional(), remove_edges: z.array(z.string()).optional(),
+     webhooks: z.array(z.object({url: z.string(), events: z.array(z.enum(['run.started', 'step.done', 'run.done', 'run.failed'])).optional()})).optional().describe('Replaces the outbound webhooks'),
+     rotate_key: z.boolean().optional().describe('Make a new inbound hook link (the old one stops working)')}, false,
+    i => {
+      const r = tasks.updateBoard(boardRef(i.board), {name: i.name, description: i.description, ...(i.project !== undefined ? {projectId: i.project ? projectId(i.project) : null} : {}),
+        addNodes: i.add_nodes?.map(toNode), updateNodes: i.update_nodes?.map(toNode), removeNodes: i.remove_nodes, addEdges: i.add_edges as any, removeEdges: i.remove_edges,
+        ...(i.webhooks ? {webhooks: i.webhooks.map(h => ({id: '', url: h.url, events: h.events ?? []}))} : {}), rotateKey: i.rotate_key}, actor) as any;
+      return r?.proposal ? r : boardSummary(r);
+    });
+  tool('delete_board', 'Delete a whiteboard and its run history. Items made from it stay.', {board: z.string()}, false, i => tasks.deleteBoard(boardRef(i.board)));
+  tool('board_from_items', 'Draw a whiteboard from existing work: every routine (grouped by SOP, with its SOP document), items with a tag (like SOP-07.2), the children of an item, or a list of items. Dependencies become arrows.',
+    {name: z.string().optional(), project: z.string().optional(), routines: z.boolean().optional(), tag: z.string().optional(), parent: z.string().optional(), items: z.array(z.string()).optional()}, false,
+    i => { const r = tasks.boardFromItems({name: i.name, projectId: i.project ? projectId(i.project) : undefined, routines: i.routines, tag: i.tag, parentId: i.parent ? tasks.findItem(i.parent).id : undefined, itemIds: i.items?.map(x => tasks.findItem(x).id)}, actor) as any; return r?.proposal ? r : boardSummary(r); });
+  tool('board_to_tasks', 'Create real tasks from a whiteboard\'s task cards that have no item yet (in the board\'s space, or project), with arrows as dependencies and repeat as routines. Linked cards are left alone.',
+    {board: z.string(), project: z.string().optional(), parent: z.string().optional()}, false,
+    i => tasks.boardToTasks(boardRef(i.board), actor, {projectId: i.project ? projectId(i.project) : undefined, parentId: i.parent ? tasks.findItem(i.parent).id : undefined}));
+  tool('run_board', 'Run a whiteboard as a workflow: makes a run task in its space with a subtask per unlinked task card (waiting on the cards before it), tracks linked cards, and fires webhook cards when the steps before them are done. input is passed to webhooks and kept on the run.',
+    {board: z.string(), input: z.record(z.string(), z.any()).optional(), title: z.string().optional()}, false,
+    i => tasks.runBoard(boardRef(i.board), actor, {trigger: 'manual', input: i.input, title: i.title}));
+  tool('list_board_runs', 'Runs of a whiteboard (or of all), newest first, with each step\'s state (waiting, open, done, fired, failed, skipped) and the run log.', {board: z.string().optional(), limit: z.number().int().max(200).optional()}, true,
+    i => tasks.listBoardRuns(i.board ? boardRef(i.board) : undefined, i.limit ?? 20));
+  tool('board_run_action', 'Act on a whiteboard run: cancel it (its tasks stay), retry a failed webhook step, or skip a step.', {run: z.string(), action: z.enum(['cancel', 'retry', 'skip']), node: z.string().optional().describe('The step\'s node id (retry, skip)')}, false,
+    i => tasks.boardRunAction(i.run, i.action, i.node));
   tool('list_events', 'Meetings and calendar events between two dates (Cadence events plus synced Google events), repeating ones expanded. mine: only where you organize or attend.',
     {from: z.string(), to: z.string(), project: z.string().optional(), mine: z.boolean().optional()}, true,
     i => listEvents(tasks, {from: i.from, to: i.to, person: actor, projectId: i.project ? projectId(i.project) : undefined, mine: i.mine}, seesProject));
