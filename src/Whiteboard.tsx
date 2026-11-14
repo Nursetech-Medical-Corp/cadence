@@ -2,35 +2,45 @@
 // open documents (Google Drive SOPs), triggers and webhooks show where automations start and what they call.
 // Saved to /api/boards; runs to /api/boards/:id/run. Agents reach the same through MCP (server/boards.ts).
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
+import {CirclePlay, Diamond, Heading, Info, Table2, MousePointer2, Hand, Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
 import type {Item, Person, Project} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Avatars, itemKey} from './components.tsx';
 
-type Kind = 'task' | 'sticky' | 'text' | 'shape' | 'frame' | 'link' | 'trigger' | 'webhook' | 'end';
+type Kind = 'task' | 'sticky' | 'text' | 'shape' | 'frame' | 'link' | 'trigger' | 'webhook' | 'end' | 'terminal' | 'decision' | 'info' | 'table' | 'title';
 type TriggerOn = 'manual' | 'webhook' | 'completed' | 'schedule';
 export type WbNode = {id: string; kind: Kind; x: number; y: number; w: number; h: number; text: string; color?: string | null; itemId?: string | null; url?: string | null;
-  assignees?: string[]; worker?: 'human' | 'ai' | 'either'; sop?: string | null; estimate?: number | null; repeat?: string | null; shape?: 'rect' | 'ellipse' | 'diamond';
+  assignees?: string[]; worker?: 'human' | 'ai' | 'either'; sop?: string | null; estimate?: number | null; repeat?: string | null; shape?: 'rect' | 'ellipse' | 'diamond'; table?: string[][];
   trigger?: {on: TriggerOn; tag?: string | null; every?: 'day' | 'week' | 'month' | null}};
 export type WbEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link'};
 type Hook = {id: string; url: string; events: string[]};
-export type Board = {id: string; projectId: string | null; name: string; description: string; nodes: WbNode[]; edges: WbEdge[]; webhooks: Hook[]; hookKey?: string; hookUrl?: string; createdBy: string | null; updated: string};
+export type Board = {id: string; projectId: string | null; name: string; description: string; sop?: string | null; nodes: WbNode[]; edges: WbEdge[]; webhooks: Hook[]; hookKey?: string; hookUrl?: string; createdBy: string | null; updated: string};
 type Step = {node: string; kind: Kind; title: string; itemId: string | null; state: string; at: string | null; note: string | null};
 type Run = {id: string; boardId: string; state: string; trigger: string; started: string; finished: string | null; parentItem: string | null; steps: Step[]; log: {at: string; text: string}[]};
 
-const SIZES: Record<Kind, [number, number]> = {task: [220, 96], sticky: [180, 140], text: [200, 40], shape: [160, 100], frame: [600, 400], link: [220, 64], trigger: [180, 64], webhook: [200, 72], end: [120, 52]};
+const SIZES: Record<Kind, [number, number]> = {task: [220, 96], sticky: [180, 140], text: [200, 40], shape: [160, 100], frame: [600, 400], link: [220, 64], trigger: [180, 64], webhook: [200, 72], end: [120, 52],
+  terminal: [150, 56], decision: [170, 110], info: [240, 110], table: [360, 150], title: [480, 64]};
 const STICKY = ['#fef3c7', '#dcfce7', '#dbeafe', '#fce7f3', '#ede9fe', '#ffedd5', '#f1f5f9'];
-const KINDS: {kind: Kind; label: string; icon: typeof Square; hint: string}[] = [
-  {kind: 'task', label: 'Task', icon: CheckSquare, hint: 'A step. Link it to a task or routine, or create one from it'},
-  {kind: 'sticky', label: 'Sticky', icon: StickyNote, hint: 'A note'},
-  {kind: 'text', label: 'Text', icon: Type, hint: 'A heading or label'},
-  {kind: 'shape', label: 'Shape', icon: Circle, hint: 'Box, circle or decision diamond'},
-  {kind: 'frame', label: 'Frame', icon: Frame, hint: 'Group an area. Moving it moves what is inside'},
-  {kind: 'link', label: 'Link', icon: Link2, hint: 'A document, like a Google Drive SOP. Connect it to tasks to attach it'},
-  {kind: 'trigger', label: 'Trigger', icon: Zap, hint: 'Where a run starts: by hand, from a webhook, on a schedule, or when a tagged task is done'},
-  {kind: 'webhook', label: 'Webhook', icon: Webhook, hint: 'Calls a URL (Zapier, n8n, Make) once the steps before it are done'},
-  {kind: 'end', label: 'End', icon: Flag, hint: 'The run is done when it gets here'},
+/** Toolbar, in two groups: the flow (steps and how a run moves) and notes (layout and information). key: keyboard shortcut. */
+const KINDS: {kind: Kind; label: string; icon: typeof Square; hint: string; key: string; group: 'flow' | 'notes'}[] = [
+  {kind: 'terminal', label: 'Start/stop', icon: CirclePlay, hint: 'Where the flow starts or stops (a pill)', key: 'O', group: 'flow'},
+  {kind: 'task', label: 'Task', icon: CheckSquare, hint: 'A step. Link it to a task or routine, or create one from it', key: 'T', group: 'flow'},
+  {kind: 'decision', label: 'Decision', icon: Diamond, hint: 'A yes or no question. Label the arrows out of it (yes, no)', key: 'D', group: 'flow'},
+  {kind: 'trigger', label: 'Trigger', icon: Zap, hint: 'Where a run starts: by hand, from a webhook, on a schedule, or when a tagged task is done', key: 'G', group: 'flow'},
+  {kind: 'webhook', label: 'Webhook', icon: Webhook, hint: 'Calls a URL (Zapier, n8n, Make) once the steps before it are done', key: 'W', group: 'flow'},
+  {kind: 'end', label: 'End', icon: Flag, hint: 'The run is done when it gets here', key: 'E', group: 'flow'},
+  {kind: 'title', label: 'Title', icon: Heading, hint: 'A heading for the board or an area: first line big, the rest a subtitle', key: 'H', group: 'notes'},
+  {kind: 'text', label: 'Text', icon: Type, hint: 'A label', key: 'X', group: 'notes'},
+  {kind: 'sticky', label: 'Sticky', icon: StickyNote, hint: 'A note', key: 'S', group: 'notes'},
+  {kind: 'info', label: 'Info', icon: Info, hint: 'An information box: what to know at this step', key: 'I', group: 'notes'},
+  {kind: 'table', label: 'Table', icon: Table2, hint: 'Rows and columns, first row is the header. Double-click a cell to edit', key: 'B', group: 'notes'},
+  {kind: 'shape', label: 'Shape', icon: Circle, hint: 'Box or circle', key: 'R', group: 'notes'},
+  {kind: 'frame', label: 'Frame', icon: Frame, hint: 'Group an area. Moving it moves what is inside', key: 'F', group: 'notes'},
+  {kind: 'link', label: 'Link', icon: Link2, hint: 'A document, like a Google Drive SOP. Connect it to tasks to attach it', key: 'L', group: 'notes'},
 ];
+const NOTE_KINDS = new Set<Kind>(['sticky', 'text', 'shape', 'frame', 'link', 'info', 'table', 'title']);
+/** Every new board opens with a heading. */
+const titleNode = (name: string): WbNode => ({id: rid(), kind: 'title', x: 0, y: 0, w: 480, h: 64, text: `${name}\nWhat this flow is for`});
 const STATE_COLOR: Record<string, string> = {waiting: '#94a3b8', open: '#3b82f6', done: '#22c55e', fired: '#22c55e', firing: '#f59e0b', failed: '#ef4444', skipped: '#a1a1aa'};
 const STEP_KINDS = new Set<Kind>(['task', 'webhook', 'end', 'trigger']);
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -60,12 +70,18 @@ function BoardList({store}: {store: Store}) {
     try { const b = await api<Board>(path, {method: 'POST', body}); location.hash = `/boards/${b.id}`; } catch (e) { store.fail(e); } finally { setBusy(false); }
   };
   const spaces = store.projects.filter(p => !p.settings.rollup);
+  const bySop = async () => {
+    setBusy(true);
+    try { const r = await api<{made: Board[]; kept: Board[]}>('/boards/by-sop', {method: 'POST', body: {}}); store.flash(r.made.length ? `Made ${r.made.length} SOP board${r.made.length === 1 ? '' : 's'}${r.kept.length ? `, ${r.kept.length} already had one` : ''}` : r.kept.length ? 'Every SOP already has a board' : 'No routines have an SOP tag yet'); setBoards(await api<Board[]>('/boards')); }
+    catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
   return <div className="wb-list">
     <header className="head"><div className="head-top"><h1><Workflow size={20} /> Whiteboards</h1></div>
       <p className="muted small space-note">Map how work flows: routines, automations, webhooks and who does each step, person or AI. Link cards to tasks and SOP documents, turn ideas into tasks, and run a board to make its tasks in order.</p></header>
     <div className="wb-new">
-      <button className="btn primary" disabled={busy} onClick={() => make('/boards', {name: 'Untitled board', projectId: spaces[0]?.id ?? null})}><Plus size={14} /> New whiteboard</button>
-      <button className="btn" disabled={busy} onClick={() => make('/boards/from-items', {routines: true})} title="A frame per SOP with its document, arrows from dependencies"><Repeat size={14} /> Map every routine</button>
+      <button className="btn primary" disabled={busy} onClick={() => make('/boards', {name: 'Untitled board', projectId: spaces[0]?.id ?? null, nodes: [titleNode('Untitled board')]})}><Plus size={14} /> New whiteboard</button>
+      <button className="btn" disabled={busy} onClick={bySop} title="One board for each SOP: its routines in order, a title and the SOP document. SOPs that have a board keep it"><Repeat size={14} /> One board per SOP</button>
+      <button className="btn ghost" disabled={busy} onClick={() => make('/boards/from-items', {routines: true})} title="Every routine on one big board, a frame per SOP"><MapIcon size={14} /> All routines on one board</button>
     </div>
     {!boards ? <div className="loading">Loading...</div> : !boards.length ? <p className="muted">No whiteboards yet.</p> :
       <div className="wb-cards">{boards.map(b => {
@@ -74,7 +90,7 @@ function BoardList({store}: {store: Store}) {
         return <a key={b.id} className="wb-card" href={`#/boards/${b.id}`}>
           <MiniMap board={b} />
           <b>{b.name}</b>
-          <span className="muted small">{sp ? sp.name : 'No space'} · {tasks.length} task card{tasks.length === 1 ? '' : 's'}{tasks.length ? `, ${linked} linked` : ''}</span>
+          <span className="muted small">{b.sop ? <span className="tag">{b.sop}</span> : null} {sp ? sp.name : 'No space'} · {tasks.length} task card{tasks.length === 1 ? '' : 's'}{tasks.length ? `, ${linked} linked` : ''}</span>
         </a>;
       })}</div>}
   </div>;
@@ -101,7 +117,7 @@ export function WhiteboardView({store, project, open, config, setConfig}: {store
     <h3><Workflow size={16} /> Whiteboard</h3>
     <p className="muted small">Pick the board this view shows, or start one.</p>
     <div className="wb-new">
-      {realSpace && <button className="btn primary" onClick={() => make('/boards', {name: `${project.name} flow`, projectId: project.id})}><Plus size={14} /> Blank board for {project.name}</button>}
+      {realSpace && <button className="btn primary" onClick={() => make('/boards', {name: `${project.name} flow`, projectId: project.id, nodes: [titleNode(`${project.name} flow`)]})}><Plus size={14} /> Blank board for {project.name}</button>}
       {scope === 'routines' && <button className="btn primary" onClick={() => make('/boards/from-items', {routines: true, name: 'Routines map'})}><Repeat size={14} /> Map every routine by SOP</button>}
       {realSpace && <button className="btn" onClick={() => make('/boards/from-items', {itemIds: [...store.items.values()].filter(i => i.projectId === project.id && !i.completed && !i.parentId).slice(0, 120).map(i => i.id), projectId: project.id, name: `${project.name} map`})}><MapIcon size={14} /> Draw this space's open work</button>}
     </div>
@@ -113,7 +129,7 @@ type Drag =
   | {mode: 'pan'; sx: number; sy: number; ox: number; oy: number}
   | {mode: 'move'; sx: number; sy: number; orig: Map<string, {x: number; y: number}>; moved: boolean}
   | {mode: 'resize'; id: string; sx: number; sy: number; w: number; h: number}
-  | {mode: 'connect'; from: string; x: number; y: number}
+  | {mode: 'connect'; from: string; x: number; y: number; target: string | null}
   | {mode: 'marquee'; x0: number; y0: number; x: number; y: number};
 
 export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store; boardId: string; open: (id: string) => void; back?: boolean; onGone?: () => void}) {
@@ -125,6 +141,15 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
   const [selEdge, setSelEdge] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  // Left drag on the board selects; middle drag, Space+drag or the hand tool pans.
+  const [tool, setTool] = useState<'select' | 'hand'>('select');
+  const spaceDown = useRef(false);
+  useEffect(() => {
+    const dn = (e: KeyboardEvent) => { if (e.code === 'Space' && !(e.target as HTMLElement).closest('input, textarea, [contenteditable]')) { spaceDown.current = true; if (e.target === canvas.current) e.preventDefault(); } };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Space') spaceDown.current = false; };
+    addEventListener('keydown', dn); addEventListener('keyup', up);
+    return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
+  }, []);
   const [panel, setPanel] = useState<'auto' | 'runs' | 'board'>('auto');
   const [runs, setRuns] = useState<Run[]>([]);
   const [showRun, setShowRun] = useState<string | null>(null);
@@ -173,7 +198,9 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
-    const onWheel = (e: WheelEvent) => { e.preventDefault(); if (e.ctrlKey || e.metaKey) zoomBy(Math.exp(-e.deltaY / 300), e.clientX, e.clientY); else setCam(c => ({...c, x: c.x - e.deltaX, y: c.y - e.deltaY})); };
+    // Wheel scrolls (Shift+wheel sideways), Ctrl or pinch zooms.
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); if (e.ctrlKey || e.metaKey) zoomBy(Math.exp(-e.deltaY / 300), e.clientX, e.clientY);
+      else if (e.shiftKey) setCam(c => ({...c, x: c.x - (e.deltaY || e.deltaX)})); else setCam(c => ({...c, x: c.x - e.deltaX, y: c.y - e.deltaY})); };
     el.addEventListener('wheel', onWheel, {passive: false});
     return () => el.removeEventListener('wheel', onWheel);
   });
@@ -182,12 +209,18 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     const r = canvas.current!.getBoundingClientRect();
     const c = at ?? toWorld(r.left + r.width / 2, r.top + r.height / 2);
     const [w, h] = SIZES[kind];
-    const n: WbNode = {id: rid(), kind, x: snap(c.x - w / 2), y: snap(c.y - h / 2), w, h, text: kind === 'task' ? 'New step' : kind === 'trigger' ? 'Start' : kind === 'end' ? 'Done' : kind === 'frame' ? 'Group' : kind === 'webhook' ? 'Call a webhook' : '',
+    const text = ({task: 'New step', trigger: 'Start', end: 'Done', frame: 'Group', webhook: 'Call a webhook', terminal: 'Start', decision: 'Yes or no?', title: 'Title\nSubtitle', info: 'Good to know'} as Partial<Record<Kind, string>>)[kind] ?? '';
+    // Step down from the center until the spot is free, so new cards never pile up.
+    let x = snap(c.x - w / 2), y = snap(c.y - h / 2);
+    const busy = (yy: number) => !at && latest.current.nodes.some(o => o.kind !== 'frame' && x < o.x + o.w && x + w > o.x && yy < o.y + o.h && yy + h > o.y);
+    for (let i = 0; i < 40 && busy(y); i++) y += 30;
+    const n: WbNode = {id: rid(), kind, x, y, w, h, text,
+      ...(kind === 'table' ? {table: [['Name', 'Owner', 'Notes'], ['', '', ''], ['', '', '']]} : {}),
       ...(kind === 'sticky' ? {color: STICKY[0]} : {}), ...(kind === 'trigger' ? {trigger: {on: 'manual'}} : {}), ...(kind === 'shape' ? {shape: 'rect'} : {}), ...(kind === 'task' ? {worker: 'either'} : {}), ...extra};
     // Frames go to the back so cards stay clickable.
     setGraph(kind === 'frame' ? [n, ...latest.current.nodes] : [...latest.current.nodes, n]);
     setSel(new Set([n.id])); setSelEdge(null);
-    if (kind !== 'frame' && kind !== 'trigger' && kind !== 'end' && !extra.text) setEditing(n.id);
+    if (!['frame', 'trigger', 'end', 'table'].includes(kind) && !extra.text) setEditing(n.id);
     return n;
   };
   const removeSel = () => {
@@ -210,9 +243,19 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     if (e.button !== 0 && e.button !== 1) return;
     canvas.current?.focus();
     setEditing(null);
-    if (e.shiftKey) { const p = toWorld(e.clientX, e.clientY); setDrag({mode: 'marquee', x0: p.x, y0: p.y, x: p.x, y: p.y}); return; }
-    setSel(new Set()); setSelEdge(null);
-    setDrag({mode: 'pan', sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y});
+    if (e.button === 1 || tool === 'hand' || spaceDown.current) { e.preventDefault(); setDrag({mode: 'pan', sx: e.clientX, sy: e.clientY, ox: cam.x, oy: cam.y}); return; }
+    // Left drag draws a selection box (Shift adds to what is selected).
+    if (!e.shiftKey) { setSel(new Set()); setSelEdge(null); }
+    const p = toWorld(e.clientX, e.clientY); setDrag({mode: 'marquee', x0: p.x, y0: p.y, x: p.x, y: p.y});
+  };
+  /** The card a connection would land on: under the pointer (with a generous margin), else the nearest one close by. */
+  const snapTarget = (p: {x: number; y: number}, from: string) => {
+    const pad = 28 / cam.k, near = 110 / cam.k;
+    const cands = nodes.filter(n => n.id !== from && n.kind !== 'frame');
+    const inside = cands.filter(n => p.x >= n.x - pad && p.x <= n.x + n.w + pad && p.y >= n.y - pad && p.y <= n.y + n.h + pad);
+    const dist = (n: WbNode) => Math.hypot(Math.max(n.x - p.x, 0, p.x - n.x - n.w), Math.max(n.y - p.y, 0, p.y - n.y - n.h));
+    const pick = (inside.length ? inside : cands.filter(n => dist(n) < near)).sort((a, b) => dist(a) - dist(b))[0];
+    return pick?.id ?? (hit(p, from)?.id ?? null);
   };
   const onNodeDown = (e: React.MouseEvent, n: WbNode) => {
     if (e.button !== 0 || editing === n.id) return;
@@ -239,21 +282,25 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     } else if (drag.mode === 'resize') {
       const dx = (e.clientX - drag.sx) / cam.k, dy = (e.clientY - drag.sy) / cam.k;
       setNodes(ns => ns.map(n => n.id === drag.id ? {...n, w: Math.max(60, snap(drag.w + dx)), h: Math.max(30, snap(drag.h + dy))} : n));
-    } else if (drag.mode === 'connect' || drag.mode === 'marquee') { const p = toWorld(e.clientX, e.clientY); setDrag({...drag, x: p.x, y: p.y}); }
+    } else if (drag.mode === 'connect') { const p = toWorld(e.clientX, e.clientY); setDrag({...drag, x: p.x, y: p.y, target: snapTarget(p, drag.from)}); }
+    else if (drag.mode === 'marquee') { const p = toWorld(e.clientX, e.clientY); setDrag({...drag, x: p.x, y: p.y}); }
   };
   const onUp = (e: React.MouseEvent) => {
     if (!drag) return;
     if ((drag.mode === 'move' && drag.moved) || drag.mode === 'resize') { latest.current = {nodes, edges}; save(); }
     if (drag.mode === 'connect') {
-      const target = hit(toWorld(e.clientX, e.clientY), drag.from);
+      const tid = drag.target ?? snapTarget(toWorld(e.clientX, e.clientY), drag.from);
+      const target = tid ? nodes.find(n => n.id === tid) : undefined;
       if (target && !edges.some(x => x.from === drag.from && x.to === target.id)) {
-        const e2: WbEdge = {id: rid(), from: drag.from, to: target.id};
+        const e2: WbEdge = {id: rid(), from: drag.from, to: target.id, ...(nodes.find(n => n.id === drag.from)?.kind === 'decision' ? {label: edges.some(x => x.from === drag.from) ? 'No' : 'Yes'} : {})};
         setGraph(nodes, [...edges, e2]); setSelEdge(e2.id); setSel(new Set());
       }
     }
     if (drag.mode === 'marquee') {
       const [x0, x1] = [Math.min(drag.x0, drag.x), Math.max(drag.x0, drag.x)], [y0, y1] = [Math.min(drag.y0, drag.y), Math.max(drag.y0, drag.y)];
-      setSel(new Set(nodes.filter(n => n.x >= x0 && n.y >= y0 && n.x + n.w <= x1 && n.y + n.h <= y1).map(n => n.id)));
+      // A box selects what it touches; a frame only when fully inside.
+      const touched = nodes.filter(n => n.kind === 'frame' ? n.x >= x0 && n.y >= y0 && n.x + n.w <= x1 && n.y + n.h <= y1 : n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0).map(n => n.id);
+      if (Math.abs(drag.x - drag.x0) + Math.abs(drag.y - drag.y0) > 4) setSel(prev => e.shiftKey ? new Set([...prev, ...touched]) : new Set(touched));
     }
     setDrag(null);
   };
@@ -263,9 +310,11 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     else if ((e.metaKey || e.ctrlKey) && e.key === 'd') { e.preventDefault(); duplicate(); }
     else if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); setSel(new Set(nodes.map(n => n.id))); }
     else if (e.key === 'Escape') { setSel(new Set()); setSelEdge(null); }
+    else if (!e.metaKey && !e.ctrlKey && (e.key === 'v' || e.key === 'V')) setTool('select');
+    else if (!e.metaKey && !e.ctrlKey && (e.key === 'p' || e.key === 'P')) setTool('hand');
     else if (e.key === 'Enter' && sel.size === 1) { e.preventDefault(); setEditing([...sel][0]); }
     else if (!e.metaKey && !e.ctrlKey && !e.altKey) {
-      const k = ({t: 'task', s: 'sticky', x: 'text', r: 'shape', f: 'frame', l: 'link', g: 'trigger', w: 'webhook', e: 'end'} as Record<string, Kind>)[e.key];
+      const k = KINDS.find(x => x.key.toLowerCase() === e.key.toLowerCase())?.kind;
       if (k) { e.preventDefault(); add(k); }
     }
   };
@@ -304,7 +353,14 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     <div className="wb-bar">
       {back && <a className="btn ghost small" href="#/boards">All whiteboards</a>}
       <input className="wb-name" defaultValue={board.name} key={board.id + board.name} onBlur={e => e.target.value.trim() && e.target.value !== board.name && saveBoard({name: e.target.value.trim()})} />
-      <span className="wb-tools">{KINDS.map(k => <button key={k.kind} className="btn ghost small" title={`${k.hint} (${({task: 'T', sticky: 'S', text: 'X', shape: 'R', frame: 'F', link: 'L', trigger: 'G', webhook: 'W', end: 'E'} as Record<Kind, string>)[k.kind]})`} onClick={() => add(k.kind)}><k.icon size={14} /> {k.label}</button>)}</span>
+      <span className="wb-tools">
+        <button className={'btn ghost small' + (tool === 'select' ? ' on' : '')} title="Select: drag on the board to box-select (V)" onClick={() => setTool('select')}><MousePointer2 size={14} /></button>
+        <button className={'btn ghost small' + (tool === 'hand' ? ' on' : '')} title="Move around: drag to pan. Also middle mouse or Space+drag (P)" onClick={() => setTool('hand')}><Hand size={14} /></button>
+        <span className="wb-sep" />
+        {KINDS.filter(k => k.group === 'flow').map(k => <button key={k.kind} className="btn ghost small" title={`${k.hint} (${k.key})`} onClick={() => add(k.kind)}><k.icon size={14} /> {k.label}</button>)}
+        <span className="wb-sep" />
+        {KINDS.filter(k => k.group === 'notes').map(k => <button key={k.kind} className="btn ghost small" title={`${k.hint} (${k.key})`} onClick={() => add(k.kind)}><k.icon size={14} /> {k.label}</button>)}
+      </span>
       <span className="spacer" />
       <button className="btn small" title="Create a task for every task card that has none. Arrows become dependencies" onClick={toTasks}><ListPlus size={13} /> Create tasks</button>
       <button className="btn small primary" title={space ? `Run it: makes its tasks in ${space.name}, in order, and fires its webhooks` : 'Put the board in a space first'} disabled={!space} onClick={doRun}><Play size={13} /> Run</button>
@@ -312,7 +368,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
       <button className={'btn small' + (sideMode === 'board' && panel === 'board' ? ' on' : '')} onClick={() => setPanel(p => p === 'board' ? 'auto' : 'board')} title="Space, webhooks and the inbound link"><Settings2 size={13} /></button>
     </div>
     <div className="wb-main">
-      <div className={'wb-canvas' + (drag?.mode === 'pan' ? ' panning' : '')} ref={canvas} tabIndex={0} onMouseDown={onBgDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onKeyDown={onKey} onPaste={onPaste}
+      <div className={'wb-canvas' + (drag?.mode === 'pan' ? ' panning' : '') + (tool === 'hand' ? ' hand' : '') + (drag?.mode === 'connect' ? ' connecting' : '')} onAuxClick={e => e.preventDefault()} ref={canvas} tabIndex={0} onMouseDown={onBgDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp} onKeyDown={onKey} onPaste={onPaste}
         onDoubleClick={e => { if (e.target === canvas.current || (e.target as HTMLElement).classList.contains('wb-world')) add('sticky', toWorld(e.clientX, e.clientY)); }}
         style={{backgroundSize: `${20 * cam.k}px ${20 * cam.k}px`, backgroundPosition: `${cam.x}px ${cam.y}px`}}>
         <div className="wb-world" style={{transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`}}>
@@ -325,7 +381,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
               const a = byId.get(e.from), b = byId.get(e.to);
               if (!a || !b) return null;
               const p1 = edgePoint(a, b.x + b.w / 2, b.y + b.h / 2), p2 = edgePoint(b, a.x + a.w / 2, a.y + a.h / 2);
-              const isLink = e.kind === 'link' || ['sticky', 'text', 'shape', 'frame', 'link'].includes(a.kind) || ['sticky', 'text', 'shape', 'frame', 'link'].includes(b.kind);
+              const isLink = e.kind === 'link' || NOTE_KINDS.has(a.kind) || NOTE_KINDS.has(b.kind);
               const on = selEdge === e.id, st = stepOf(e.from);
               const color = on ? 'var(--accent)' : st && (st.state === 'done' || st.state === 'fired') ? STATE_COLOR.done : 'var(--text2)';
               return <g key={e.id} onMouseDown={ev => { ev.stopPropagation(); setSelEdge(e.id); setSel(new Set()); canvas.current?.focus(); }}>
@@ -334,12 +390,16 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
                 {e.label && <text x={(p1.x + p2.x) / 2} y={(p1.y + p2.y) / 2 - 6} className="wb-elabel" textAnchor="middle">{e.label}</text>}
               </g>;
             })}
-            {drag?.mode === 'connect' && byId.get(drag.from) && (() => { const a = byId.get(drag.from)!, p = edgePoint(a, drag.x, drag.y); return <line x1={p.x} y1={p.y} x2={drag.x} y2={drag.y} stroke="var(--accent)" strokeWidth={2} strokeDasharray="4 4" />; })()}
+            {drag?.mode === 'connect' && byId.get(drag.from) && (() => {
+              const a = byId.get(drag.from)!, t = drag.target ? byId.get(drag.target) : undefined;
+              const end = t ? edgePoint(t, a.x + a.w / 2, a.y + a.h / 2) : {x: drag.x, y: drag.y}, p = edgePoint(a, end.x, end.y);
+              return <line x1={p.x} y1={p.y} x2={end.x} y2={end.y} stroke="var(--accent)" strokeWidth={2} strokeDasharray={t ? undefined : '4 4'} markerEnd={t ? 'url(#wb-arrow-on)' : undefined} />; })()}
             {drag?.mode === 'marquee' && <rect x={Math.min(drag.x0, drag.x)} y={Math.min(drag.y0, drag.y)} width={Math.abs(drag.x - drag.x0)} height={Math.abs(drag.y - drag.y0)} fill="var(--accent-soft)" stroke="var(--accent)" />}
           </svg>
           {nodes.map(n => <NodeView key={n.id} store={store} n={n} sops={sops} selected={sel.has(n.id)} editing={editing === n.id} step={stepOf(n.id)} open={open}
             onDown={e => onNodeDown(e, n)} onEdit={() => setEditing(n.id)} onText={text => { setEditing(null); if (text !== n.text) patchNode(n.id, {text}); }}
-            onConnect={e => { e.stopPropagation(); const p = toWorld(e.clientX, e.clientY); setDrag({mode: 'connect', from: n.id, x: p.x, y: p.y}); }}
+            snapping={drag?.mode === 'connect' && drag.target === n.id} onTable={t => patchNode(n.id, {table: t})}
+            onConnect={e => { e.stopPropagation(); const p = toWorld(e.clientX, e.clientY); setDrag({mode: 'connect', from: n.id, x: p.x, y: p.y, target: null}); }}
             onResize={e => { e.stopPropagation(); setDrag({mode: 'resize', id: n.id, sx: e.clientX, sy: e.clientY, w: n.w, h: n.h}); }} />)}
         </div>
         {!nodes.length && <div className="wb-empty muted">Add a card from the toolbar, double-click for a sticky, or paste a link. Drag from a card's dot to connect it.</div>}
@@ -367,8 +427,8 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
   </div>;
 }
 
-function NodeView({store, n, sops, selected, editing, step, open, onDown, onEdit, onText, onConnect, onResize}: {store: Store; n: WbNode; sops: Record<string, string>; selected: boolean; editing: boolean; step?: Step; open: (id: string) => void;
-  onDown: (e: React.MouseEvent) => void; onEdit: () => void; onText: (t: string) => void; onConnect: (e: React.MouseEvent) => void; onResize: (e: React.MouseEvent) => void}) {
+function NodeView({store, n, sops, selected, editing, step, open, onDown, onEdit, onText, onConnect, onResize, snapping, onTable}: {store: Store; n: WbNode; sops: Record<string, string>; selected: boolean; editing: boolean; step?: Step; open: (id: string) => void;
+  onDown: (e: React.MouseEvent) => void; onEdit: () => void; onText: (t: string) => void; onConnect: (e: React.MouseEvent) => void; onResize: (e: React.MouseEvent) => void; snapping?: boolean; onTable: (t: string[][]) => void}) {
   const item = n.kind === 'task' ? live(store.items, step?.itemId ?? n.itemId) : undefined;
   const project = item ? store.projects.find(p => p.id === item.projectId) : undefined;
   const status = item && project ? project.statuses.find(s => s.id === item.status) : undefined;
@@ -404,12 +464,17 @@ function NodeView({store, n, sops, selected, editing, step, open, onDown, onEdit
   else if (n.kind === 'webhook') body = <div className="wb-iconbody"><Webhook size={14} /> <span><b>{n.text || 'Webhook'}</b><br /><span className="muted small">{n.url ? new URL(n.url).hostname : 'Set the URL'}</span>{step && <><br /><span className="wb-step" style={{background: STATE_COLOR[step.state]}}>{step.state}</span></>}</span></div>;
   else if (n.kind === 'end') body = <div className="wb-iconbody center"><Flag size={14} /> {n.text || 'Done'}</div>;
   else if (n.kind === 'frame') body = <div className="wb-frame-title">{n.text}</div>;
+  else if (n.kind === 'title') { const [h, ...rest] = n.text.split('\n'); body = <div className="wb-titlebody"><div className="wb-h1">{h}</div>{rest.length > 0 && <div className="wb-sub">{rest.join(' ')}</div>}</div>; }
+  else if (n.kind === 'terminal') body = <div className="wb-iconbody center">{/stop|end|done|finish/i.test(n.text) ? <Square size={13} /> : <CirclePlay size={14} />} <b>{n.text || 'Start'}</b></div>;
+  else if (n.kind === 'decision') body = <div className="wb-decision-text">{n.text || 'Yes or no?'}</div>;
+  else if (n.kind === 'info') body = <div className="wb-infobody"><Info size={14} className="wb-info-ico" /><div className="wb-text">{n.text}</div></div>;
+  else if (n.kind === 'table') body = <TableBody rows={n.table ?? [['']]} onChange={onTable} />;
   else body = <div className="wb-text">{n.text}</div>;
-  return <div className={`wb-node k-${n.kind}${n.kind === 'shape' ? ' s-' + (n.shape ?? 'rect') : ''}${selected ? ' sel' : ''}`} style={style} onMouseDown={onDown} onDoubleClick={e => { e.stopPropagation(); onEdit(); }} data-node={n.id}>
-    {n.kind === 'shape' && n.shape === 'diamond' && <svg className="wb-diamond" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,2 98,50 50,98 2,50" fill="var(--card)" stroke={n.color ?? 'var(--text2)'} strokeWidth={1.5} vectorEffect="non-scaling-stroke" /></svg>}
+  return <div className={`wb-node k-${n.kind}${n.kind === 'shape' ? ' s-' + (n.shape ?? 'rect') : ''}${selected ? ' sel' : ''}${snapping ? ' snap' : ''}`} style={style} onMouseDown={onDown} onDoubleClick={e => { e.stopPropagation(); onEdit(); }} data-node={n.id}>
+    {((n.kind === 'shape' && n.shape === 'diamond') || n.kind === 'decision') && <svg className="wb-diamond" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,2 98,50 50,98 2,50" fill={n.kind === 'decision' ? 'color-mix(in srgb, #f59e0b 12%, var(--card))' : 'var(--card)'} stroke={n.color ?? (n.kind === 'decision' ? '#f59e0b' : 'var(--text2)')} strokeWidth={1.6} vectorEffect="non-scaling-stroke" /></svg>}
     {body}
-    {!editing && n.kind !== 'frame' && <span className="wb-handle" title="Drag to another card to connect" onMouseDown={onConnect} />}
-    {!editing && n.kind === 'frame' && <span className="wb-handle frame" title="Drag to another card to connect" onMouseDown={onConnect} />}
+    {/* Connection dots on all four sides: drag from any to another card. While connecting, the card it will join lights up. */}
+    {!editing && (['t', 'r', 'b', 'l'] as const).map(side => <span key={side} className={`wb-port p-${side}`} title="Drag to another card to connect" onMouseDown={onConnect} />)}
     {selected && !editing && <span className="wb-resize" onMouseDown={onResize} />}
   </div>;
 }
@@ -455,6 +520,12 @@ function NodeInspector({store, n, space, sops, patch, remove, duplicate, open}: 
       {n.trigger?.on === 'completed' && <label>Tag or task key<input className="plain-input" placeholder="SOP-07.2 or OPS-12" defaultValue={n.trigger.tag ?? ''} key={n.id + 't'} onBlur={e => e.target.value.trim() && patch({trigger: {...n.trigger!, tag: e.target.value.trim()}})} /></label>}
       {n.trigger?.on === 'webhook' && <p className="muted small">The inbound link is in the board settings (gear button).</p>}
     </>}
+    {n.kind === 'table' && <div className="row">
+      <button className="btn small" onClick={() => { const t = n.table ?? [['']]; patch({table: [...t, Array(t[0]?.length ?? 1).fill('')], h: n.h + 32}); }}><Plus size={12} /> Row</button>
+      <button className="btn small" onClick={() => { const t = n.table ?? [['']]; patch({table: t.map((r, i) => [...r, i === 0 ? 'Column' : '']), w: n.w + 110}); }}><Plus size={12} /> Column</button>
+      <button className="btn small" disabled={(n.table?.length ?? 0) <= 1} onClick={() => patch({table: (n.table ?? []).slice(0, -1), h: Math.max(60, n.h - 32)})}><Minus size={12} /> Row</button>
+      <button className="btn small" disabled={(n.table?.[0]?.length ?? 0) <= 1} onClick={() => patch({table: (n.table ?? []).map(r => r.slice(0, -1)), w: Math.max(120, n.w - 110)})}><Minus size={12} /> Column</button>
+      <span className="muted small">Double-click a cell to type; Tab moves on; Enter on the last row adds one.</span></div>}
     {n.kind === 'shape' && <label>Shape<select className="plain-input" value={n.shape ?? 'rect'} onChange={e => patch({shape: e.target.value as 'rect'})}><option value="rect">Box</option><option value="ellipse">Circle</option><option value="diamond">Decision</option></select></label>}
     {n.kind !== 'text' && <div className="wb-field"><span className="muted small">Color</span><div className="row">{(n.kind === 'sticky' ? STICKY : ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#64748b']).map(c => <button key={c} className={'wb-swatch' + ((n.color ?? '') === c ? ' on' : '')} style={{background: c}} onClick={() => patch({color: c})} />)}
       {n.kind !== 'sticky' && <button className="btn ghost small" onClick={() => patch({color: null})}>None</button>}</div></div>}
@@ -481,7 +552,8 @@ function BoardSettings({store, board, save, nodes}: {store: Store; board: Board;
       <div className="row"><input className="plain-input grow" placeholder="https://hooks.zapier.com/..." value={url} onChange={e => setUrl(e.target.value)} />
         <button className="btn small" disabled={!/^https?:\/\//.test(url)} onClick={() => { save({webhooks: [...board.webhooks, {id: rid(), url, events: []}]}); setUrl(''); }}><Plus size={12} /> Add</button></div></div>
     <div className="row" style={{marginTop: 16}}><button className="btn small danger" onClick={async () => { if (!confirm(`Delete "${board.name}" and its run history? Tasks made from it stay.`)) return; try { await api(`/boards/${board.id}`, {method: 'DELETE'}); location.hash = '/boards'; } catch (e) { store.fail(e); } }}><Trash2 size={12} /> Delete board</button></div>
-    <p className="muted small">Keys: T task, S sticky, X text, R shape, F frame, L link, G trigger, W webhook, E end. Enter edits, Delete removes, Ctrl+D duplicates, Shift+drag selects an area, Ctrl+wheel zooms. Paste a link to add it.</p>
+    <p className="muted small">Drag on the board to select; middle mouse, Space+drag or the hand (P) to move around; Shift+wheel scrolls sideways; Ctrl+wheel zooms. Drag from a card's dot toward another card: the arrow snaps to it.</p>
+    <p className="muted small">Keys: {KINDS.map(k => `${k.key} ${k.label.toLowerCase()}`).join(', ')}. V select. Enter edits, Delete removes, Ctrl+D duplicates. Paste a link to add it.</p>
   </div>;
 }
 
@@ -516,4 +588,26 @@ export function ItemBoards({store, item}: {store: Store; item: Item}) {
   useEffect(() => { api<Board[]>(`/boards?itemId=${item.id}`).then(l => setList(l.map(b => ({id: b.id, name: b.name})))).catch(() => setList([])); }, [item.id, store.tick]);
   if (!list.length) return null;
   return <span className="sop-links">{list.map(b => <a key={b.id} className="tag" href={`#/boards/${b.id}`} title="Open the whiteboard"><Workflow size={10} /> {b.name}</a>)}</span>;
+}
+
+/** A table card: the first row is the header. Double-click a cell to edit; Tab moves to the next cell, Enter on the last row adds one. */
+function TableBody({rows, onChange}: {rows: string[][]; onChange: (t: string[][]) => void}) {
+  const [cell, setCell] = useState<[number, number] | null>(null);
+  const set = (r: number, c: number, v: string) => onChange(rows.map((row, i) => i === r ? row.map((x, j) => j === c ? v : x) : row));
+  const cols = Math.max(1, ...rows.map(r => r.length));
+  return <table className="wb-table" onMouseDown={e => { if (cell) e.stopPropagation(); }}>
+    <tbody>{rows.map((row, r) => <tr key={r}>{Array.from({length: cols}, (_, c) => {
+      const Tag = r === 0 ? 'th' : 'td';
+      const on = cell?.[0] === r && cell[1] === c;
+      return <Tag key={c} onDoubleClick={e => { e.stopPropagation(); setCell([r, c]); }}>
+        {on ? <input autoFocus defaultValue={row[c] ?? ''} onMouseDown={e => e.stopPropagation()}
+          onBlur={e => { setCell(null); if (e.target.value !== (row[c] ?? '')) set(r, c, e.target.value); }}
+          onKeyDown={e => {
+            e.stopPropagation();
+            if (e.key === 'Escape') setCell(null);
+            if (e.key === 'Tab') { e.preventDefault(); const v = (e.target as HTMLInputElement).value; if (v !== (row[c] ?? '')) set(r, c, v); const n = r * cols + c + (e.shiftKey ? -1 : 1); if (n >= 0 && n < rows.length * cols) setCell([Math.floor(n / cols), n % cols]); else setCell(null); }
+            if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value; const next = rows.map((x, i) => i === r ? x.map((y, j) => j === c ? v : y) : x); if (r === rows.length - 1) next.push(Array(cols).fill('')); onChange(next); setCell([r + 1, c]); }
+          }} /> : (row[c] || <span className="wb-cell-empty">{r === 0 ? 'Column' : ''}</span>)}
+      </Tag>; })}</tr>)}</tbody>
+  </table>;
 }

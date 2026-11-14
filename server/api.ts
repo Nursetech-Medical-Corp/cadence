@@ -1162,9 +1162,15 @@ If you did not ask for it, ignore this email.`)
         const one = (ref: string) => { const bd = tasks.board(ref); if (!seesB(bd)) throw new NotFound('No such whiteboard'); return bd; };
         const edit = (ref: string) => { const bd = one(ref); if (!editsB(bd)) throw new Denied('You cannot change this whiteboard'); return bd; };
         const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
-        const BOARD_KEYS = ['name', 'description', 'projectId', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
+        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
         const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
-        if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), sop: q('sop'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        // One board per SOP for every routine (existing SOP boards are kept).
+        if (b === 'by-sop' && m === 'POST') {
+          if (held('boardsBySop', [{actor}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor}]));
+          const r = tasks.boardsBySop({actor, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
+          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out)});
+        }
         if (!b && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
           const input = pick(body, BOARD_KEYS);
@@ -1174,6 +1180,10 @@ If you did not ask for it, ignore this email.`)
         if (b === 'from-items' && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
           const qy = pick(body, ['name', 'projectId', 'tag', 'parentId', 'itemIds', 'routines']);
+          // An SOP already has its board: open that one instead of making another.
+          const code = typeof body.tag === 'string' && /^sop-/i.test(body.tag) ? body.tag.toUpperCase() : null;
+          const have = code ? tasks.listBoards({sop: code}).find(seesB) : undefined;
+          if (have && !body.fresh) return send(res, 200, out(have));
           if (held('boardFromItems', [qy, actor])) return send(res, 202, propose(tasks, actor!, 'boardFromItems', [qy, actor]));
           return send(res, 201, out(tasks.boardFromItems(qy, actor, canSee)));
         }

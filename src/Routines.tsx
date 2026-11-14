@@ -4,7 +4,7 @@
 // A routine has one live copy; finishing it makes the next. Switch one (or a whole SOP) off, delay this copy,
 // skip it, make it wait for other work (a hire, a W-2 setup), or end it.
 import {Fragment, useEffect, useMemo, useState} from 'react';
-import {CircleStop, Clock3, ExternalLink, Hourglass, Plus, Repeat, SkipForward} from 'lucide-react';
+import {Workflow, CircleStop, Clock3, ExternalLink, Hourglass, Plus, Repeat, SkipForward} from 'lucide-react';
 import type {Item, Template} from './types.ts';
 import {api, type Store, realProjects} from './store.ts';
 import {Avatar, DateInput, Empty, PeoplePicker, fmtHours, itemKey} from './components.tsx';
@@ -169,6 +169,8 @@ function RoutineList({store, groups, group, open, busy, act, delay, wait, sopLin
               onClick={() => act((on.length ? on : list).map(i => i.id), on.length ? 'pause' : 'resume')} />}
             <b>{label}</b> <span className="count">{list.length}</span>
             {link && <a className="small" href={link} target="_blank" rel="noreferrer" title="Open the SOP"><ExternalLink size={12} /> SOP</a>}
+            {group === 'sop' && /^SOP-/i.test(label) && <button className="small link" title="Open this SOP's whiteboard (made the first time from its routines, in order)" onClick={async () => {
+              try { const b = await api<{id: string}>('/boards/from-items', {method: 'POST', body: {routines: true, tag: label}}); location.hash = `/boards/${b.id}`; } catch (e) { store.fail(e); } }}><Workflow size={12} /> Whiteboard</button>}
             <span className="muted small" style={{marginLeft: 'auto'}}>{fmtHours(hoursWeek(list))} / week</span>
           </div>
           {list.map(i => {

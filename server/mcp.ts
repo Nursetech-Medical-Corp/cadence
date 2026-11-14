@@ -240,12 +240,13 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     i => tasks.autoSchedule(me(), i.date ?? tasks.today(), {from: i.from, offsetMinutes: i.offsetMinutes}));
   // ---- Whiteboards: design workflows on a canvas, link cards to tasks and SOP documents, run them ----
   const nodeShape = z.object({
-    id: z.string().optional().describe('Your own short id, so connections can refer to it'), kind: z.enum(['task', 'sticky', 'text', 'shape', 'frame', 'link', 'trigger', 'webhook', 'end']),
+    id: z.string().optional().describe('Your own short id, so connections can refer to it'), kind: z.enum(['task', 'sticky', 'text', 'shape', 'frame', 'link', 'trigger', 'webhook', 'end', 'terminal', 'decision', 'info', 'table', 'title']).describe('terminal: start or stop pill; decision: a yes/no diamond (label its arrows); info: a note box; table: rows of cells (first row is the header); title: a board heading (first line big, the rest a subtitle)'),
     x: z.number().optional(), y: z.number().optional(), w: z.number().optional(), h: z.number().optional(), text: z.string().optional().describe('Card text; for task cards the first line is the title'),
     color: z.string().optional(), item: z.string().optional().describe('task: link to an existing item (id or key)'), url: z.string().optional().describe('link: the document (Google Drive SOP); webhook: where it POSTs'),
     assignees: z.array(z.string()).optional().describe('task: person names or ids (or none)'), worker: z.enum(['human', 'ai', 'either']).optional(), sop: z.string().optional().describe('SOP code like SOP-07.2'),
     estimate: z.number().optional().describe('Hours'), repeat: z.string().optional().describe('task: repeat for Create tasks, like week, 2w, month, weekdays'),
     shape: z.enum(['rect', 'ellipse', 'diamond']).optional(),
+    table: z.array(z.array(z.string())).optional().describe('table: rows of cells, first row is the header'),
     trigger: z.object({on: z.enum(['manual', 'webhook', 'completed', 'schedule']), tag: z.string().optional().describe('completed: tag or item key that starts a run when finished'), every: z.enum(['day', 'week', 'month']).optional()}).optional(),
   });
   const edgeShape = z.object({id: z.string().optional(), from: z.string(), to: z.string(), label: z.string().optional(), kind: z.enum(['flow', 'link']).optional().describe('flow: order of work (default); link: just related')});
@@ -279,6 +280,8 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('board_from_items', 'Draw a whiteboard from existing work: every routine (grouped by SOP, with its SOP document), items with a tag (like SOP-07.2), the children of an item, or a list of items. Dependencies become arrows.',
     {name: z.string().optional(), project: z.string().optional(), routines: z.boolean().optional(), tag: z.string().optional(), parent: z.string().optional(), items: z.array(z.string()).optional()}, false,
     i => { const r = tasks.boardFromItems({name: i.name, projectId: i.project ? projectId(i.project) : undefined, routines: i.routines, tag: i.tag, parentId: i.parent ? tasks.findItem(i.parent).id : undefined, itemIds: i.items?.map(x => tasks.findItem(x).id)}, actor) as any; return r?.proposal ? r : boardSummary(r); });
+  tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it.', {}, false,
+    () => { const r = tasks.boardsBySop({actor}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop}))}; });
   tool('board_to_tasks', 'Create real tasks from a whiteboard\'s task cards that have no item yet (in the board\'s space, or project), with arrows as dependencies and repeat as routines. Linked cards are left alone.',
     {board: z.string(), project: z.string().optional(), parent: z.string().optional()}, false,
     i => tasks.boardToTasks(boardRef(i.board), actor, {projectId: i.project ? projectId(i.project) : undefined, parentId: i.parent ? tasks.findItem(i.parent).id : undefined}));

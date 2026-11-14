@@ -62,6 +62,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     updateDayPlan: (person) => self(person, 'plan days'),
     autoSchedule: (person) => self(person, 'plan days'),
     createSubspace: (pid) => need(pid, 'settings'),
+    boardsBySop: (o) => { if (o) o.visible = tasks.listProjects().filter(p => sees(p.id) && caps(p.id).has('edit')).map(p => p.id); else throw new Forbidden('Pass options'); },
     createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
     updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
     deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },
@@ -149,6 +150,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   };
   const filters: Record<string, (r: any) => any> = {
     listBoards: (r: any[]) => r.filter(seesBoard).map(boardOut),
+    boardsBySop: (r: any) => ({made: r.made.map(boardOut), kept: r.kept.filter(seesBoard).map(boardOut)}),
     board: (b: any) => { if (!seesBoard(b)) throw new Forbidden('Not found'); return boardOut(b); },
     createBoard: boardOut, updateBoard: boardOut, boardFromItems: boardOut,
     listBoardRuns: (r: any[]) => r.filter(x => { try { return seesBoard(boardOf(x.boardId)); } catch { return false; } }),

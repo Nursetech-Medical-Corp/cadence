@@ -77,6 +77,35 @@ test('whiteboards: draw routines by SOP with their document; create tasks from c
   assert.equal(t.boardToTasks(d.id, david.id).created.length, 0, 'running it again creates nothing new');
 });
 
+test('whiteboards: one board per SOP with a title and its document; flowchart kinds and tables', () => {
+  const {t, david, p} = setup();
+  setSopLinks(t, [{code: 'SOP-01.1', url: 'https://docs.google.com/document/d/one', title: 'Bookkeeping'}]);
+  const a = t.createItem({projectId: p.id, title: 'Reconcile', tags: ['SOP-01.1'], due: '2026-11-16', estimate: 1, recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  t.createItem({projectId: p.id, title: 'Close books', tags: ['SOP-01.1'], deps: [a.id], due: '2026-11-17', recur: {every: 1, unit: 'month', mode: 'schedule'}}, david.id);
+  t.createItem({projectId: p.id, title: 'Post jobs', tags: ['SOP-02.1'], due: '2026-11-16', recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  const r = t.boardsBySop({actor: david.id});
+  assert.deepEqual(r.made.map(b => b.sop).sort(), ['SOP-01.1', 'SOP-02.1']);
+  const one = r.made.find(b => b.sop === 'SOP-01.1')!;
+  assert.match(one.nodes.find(n => n.kind === 'title')!.text, /^SOP-01.1 Bookkeeping flow\n2 routines, 1h each round/);
+  assert.equal(one.nodes.find(n => n.kind === 'link')!.url, 'https://docs.google.com/document/d/one');
+  assert.ok(!one.nodes.some(n => n.kind === 'frame'), 'a board for one SOP needs no frame');
+  assert.equal(t.listBoards({sop: 'sop-01.1'}).length, 1);
+  assert.equal(t.boardsBySop({actor: david.id}).made.length, 0, 'SOPs that have a board keep it');
+
+  const b = t.createBoard({name: 'Flow', projectId: p.id, nodes: [
+    {id: 's', kind: 'terminal', x: 0, y: 0, w: 0, h: 0, text: 'Start'},
+    {id: 'd', kind: 'decision', x: 200, y: 0, w: 0, h: 0, text: 'Paid?'},
+    {id: 'y', kind: 'task', x: 400, y: 0, w: 0, h: 0, text: 'Ship'},
+    {id: 'i', kind: 'info', x: 400, y: 200, w: 0, h: 0, text: 'Ships take 2 days'},
+    {id: 'tb', kind: 'table', x: 0, y: 300, w: 0, h: 0, text: '', table: [['Name', 'Owner'], ['Ship', 'Sam', 'extra']]},
+  ], edges: [{id: '1', from: 's', to: 'd'}, {id: '2', from: 'd', to: 'y', label: 'Yes'}, {id: '3', from: 'i', to: 'y'}]}, david.id);
+  assert.deepEqual(b.nodes.find(n => n.id === 'tb')!.table, [['Name', 'Owner', ''], ['Ship', 'Sam', 'extra']], 'rows are padded to the same width');
+  assert.equal(b.edges.find(e => e.id === '2')!.kind, 'flow', 'decisions are part of the flow');
+  assert.equal(b.edges.find(e => e.id === '3')!.kind, 'link', 'info boxes only link');
+  const run = t.runBoard(b.id, david.id);
+  assert.deepEqual(run.steps.map(x => x.node), ['y'], 'start, decision and notes are not steps');
+});
+
 test('whiteboards: a run makes tasks in order, fires webhooks when steps are done, logs and finishes', async () => {
   const {t, david, p, done, posts} = setup();
   const linked = t.createItem({projectId: p.id, title: 'Existing check'}, david.id);

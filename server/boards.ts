@@ -17,7 +17,7 @@ import {daysBetween} from '../src/dates.ts';
 import type {Item} from '../src/types.ts';
 import {listSopLinks, sopCode} from './sops.ts';
 
-export const NODE_KINDS = ['task', 'sticky', 'text', 'shape', 'frame', 'link', 'trigger', 'webhook', 'end'] as const;
+export const NODE_KINDS = ['task', 'sticky', 'text', 'shape', 'frame', 'link', 'trigger', 'webhook', 'end', 'terminal', 'decision', 'info', 'table', 'title'] as const;
 export type NodeKind = typeof NODE_KINDS[number];
 export type TriggerOn = 'manual' | 'webhook' | 'completed' | 'schedule';
 export type BoardNode = {
@@ -30,11 +30,15 @@ export type BoardNode = {
   /** task: quick-add repeat, like week, 2w, month or weekdays, used by Create tasks. */
   repeat?: string | null;
   shape?: 'rect' | 'ellipse' | 'diamond';
+  /** table: rows of cells; the first row is the header. */
+  table?: string[][];
   trigger?: {on: TriggerOn; tag?: string | null; every?: 'day' | 'week' | 'month' | null};
 };
 export type BoardEdge = {id: string; from: string; to: string; label?: string | null; kind?: 'flow' | 'link'};
 export type BoardHook = {id: string; url: string; events: string[]};
-export type Board = {id: string; projectId: string | null; name: string; description: string; nodes: BoardNode[]; edges: BoardEdge[];
+export type Board = {id: string; projectId: string | null; name: string; description: string;
+  /** The SOP this board maps (one board per SOP), so routines link to it. */
+  sop: string | null; nodes: BoardNode[]; edges: BoardEdge[];
   webhooks: BoardHook[]; hookKey: string; createdBy: string | null; created: string; updated: string; lastScheduled: string | null};
 export type StepState = 'waiting' | 'open' | 'done' | 'firing' | 'fired' | 'failed' | 'skipped';
 export type Step = {node: string; kind: NodeKind; title: string; itemId: string | null; state: StepState; at: string | null; note: string | null};
@@ -44,7 +48,8 @@ export type Run = {id: string; boardId: string; state: 'running' | 'done' | 'fai
 
 export const RUN_EVENTS = ['run.started', 'step.done', 'run.done', 'run.failed'] as const;
 const STEP_KINDS = new Set<NodeKind>(['task', 'webhook', 'end']);
-const NON_FLOW = new Set<NodeKind>(['sticky', 'text', 'shape', 'frame', 'link']);
+// Notes and layout never take part in the order of work. Start/stop and decisions pass the flow through.
+const NON_FLOW = new Set<NodeKind>(['sticky', 'text', 'shape', 'frame', 'link', 'info', 'table', 'title']);
 const now = () => new Date().toISOString();
 const rid = () => randomBytes(6).toString('hex');
 const j = <T>(s: unknown, d: T): T => { try { return typeof s === 'string' && s ? JSON.parse(s) : d; } catch { return d; } };
@@ -74,16 +79,17 @@ export function migrateBoards(tasks: Tasks) {
 }
 
 const toBoard = (r: Record<string, unknown>): Board => {
-  const d = j<{nodes?: BoardNode[]; edges?: BoardEdge[]}>(r.data, {});
-  return {id: r.id as string, projectId: (r.project_id as string) ?? null, name: r.name as string, description: r.description as string, nodes: d.nodes ?? [], edges: d.edges ?? [],
+  const d = j<{nodes?: BoardNode[]; edges?: BoardEdge[]; sop?: string | null}>(r.data, {});
+  return {id: r.id as string, projectId: (r.project_id as string) ?? null, name: r.name as string, description: r.description as string, sop: d.sop ?? null, nodes: d.nodes ?? [], edges: d.edges ?? [],
     webhooks: j(r.webhooks, []), hookKey: r.hook_key as string, createdBy: (r.created_by as string) ?? null, created: r.created as string, updated: r.updated as string, lastScheduled: (r.last_scheduled as string) ?? null};
 };
 const toRun = (r: Record<string, unknown>): Run => ({id: r.id as string, boardId: r.board_id as string, state: r.state as Run['state'], trigger: r.trigger as string, by: (r.by as string) ?? null,
   started: r.started as string, finished: (r.finished as string) ?? null, parentItem: (r.parent_item as string) ?? null, input: j(r.input, null), steps: j(r.steps, []), log: j(r.log, [])});
 
-export function listBoards(tasks: Tasks, q: {projectId?: string; itemId?: string} = {}): Board[] {
+export function listBoards(tasks: Tasks, q: {projectId?: string; itemId?: string; sop?: string} = {}): Board[] {
   migrateBoards(tasks);
   let list = tasks.db.prepare('select * from boards order by updated desc').all().map(toBoard);
+  if (q.sop) list = list.filter(b => b.sop === q.sop!.toUpperCase());
   if (q.projectId) list = list.filter(b => b.projectId === q.projectId);
   if (q.itemId) { const ids = new Set(itemChain(tasks, q.itemId)); list = list.filter(b => b.nodes.some(n => n.itemId && (ids.has(n.itemId) || ids.has(liveId(tasks, n.itemId))))); }
   return list;
@@ -117,7 +123,8 @@ function itemChain(tasks: Tasks, itemId: string) {
 
 const num = (v: unknown, d: number, min: number, max: number) => typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : d;
 const str = (v: unknown, max: number) => typeof v === 'string' ? v.slice(0, max) : '';
-const SIZES: Record<NodeKind, [number, number]> = {task: [220, 96], sticky: [180, 140], text: [200, 40], shape: [160, 100], frame: [600, 400], link: [220, 64], trigger: [180, 64], webhook: [200, 72], end: [120, 52]};
+const SIZES: Record<NodeKind, [number, number]> = {task: [220, 96], sticky: [180, 140], text: [200, 40], shape: [160, 100], frame: [600, 400], link: [220, 64], trigger: [180, 64], webhook: [200, 72], end: [120, 52],
+  terminal: [150, 56], decision: [170, 110], info: [240, 110], table: [360, 150], title: [480, 64]};
 
 function cleanNode(tasks: Tasks, n: Partial<BoardNode>, people: Set<string>): BoardNode {
   if (!n || typeof n !== 'object') throw new Invalid('Each node must be an object');
@@ -139,6 +146,12 @@ function cleanNode(tasks: Tasks, n: Partial<BoardNode>, people: Set<string>): Bo
     if (n.repeat) out.repeat = str(n.repeat, 20);
   }
   if (kind === 'shape') out.shape = n.shape === 'ellipse' || n.shape === 'diamond' ? n.shape : 'rect';
+  if (kind === 'table') {
+    const rows = Array.isArray(n.table) ? n.table : [['Name', 'Notes'], ['', '']];
+    out.table = rows.slice(0, 50).map(r => (Array.isArray(r) ? r : []).slice(0, 12).map(c => String(c ?? '').slice(0, 500)));
+    const cols = Math.max(1, ...out.table.map(r => r.length));
+    out.table = out.table.map(r => [...r, ...Array(cols - r.length).fill('')]);
+  }
   if (kind === 'trigger') {
     const t = n.trigger ?? {on: 'manual'};
     if (!['manual', 'webhook', 'completed', 'schedule'].includes(t.on)) throw new Invalid('trigger.on must be manual, webhook, completed or schedule');
@@ -173,16 +186,18 @@ function cleanHooks(v: unknown): BoardHook[] {
   });
 }
 
-export type BoardInput = {name?: string; description?: string; projectId?: string | null; nodes?: BoardNode[]; edges?: BoardEdge[]; webhooks?: BoardHook[]};
+export type BoardInput = {name?: string; description?: string; projectId?: string | null; nodes?: BoardNode[]; edges?: BoardEdge[]; webhooks?: BoardHook[]; sop?: string | null};
+const cleanSop = (v: unknown) => v ? sopCode(String(v)) : null;
+const dataOf = (b: {nodes: BoardNode[]; edges: BoardEdge[]; sop: string | null}) => JSON.stringify({nodes: b.nodes, edges: b.edges, ...(b.sop ? {sop: b.sop} : {})});
 export function createBoard(tasks: Tasks, input: BoardInput, actor: string | null): Board {
   migrateBoards(tasks);
   const name = str(input.name, 200).trim() || 'Untitled board';
   if (input.projectId) { const p = tasks.project(input.projectId); if (p.settings.rollup) throw new Invalid('Put a whiteboard in a real space, not a rollup'); }
   const g = cleanGraph(tasks, input.nodes ?? [], input.edges ?? []);
-  const t = now(), b: Board = {id: rid(), projectId: input.projectId ?? null, name, description: str(input.description, 5000), ...g, webhooks: cleanHooks(input.webhooks ?? []),
+  const t = now(), b: Board = {id: rid(), projectId: input.projectId ?? null, name, description: str(input.description, 5000), sop: cleanSop(input.sop), ...g, webhooks: cleanHooks(input.webhooks ?? []),
     hookKey: 'wb_' + randomBytes(18).toString('base64url'), createdBy: actor, created: t, updated: t, lastScheduled: null};
   tasks.db.prepare('insert into boards (id, project_id, name, description, data, webhooks, hook_key, created_by, created, updated) values (?,?,?,?,?,?,?,?,?,?)')
-    .run(b.id, b.projectId, b.name, b.description, JSON.stringify({nodes: b.nodes, edges: b.edges}), JSON.stringify(b.webhooks), b.hookKey, actor, t, t);
+    .run(b.id, b.projectId, b.name, b.description, dataOf(b), JSON.stringify(b.webhooks), b.hookKey, actor, t, t);
   tasks.emit({kind: 'boards'});
   return b;
 }
@@ -208,10 +223,10 @@ export function updateBoard(tasks: Tasks, ref: string, patch: BoardInput & Board
   }
   const next: Board = {...b, ...g, projectId, name: patch.name !== undefined ? (str(patch.name, 200).trim() || b.name) : b.name,
     description: patch.description !== undefined ? str(patch.description, 5000) : b.description,
-    webhooks: patch.webhooks !== undefined ? cleanHooks(patch.webhooks) : b.webhooks,
+    webhooks: patch.webhooks !== undefined ? cleanHooks(patch.webhooks) : b.webhooks, sop: patch.sop !== undefined ? cleanSop(patch.sop) : b.sop,
     hookKey: patch.rotateKey ? 'wb_' + randomBytes(18).toString('base64url') : b.hookKey, updated: now()};
   tasks.db.prepare('update boards set project_id = ?, name = ?, description = ?, data = ?, webhooks = ?, hook_key = ?, updated = ? where id = ?')
-    .run(next.projectId, next.name, next.description, JSON.stringify({nodes: next.nodes, edges: next.edges}), JSON.stringify(next.webhooks), next.hookKey, next.updated, b.id);
+    .run(next.projectId, next.name, next.description, dataOf(next), JSON.stringify(next.webhooks), next.hookKey, next.updated, b.id);
   tasks.emit({kind: 'boards'});
   return next;
 }
@@ -291,10 +306,16 @@ export function boardFromItems(tasks: Tasks, q: {name?: string; projectId?: stri
   if (items.length > 400) items = items.slice(0, 400);
   const sopOf = (i: Item) => i.tags.map(t => sopCode(t)).find(Boolean) ?? null;
   const groups = new Map<string, Item[]>();
-  for (const i of items) { const g = q.routines || q.tag ? (sopOf(i) ?? 'No SOP') : ''; groups.set(g, [...(groups.get(g) ?? []), i]); }
+  for (const i of items) { const g = q.routines && !q.tag ? (sopOf(i) ?? 'No SOP') : ''; groups.set(g, [...(groups.get(g) ?? []), i]); }
   const sops = new Map(listSopLinks(tasks).map(l => [l.code, l]));
   const nodes: BoardNode[] = [], edges: BoardEdge[] = [], nodeOf = new Map<string, string>();
-  let top = 0;
+  const name = q.name || (q.tag ? `${sopCode(q.tag) && sops.get(sopCode(q.tag)!)?.title ? `${sopCode(q.tag)} ${sops.get(sopCode(q.tag)!)!.title}` : q.tag} flow` : q.routines ? 'Routines map' : q.parentId ? `${tasks.findItem(q.parentId).title} flow` : 'Work map');
+  // Every drawn board opens with a title and a one-line summary.
+  const hours = items.reduce((a, i) => a + (i.estimate ?? 0), 0);
+  nodes.push({id: rid(), kind: 'title', x: 0, y: -10, w: 640, h: 64, text: `${name}\n${items.length} ${q.routines || items.every(i => i.recur) ? 'routine' : 'task'}${items.length === 1 ? '' : 's'}${hours ? `, ${Math.round(hours * 10) / 10}h each round` : ''}${groups.size > 1 ? `, ${groups.size} SOPs` : ''}`});
+  const tagLink = q.tag && sopCode(q.tag) ? sops.get(sopCode(q.tag)!) ?? sops.get('*') : undefined;
+  if (tagLink) nodes.push({id: rid(), kind: 'link', x: 680, y: 0, w: 240, h: 56, text: sops.get(sopCode(q.tag!)!) ? `${sopCode(q.tag!)} document` : 'SOP master list', url: tagLink.url});
+  let top = 90;
   for (const [g, list] of [...groups].sort((a, c) => a[0].localeCompare(c[0]))) {
     const ids = new Set(list.map(i => i.id));
     const depth = new Map<string, number>();
@@ -324,8 +345,20 @@ export function boardFromItems(tasks: Tasks, q: {name?: string; projectId?: stri
   for (const i of items) for (const dpd of i.deps) if (nodeOf.has(dpd)) edges.push({id: rid(), from: nodeOf.get(dpd)!, to: nodeOf.get(i.id)!, kind: 'flow'});
   const projects = new Set(items.map(i => i.projectId));
   const projectId = q.projectId ?? (projects.size === 1 ? [...projects][0] : null);
-  const name = q.name || (q.tag ? `${q.tag} flow` : q.routines ? 'Routines map' : q.parentId ? `${tasks.findItem(q.parentId).title} flow` : 'Work map');
-  return createBoard(tasks, {name, projectId, nodes, edges}, actor);
+  return createBoard(tasks, {name, projectId, nodes, edges, sop: q.tag ? sopCode(q.tag) : null}, actor);
+}
+
+/** One board per SOP for every routine with an SOP tag. Boards already made for an SOP are kept, not duplicated. */
+export function boardsBySop(tasks: Tasks, actor: string | null, canSee: (projectId: string) => boolean = () => true, visible?: string[]) {
+  const see = (pid: string) => canSee(pid) && (!visible || visible.includes(pid));
+  const codes = [...new Set(tasks.listRoutines().filter(i => see(i.projectId)).flatMap(i => i.tags.map(t => sopCode(t)).filter((c): c is string => !!c)))].sort();
+  const made: Board[] = [], kept: Board[] = [];
+  for (const code of codes) {
+    const have = listBoards(tasks, {sop: code})[0];
+    if (have) { kept.push(have); continue; }
+    made.push(boardFromItems(tasks, {routines: true, tag: code}, actor, canSee));
+  }
+  return {made, kept};
 }
 
 // ---- Runs ----

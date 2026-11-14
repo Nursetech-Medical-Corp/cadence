@@ -1621,7 +1621,8 @@ export class Tasks {
   autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
-  listBoards(q: {projectId?: string; itemId?: string} = {}) { return boards.listBoards(this, q); }
+  listBoards(q: {projectId?: string; itemId?: string; sop?: string} = {}) { return boards.listBoards(this, q); }
+  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible); }
   board(ref: string) { return boards.getBoard(this, ref); }
   createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
   updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }

@@ -14,7 +14,8 @@
     "demo": "vite --mode demo --port 5191",
     "start": "tsx server/main.ts",
     "reset-password": "tsx server/reset-password.ts",
-    "decrypt-backup": "tsx server/decrypt-backup.ts"
+    "decrypt-backup": "tsx server/decrypt-backup.ts",
+    "e2e": "node tests/e2e/planner.e2e.cjs && node tests/e2e/whiteboard.e2e.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

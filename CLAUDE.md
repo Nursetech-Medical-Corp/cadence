@@ -6,5 +6,6 @@
   3. docs: `docs/AI-GUIDE.md` (feature map row, how it works, REST line) and `docs/MCP.md` (tools table),
   4. tests in `tests/`.
 - `tests/docs.test.ts` fails if any MCP tool is missing from the docs.
+- Before committing behavior changes, run the `feature-check` skill: `pnpm test`, `pnpm e2e`, and `docs/FEATURES-CHECKLIST.md`. Every bug found gets a checklist row and a scenario.
 - Keep generic features generic: no company names or data in code. Company data (SOP links, spaces, items) lives in the running instance, not the repo.
 - Writing style in docs and UI: short, plain, no em dashes.

@@ -1708,3 +1708,38 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 
 .dp-dropzone { border: 2px dashed var(--accent-line); border-radius: 6px; padding: 3px 8px; height: 31px; box-sizing: border-box; text-align: center; color: var(--muted); font-size: .9em; margin-top: 4px; }
 .dp-dropzone.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* Whiteboards: tools, ports and snapping, flowchart shapes, tables, titles */
+.wb-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
+.wb-canvas.hand { cursor: grab; } .wb-canvas.hand.panning { cursor: grabbing; }
+.wb-canvas { cursor: default; }
+.wb-handle { display: none; }
+.wb-port { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--card); border: 2px solid var(--accent); opacity: 0; cursor: crosshair; z-index: 3; transition: transform .1s, opacity .1s; }
+.wb-port::after { content: ''; position: absolute; inset: -8px; border-radius: 50%; } /* bigger grab area */
+.wb-port.p-t { top: -7px; left: calc(50% - 6px); } .wb-port.p-b { bottom: -7px; left: calc(50% - 6px); }
+.wb-port.p-l { left: -7px; top: calc(50% - 6px); } .wb-port.p-r { right: -7px; top: calc(50% - 6px); }
+.wb-node:hover .wb-port, .wb-node.sel .wb-port { opacity: 1; }
+.wb-port:hover { transform: scale(1.4); background: var(--accent); }
+.wb-canvas.connecting .wb-port { opacity: .55; }
+.wb-node.snap { outline: 3px solid var(--accent); outline-offset: 3px; box-shadow: 0 0 0 8px var(--accent-soft); }
+.wb-node.snap .wb-port { opacity: 1; background: var(--accent); }
+.wb-node.k-frame .wb-port.p-t, .wb-node.k-frame .wb-port.p-b, .wb-node.k-frame .wb-port.p-l { display: none; }
+.wb-node.k-frame .wb-port.p-r { top: 12px; }
+.wb-node.k-terminal { border-radius: 999px; border: 2px solid #22c55e; background: color-mix(in srgb, #22c55e 10%, var(--card)); justify-content: center; }
+.wb-node.k-decision { background: transparent; border: 0; box-shadow: none; align-items: center; justify-content: center; text-align: center; padding: 18px 26px; }
+.wb-node.k-decision.sel { outline-offset: -4px; }
+.wb-decision-text { font-weight: 600; font-size: 13px; line-height: 1.25; }
+.wb-node.k-info { border: 1px solid color-mix(in srgb, #0ea5e9 45%, transparent); border-left: 4px solid #0ea5e9; background: color-mix(in srgb, #0ea5e9 7%, var(--card)); }
+.wb-infobody { display: flex; gap: 8px; align-items: flex-start; overflow: hidden; }
+.wb-info-ico { color: #0ea5e9; flex: none; margin-top: 2px; }
+.wb-node.k-title { background: transparent; border: 0; box-shadow: none; padding: 0 4px; }
+.wb-titlebody { display: flex; flex-direction: column; gap: 2px; }
+.wb-h1 { font-size: 26px; font-weight: 750; letter-spacing: -.02em; line-height: 1.15; }
+.wb-sub { font-size: 14px; color: var(--muted); }
+.wb-node.k-table { padding: 0; overflow: hidden; }
+.wb-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.wb-table th, .wb-table td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; overflow: hidden; text-overflow: ellipsis; height: 30px; }
+.wb-table th { background: color-mix(in srgb, var(--accent) 10%, var(--card)); font-weight: 650; }
+.wb-table tr:nth-child(odd) td { background: var(--bg2); }
+.wb-table input { width: 100%; border: 0; outline: 2px solid var(--accent); border-radius: 3px; font: inherit; background: var(--card); color: var(--text); padding: 1px 3px; }
+.wb-cell-empty { color: var(--muted); font-weight: 400; }
