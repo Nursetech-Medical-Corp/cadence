@@ -13,6 +13,8 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
 
 ## Day planner
+- Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)
+- Box edges show a small grab line only when the pointer is on that edge.
 - Brain dump: Enter adds a line; pasting many lines adds them all. (e2e)
 - Match on shows at most 3 close tasks under each line as chips, never a full list. (e2e)
 - Tying a line to a task links it, adds you to the task, and sets due today if it had no date. (e2e)

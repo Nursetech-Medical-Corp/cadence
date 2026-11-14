@@ -36,7 +36,7 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     const page = await browser.newPage({viewport: {width: 1500, height: 950}});
     const errors = [];
     page.on('pageerror', e => errors.push(e.message));
-    await page.addInitScript(([id, s]) => { localStorage.setItem('me:main', id); localStorage.setItem('me', id); localStorage.setItem('day-space', s); localStorage.removeItem('day-design'); }, [me, space]);
+    await page.addInitScript(([id, s]) => { localStorage.setItem('me:main', id); localStorage.setItem('me', id); localStorage.setItem('day-space', s); if (!sessionStorage.getItem('e2e-started')) { sessionStorage.setItem('e2e-started', '1'); localStorage.removeItem('day-design'); } }, [me, space]);
     await page.goto(BASE + '/#/day');
     await page.waitForSelector('.dp-grid');
     const plan = () => api(`/day/${date}`, {}, me);
@@ -180,6 +180,21 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     check('a day planned in another time zone says so', (await page.locator('.dp-tznote').count()) === 1);
     await page.getByRole('button', {name: 'Use my time zone'}).click(); await wait(900);
     check('Use my time zone switches the day to this computer\'s zone', (await plan()).tz === Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+    // 14. Each view keeps the week row, Today and the day arrows (they stay put while the hours scroll).
+    for (const view of ['columns', 'horizontal', 'focus']) {
+      await page.evaluate(v => localStorage.setItem('day-design', v), view); await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);
+      if (process.env.SHOTS) await page.screenshot({path: join(process.env.SHOTS, `planner-${view}.png`)});
+      await page.locator('.dp-day').evaluate(el => { el.scrollTop = 99999; el.scrollLeft = 99999; }); await wait(200);
+      const vis = async sel => { const b = await page.locator(sel).first().boundingBox(); return !!b && b.y >= 0 && b.y < 950 && b.height > 0; };
+      check(`${view}: the view is on`, (await page.locator(`.dp.d-${view}`).count()) === 1);
+      check(`${view}: the week row stays in view after scrolling the day`, await vis('.dp-week') && (await page.locator('.dp-wday').count()) === 7);
+      check(`${view}: day arrows stay in view`, await vis('.dp-daynav'));
+      await page.locator('.dp-wday').nth(0).click(); await wait(400);
+      check(`${view}: the week row is still there after picking a day`, (await page.locator('.dp-wday').count()) === 7 && await vis('.dp-week'));
+      check(`${view}: Today brings you back`, (await page.locator('.dp-daynav button', {hasText: 'Today'}).count()) === 1 || (await page.locator('.dp-wday').nth(0).getAttribute('class')).includes('today'));
+      await page.locator('.dp-daynav button', {hasText: 'Today'}).click().catch(() => {}); await wait(300);
+    }
 
     check('no page errors', !errors.length, errors.join('; '));
   } catch (e) {

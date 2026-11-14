@@ -43,10 +43,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [space, setSpace] = useState(() => localStorage.getItem('day-space') ?? '');
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [design, setDesignState] = useState(() => localStorage.getItem('day-design') ?? 'focus');
+  const [design, setDesignState] = useState(() => { const d = localStorage.getItem('day-design'); return d === 'columns' || d === 'horizontal' ? d : 'focus'; });
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem('day-density') as Density) || 'normal');
   const [bySource, setBySource] = useState(() => !!localStorage.getItem('day-bysource'));
-  const [tab, setTab] = useState<'dump' | 'top' | 'tasks' | 'day'>('day');
   const [events, setEvents] = useState<CalEv[]>([]);
   const [week, setWeek] = useState<{date: string; boxes: number; minutes: number; events: number}[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -127,12 +126,15 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   // Scroll the day to an hour before now (or the first box) once per day shown.
   useEffect(() => {
     const el = dayRef.current;
-    if (!el || !plan || scrolled.current === date) return;
-    scrolled.current = date;
+    if (!el || !plan || scrolled.current === date + design) return;
+    scrolled.current = date + design;
     const tzz = plan.tz || browserTz();
     const target = date === inZone(new Date(), tzz).day ? inZone(new Date(), tzz).m - 60 : plan.blocks.length ? Math.min(...plan.blocks.map(b => mins(b.start))) - 30 : plan.dayStart * 60;
     const grid = el.querySelector('.dp-grid') as HTMLElement | null;
-    if (grid) el.scrollTop = Math.max(0, grid.offsetTop + (target - (localStorage.getItem('day-early') === '1' ? 0 : Math.min(6, plan.dayStart) * 60)) * 1.4);
+    const viewStart = localStorage.getItem('day-early') === '1' ? 0 : Math.min(6, plan.dayStart) * 60;
+    const k = (DESIGNS.find(x => x.id === design)?.px ?? 1.4) * DENSITY[density];
+    if (grid && design === 'horizontal') el.scrollLeft = Math.max(0, (target - viewStart) * k);
+    else if (grid) el.scrollTop = Math.max(0, grid.offsetTop + (target - viewStart) * k);
   });
   if (!me) return <p className="muted">Pick who you are first.</p>;
   if (!plan) return <div className="loading">Loading...</div>;
@@ -447,8 +449,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     if (!d) return;
     placeDrop(d, minuteAt(ev, d));
   };
-  const dayGrid = <div className={'dp-day' + (horiz ? ' horiz' : '')} ref={dayRef}>
-    {!horiz && week.length === 7 && <div className="dp-week">{week.map(w => {
+  // The week row, day arrows and notes stay put above the day; only the hours scroll.
+  const dayHead = <div className="dp-dayhead">
+    {week.length === 7 && <div className="dp-week">{week.map(w => {
       const due = [...store.items.values()].filter(i => i.assignees.includes(me) && !i.completed && i.due === w.date && !listSpaces.has(i.projectId)).length;
       return <button key={w.date} className={'dp-wday' + (w.date === date ? ' on' : '') + (w.date === today ? ' today' : '')} onClick={() => setDate(w.date)}
         title={`${w.boxes} time box${w.boxes === 1 ? '' : 'es'} (${fmtM(w.minutes)}), ${w.events} calendar event${w.events === 1 ? '' : 's'}, ${due} task${due === 1 ? '' : 's'} due`}>
@@ -456,7 +459,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         <span className="dp-wbar"><span style={{width: `${Math.min(100, w.minutes / 480 * 100)}%`}} /></span>
         <span className="dp-wstats">{w.boxes ? <span title="Time boxes">{fmtM(w.minutes)}</span> : null}{w.events ? <span title="Calendar events"><CalendarClock size={10} /> {w.events}</span> : null}{due ? <span title="Tasks due">{due} due</span> : null}</span>
       </button>; })}</div>}
-    {!horiz && <div className="dp-daynav">
+    {<div className="dp-daynav">
       <button className="btn ghost small" onClick={() => setDate(addDays(date, -1))}><ChevronLeft size={14} /> {dayName(addDays(date, -1))}</button>
       <b>{dayName(date, true)}</b>{date !== today && <button className="btn small" onClick={() => setDate(today)}>Today</button>}
       <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))}>{dayName(addDays(date, 1))} <ChevronRight size={14} /></button>
@@ -468,6 +471,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {fitInfo.plannedMinutes > 0 && <span className="muted"> ({Math.round(fitInfo.loggedMinutes / fitInfo.plannedMinutes * 100)}%)</span>}
       {fitInfo.added > 0 && <span> · {fitInfo.added} unplanned box{fitInfo.added === 1 ? '' : 'es'} added</span>}
       <button className="icon" title="Hide" onClick={() => setFitInfo(null)}><X size={12} /></button></div>}
+  </div>;
+  const dayGrid = <div className={'dp-daycol' + (horiz ? ' horiz' : '')}>{dayHead}<div className={'dp-day' + (horiz ? ' horiz' : '')} ref={dayRef}>
     {!horiz && foldEnd > 0 && <button className="dp-early" onClick={() => { const v = !showEarly; setShowEarly(v); localStorage.setItem('day-early', v ? '1' : ''); }}>
       {showEarly ? <ChevronDown size={13} /> : <ChevronRight size={13} />} 12am to {label(foldEnd)}{earlyBoxes ? ` (${earlyBoxes} box${earlyBoxes === 1 ? '' : 'es'})` : ''}</button>}
     <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={overGrid} onDragLeave={e => { if (!stillIn(e)) setDropGhost(null); }} onDrop={dropAt}
@@ -529,23 +534,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       })}
     </div>
     {!plan.blocks.length && <p className="muted small dp-hint">Drag a priority, a brain dump line or a task onto a time, or press Plan my day from now. Reminders go to your Inbox and to phones and desktops with notifications on.</p>}
-  </div>;
-  // Agenda: the boxes as a list in time order, times edited in place.
+  </div></div>;
   const sorted = [...plan.blocks].sort((a, b) => mins(a.start) - mins(b.start));
-  const agenda = <div className="dp-agenda" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const d = JSON.parse(e.dataTransfer.getData('application/x-plan') || 'null') as DragData | null; if (d && d.from !== 'block') placeDrop(d, nextFree(30)); }}>
-    <h4>Today's time boxes</h4>
-    {!sorted.length && <p className="muted small">Drop things here (they go in the next free time) or press Plan my day from now.</p>}
-    {sorted.map(b => { const it = item(b), done = isDone(b), s = mins(b.start), running = !!it && store.running?.itemId === it.id;
-      const cur = nowM !== null && nowM >= s && nowM < s + b.minutes;
-      return <div key={b.id} data-src={srcOf(b)} className={'dp-arow' + (done ? ' done' : '') + (cur ? ' now' : '')}>
-        <input type="time" className="plain-input dp-atime" value={b.start} step={300} onChange={e => e.target.value && patchBlock(b.id, {start: e.target.value, at: atOf(plan.date, e.target.value)})} />
-        <select className="plain-select small" value={b.minutes} onChange={e => patchBlock(b.id, {minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v}m` : `${v / 60}h`}</option>)}</select>
-        <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry('blocks', b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
-        <span className="dp-acol"><button className="dp-text link" onClick={() => it ? open(it.id) : setEditing(b.id)}>{it ? <span className="dp-key">{itemKey(it, store.projects)}</span> : null} {it?.title ?? b.text}</button>
-          {it && taskInfo(it)}{linkChips(b)}</span>
-        {blockTools(b, it, done, running)}
-      </div>; })}
-  </div>;
   // Focus: what is on now, and what is next.
   const curB = sorted.find(b => nowM !== null && nowM >= mins(b.start) && nowM < mins(b.start) + b.minutes);
   const nextB = sorted.find(b => nowM !== null && mins(b.start) > nowM && !isDone(b));
@@ -567,7 +557,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     {!dayEntries.length ? <p className="muted small">No time logged yet. Press play on a box to start a timer.</p> : <>
       {dayEntries.map(t => { const it = store.items.get(t.itemId), s = inZone(t.start, tz).m, timed = !!t.end && t.end !== t.start;
         return <div key={t.id} className={'dp-tsrow' + (!t.end ? ' running' : '')}>
-          <span className="dp-tstime">{!t.end ? `${label(s)} to now` : timed ? `${label(s)} to ${label(inZone(t.end, tz).m)}` : 'logged'}</span>
+          <span className="dp-tstime" title={timed || !t.end ? '' : 'Added as minutes, with no start and stop time'}>{!t.end ? `${label(s)} to now` : timed ? `${label(s)} to ${label(inZone(t.end, tz).m)}` : 'added by hand'}</span>
           <button className="dp-text link" onClick={() => open(t.itemId)}>{it ? <><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</> : 'A task'}</button>
           <span className="muted small">{fmtM(entryMin(t))}</span>
         </div>; })}
@@ -579,18 +569,19 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const editor = eb && <BoxEditor key={eb.id} store={store} b={eb} date={date} space={space} open={open}
     patch={p => patchBlock(eb.id, p)} remove={() => { removeBlock(eb.id); setEditing(null); }} close={() => setEditing(null)} />;
   const fold = (k: string, title: string, body: React.ReactNode) => <details open={isOpen(k)} onToggle={e => { const v = (e.currentTarget as HTMLDetailsElement).open; if (v !== isOpen(k)) setOpen(k, v); }}><summary>{title}</summary>{body}</details>;
-  const tabsBar = <div className="dp-tabs">{(['dump', 'top', 'tasks', 'day'] as const).map(t => <button key={t} className={'btn' + (tab === t ? ' on' : '')} onClick={() => setTab(t)}>{({dump: 'Brain dump', top: 'Top 3', tasks: `Assigned (${mine.length})`, day: `Day (${plan.blocks.length})`})[t]}</button>)}</div>;
 
+  // Three views, same features: Focus (lists left, day right), Three columns, and Timeline across.
+  const lists = {
+    top: fold('top', 'Top 3', topSec),
+    dump: fold('dump', `Brain dump (${plan.dump.filter(e => !isDone(e)).length})`, dumpSec),
+    mine: fold('mine', `Assigned (${mine.length})`, mineSec),
+    logged: fold('logged', 'Timesheet for the day', loggedSec),
+  };
   let body;
   switch (D.id) {
-    case 'gcal': body = <div className="dp-main">{dayGrid}<div className="dp-left right">{topSec}{dumpSec}{mineSec}</div></div>; break;
-    case 'columns': body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}</div>{dayGrid}<div className="dp-left right">{mineSec}</div></div>; break;
-    case 'focus': body = <div className="dp-main"><div className="dp-left">{nowCard}{fold('top', 'Top 3', topSec)}{fold('dump', `Brain dump (${plan.dump.filter(e => !isDone(e)).length})`, dumpSec)}{fold('mine', `Assigned (${mine.length})`, mineSec)}{fold('logged', 'Timesheet for the day', loggedSec)}</div>{dayGrid}</div>; break;
-    case 'agenda': body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}{mineSec}</div><div className="dp-day">{agenda}</div></div>; break;
-    case 'zen': body = <div className="dp-main"><div className="dp-left">{topSec}<details><summary>Brain dump ({plan.dump.length})</summary>{dumpSec}</details><details><summary>Assigned ({mine.length})</summary>{mineSec}</details></div>{dayGrid}</div>; break;
-    case 'tabs': body = <div className="dp-main col">{tabsBar}<div className="dp-tabbody">{tab === 'dump' ? dumpSec : tab === 'top' ? topSec : tab === 'tasks' ? mineSec : <>{nowCard}{dayGrid}</>}</div></div>; break;
-    case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-row3">{topSec}{dumpSec}{mineSec}</div></div>; break;
-    default: body = <div className="dp-main"><div className="dp-left">{topSec}{dumpSec}{mineSec}</div>{dayGrid}</div>;
+    case 'columns': body = <div className="dp-main"><div className="dp-left">{nowCard}{lists.top}{lists.dump}</div>{dayGrid}<div className="dp-left right">{lists.mine}{lists.logged}</div></div>; break;
+    case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-row3"><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
+    default: body = <div className="dp-main"><div className="dp-left">{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{dayGrid}</div>;
   }
   return <div className={`dp d-${D.id}${bySource ? ' by-source' : ''}`}>{head}{body}{editor}</div>;
 }
@@ -599,16 +590,9 @@ type Density = 'compact' | 'normal' | 'roomy';
 const DENSITY: Record<Density, number> = {compact: 0.75, normal: 1, roomy: 1.4};
 /** Ten ways to lay out and style the planner. Same data; pick one in the header. */
 export const DESIGNS: {id: string; name: string; hint: string; px?: number}[] = [
-  {id: 'classic', name: 'Classic', hint: 'Lists on the left, the day on the right'},
-  {id: 'paper', name: 'Paper planner', hint: 'Grid paper and ruled boxes, like a printed day planner'},
-  {id: 'gcal', name: 'Calendar', hint: 'Calendar first with solid colored events; lists on the right'},
-  {id: 'columns', name: 'Three columns', hint: 'Top 3 and dump, the day, then assigned work'},
-  {id: 'focus', name: 'Focus', hint: 'A big Now and Next card; the rest folds away'},
-  {id: 'agenda', name: 'Agenda list', hint: 'No grid: time boxes as a list with editable times'},
-  {id: 'night', name: 'Night', hint: 'Dark, high contrast, glowing boxes'},
-  {id: 'zen', name: 'Zen', hint: 'Big type, no borders, only Top 3 and the day'},
-  {id: 'tabs', name: 'Phone tabs', hint: 'One section at a time with big touch targets'},
-  {id: 'horizontal', name: 'Timeline across', hint: 'Hours run left to right; lists underneath', px: 3.4},
+  {id: 'focus', name: 'Focus', hint: 'Now and next, your lists on the left, the day on the right'},
+  {id: 'columns', name: 'Three columns', hint: 'Top 3 and dump, the day, then assigned work and the timesheet'},
+  {id: 'horizontal', name: 'Timeline across', hint: 'Hours run left to right; your lists underneath', px: 3.4},
 ];
 
 function startResize(e: React.MouseEvent, b: Block, done: (minutes: number) => void, px: number, horiz: boolean) {

@@ -1588,77 +1588,28 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-nowcard .row { display: flex; gap: 6px; }
 
 /* 2. Paper planner */
-.d-paper { --paper: #fffdf6; --ink: #1e3a8a; background: var(--paper); color: #222; font-family: "Bradley Hand", "Segoe Print", "Comic Neue", "Marker Felt", cursive; }
-[data-theme=dark] .d-paper { --paper: #1e1d1a; color: #e8e4d8; --ink: #93c5fd; }
-.d-paper .dp-main, .d-paper .dp-head { background-image: linear-gradient(var(--line2) 1px, transparent 1px), linear-gradient(90deg, var(--line2) 1px, transparent 1px); background-size: 18px 18px; }
-.d-paper .dp-sec { border: 1.5px solid #444; margin-top: 14px; padding: 0 8px 6px; background: var(--paper); }
-.d-paper .dp-sec h4 { font-family: inherit; text-transform: none; letter-spacing: 0; font-size: 1.05em; color: #333; border-bottom: 1.5px solid #444; margin: 0 -8px 4px; padding: 4px 8px; }
-.d-paper .dp-entry { border-bottom: 1px solid #bbb; border-radius: 0; color: var(--ink); font-size: 1.08em; }
-.d-paper .dp-num { display: inline; font-weight: 700; color: #444; }
-.d-paper .dp-grid { border: 1.5px solid #444; background: var(--paper); }
-.d-paper .dp-slot.hour { border-top: 1.5px solid #444; }
-.d-paper .dp-hour { font-size: 1.3em; color: #333; font-family: inherit; left: 8px; }
-.d-paper .dp-half { position: absolute; left: 54px; top: 2px; font-size: 11px; color: #888; }
-.d-paper .dp-block { background: color-mix(in srgb, #fde047 45%, transparent); border: 0; border-left: 3px solid var(--ink); color: var(--ink); font-size: 1.05em; border-radius: 2px; }
-.d-paper .dp-block.done { background: color-mix(in srgb, #86efac 55%, transparent); }
-.d-paper .dp-block.done .dp-btitle { text-decoration: line-through 2px; }
 
 /* 3. Calendar */
-.d-gcal .dp-day { padding-left: 24px; }
-.d-gcal .dp-slot { border-bottom-color: transparent; }
-.d-gcal .dp-slot.hour { border-top-color: var(--line); }
-.d-gcal .dp-block { background: var(--accent); border: 0; color: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
-.d-gcal .dp-block .dp-btime, .d-gcal .dp-block .dp-key, .d-gcal .dp-block .icon { color: rgba(255,255,255,.85); }
-.d-gcal.by-source .dp-block:not(.done) { background: var(--src); color: #fff; }
-.d-gcal .dp-block.done { background: var(--ok); color: #fff; }
-.d-gcal .dp-block .check { border-color: rgba(255,255,255,.8); }
-.d-gcal .dp-left { width: 330px; background: var(--bg2); }
 
 /* 4. Three columns */
-.d-columns .dp-left { width: 300px; }
 .d-columns .dp-left.right { width: 280px; background: var(--bg2); }
 
 /* 5. Focus */
 .d-focus .dp-left { width: 420px; }
-.d-focus .dp-top .dp-entry { font-size: 1.15em; padding: 8px; border: 1px solid var(--line); margin-bottom: 6px; background: var(--card); }
 
 /* 7. Night */
-.d-night { --bg: #0d0e14; --bg2: #12131b; --card: #181a24; --line: #262838; --line2: #1c1e2a; --text: #eef0ff; --text2: #b9bdd6; --muted: #7d82a3; --hover: #1f2130; background: var(--bg); color: var(--text); }
-.d-night .dp-head { background: var(--bg2); }
-.d-night .dp-block { background: color-mix(in srgb, var(--accent) 22%, #0d0e14); border-color: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent); }
-.d-night.by-source .dp-block:not(.done) { background: color-mix(in srgb, var(--src) 22%, #0d0e14); box-shadow: 0 0 12px color-mix(in srgb, var(--src) 40%, transparent); }
-.d-night .dp-block.done { background: color-mix(in srgb, var(--ok) 25%, #0d0e14); box-shadow: 0 0 10px color-mix(in srgb, var(--ok) 40%, transparent); }
-.d-night .plain-input, .d-night .plain-select { background: var(--card); color: var(--text); border-color: var(--line); }
 
 /* 8. Zen */
-.d-zen .dp-head { border-bottom: 0; }
-.d-zen .dp-left { border-right: 0; width: 420px; padding-left: 32px; }
-.d-zen .dp-top h4 { font-size: 1em; }
-.d-zen .dp-top .dp-entry { font-size: 1.35em; padding: 10px 4px; }
-.d-zen .dp-num { display: inline; font-size: 1.6em; font-weight: 200; color: var(--muted); width: 26px; }
-.d-zen .dp-slot { border-bottom: 0; } .d-zen .dp-slot.hour { border-top: 1px solid var(--line2); }
-.d-zen .dp-grid { border-top: 0; }
-.d-zen .dp-block { background: transparent; border: 0; border-left: 2px solid var(--accent); border-radius: 0; font-size: 14px; }
-.d-zen .dp-block.done { border-left-color: var(--ok); background: transparent; }
 
 /* 9. Phone tabs */
-.dp-tabs { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.dp-tabs .btn { padding: 8px 14px; font-size: 1em; }
-.dp-tabbody { flex: 1; overflow-y: auto; padding: 0 16px 40px; max-width: 720px; width: 100%; }
-.d-tabs .dp-entry { padding: 10px 6px; font-size: 1.08em; border-bottom: 1px solid var(--line2); }
-.d-tabs .dp-entry .check { width: 22px; height: 22px; }
-.d-tabs .dp-tabbody .dp-day { padding: 0; overflow: visible; }
 
 /* 10. Timeline across */
-.d-horizontal .dp-row3 .dp-sec h4 { margin-top: 14px; }
-.d-paper .dp-half { left: 30px; top: auto; bottom: 2px; }
 .dp-day.horiz .dp-btime, .dp-day.horiz .dp-block .icon { display: none; }
 .dp-day.horiz .dp-block:hover .icon { display: inline-flex; }
 .dp-day.horiz .dp-block { font-size: 12px; }
 
 /* Day planner: calendar-style building, events, box details, editor */
 .dp-daynav { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 8px 50px; position: sticky; top: -12px; z-index: 4; background: var(--bg); padding: 6px 0; }
-.d-paper .dp-daynav { background: var(--paper); }
 .dp-grid { cursor: cell; }
 .dp-ghost { position: absolute; left: 56px; right: 4px; background: var(--accent-soft); border: 2px dashed var(--accent); border-radius: 6px; font-size: 11px; color: var(--accent); padding: 2px 6px; z-index: 4; pointer-events: none; }
 .dp-nowlabel { position: absolute; left: -50px; top: -9px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 1px 4px; }
@@ -1680,8 +1631,9 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-editor { position: fixed; right: 18px; top: 90px; width: 340px; max-height: calc(100vh - 120px); overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
 .dp-editor .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .dp-field { display: flex; flex-direction: column; gap: 4px; }
-.d-focus .dp-left details > summary { margin-top: 14px; }
-.d-focus .dp-left details .dp-sec h4 { display: none; }
+.dp details > summary { margin-top: 14px; }
+.dp details .dp-sec h4 { display: none; }
+.d-columns .dp-left { width: 320px; }
 
 /* Sub-spaces sit indented under their parent in the sidebar. */
 .proj-row[data-sub] { padding-left: 14px; position: relative; }
@@ -1752,7 +1704,10 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 
 /* Day planner: top edge, day timesheet, time zone note */
 .dp-resize.top { top: 0; bottom: auto; }
-.dp-block:hover .dp-resize { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.dp-resize::after { content: ''; position: absolute; left: 30%; right: 30%; height: 2px; border-radius: 2px; background: transparent; }
+.dp-resize.top::after { top: 1px; } .dp-resize:not(.top)::after { bottom: 1px; }
+.dp-resize:hover::after { background: var(--accent); }
+.dp-resize.x::after { left: auto; right: 1px; top: 30%; bottom: 30%; width: 2px; height: auto; }
 .dp-tsrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-bottom: 1px solid var(--line2); font-size: .92em; }
 .dp-tsrow.running .dp-tstime { color: var(--ok); font-weight: 600; }
 .dp-tstime { width: 120px; flex: none; color: var(--text2); font-variant-numeric: tabular-nums; }
@@ -1769,3 +1724,13 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-wbar { height: 3px; background: var(--line2); border-radius: 2px; overflow: hidden; }
 .dp-wbar span { display: block; height: 100%; background: var(--accent); }
 .dp-wstats { display: flex; gap: 6px; font-size: 10.5px; color: var(--text2); flex-wrap: wrap; min-height: 14px; }
+
+/* Day planner: the day column (fixed head, scrolling hours) */
+.dp-daycol { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.dp-daycol.horiz { flex: none; }
+.dp-dayhead { padding: 10px 16px 0; flex: none; }
+.dp-dayhead .dp-week, .dp-dayhead .dp-daynav { margin-left: 50px; }
+.dp-daycol.horiz .dp-dayhead .dp-week, .dp-daycol.horiz .dp-dayhead .dp-daynav { margin-left: 0; }
+.dp-daycol .dp-day { padding-top: 0; }
+.dp-daynav { position: static; }
+.dp-row3 > div { min-width: 0; }
