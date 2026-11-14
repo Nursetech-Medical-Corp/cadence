@@ -137,6 +137,25 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     const title = page.locator('.dp-editor .dp-etitle');
     check('box editor has an editable title', (await title.count()) === 1 && await title.isEditable());
 
+    // 11. Fit to my time: boxes move to logged time, the plan stays as an outline, logged work with no box gets one, Ctrl+Z undoes.
+    await page.keyboard.press('Escape');
+    const fitTask = await api('/items', {method: 'POST', body: {projectId: space, title: 'Fit me', assignees: [me]}}, me);
+    const extra = await api('/items', {method: 'POST', body: {projectId: space, title: 'Surprise work', assignees: [me]}}, me);
+    const at = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.toISOString(); };
+    const p11 = await plan();
+    await api(`/day/${date}`, {method: 'PUT', body: {blocks: [...p11.blocks, {id: 'fitbox', text: '', itemId: fitTask.id, start: '15:00', minutes: 60}]}}, me);
+    await api('/time', {method: 'POST', body: {itemId: fitTask.id, person: me, start: at(15, 20), end: at(16, 5)}}, me);
+    await api('/time', {method: 'POST', body: {itemId: extra.id, person: me, start: at(17, 0), end: at(17, 30)}}, me);
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(800);
+    await page.getByRole('button', {name: /Fit to my time/}).click();
+    await page.getByRole('button', {name: /^Whole day/}).click(); await wait(1200);
+    const p11b = await plan(), fb2 = p11b.blocks.find(b => b.id === 'fitbox');
+    check('Fit to my time moves a box to when the work was logged', fb2 && fb2.start === '15:20' && fb2.minutes === 45 && fb2.planned?.start === '15:00', JSON.stringify(fb2));
+    check('logged work with no box gets one', p11b.blocks.some(b => b.itemId === extra.id && b.start === '17:00' && b.minutes === 30));
+    check('the planned time shows as an outline, with a planned vs logged summary', (await page.locator('.dp-planned').count()) >= 1 && (await page.locator('.dp-fitinfo').count()) === 1);
+    await page.locator('body').click({position: {x: 5, y: 5}}); await page.keyboard.press('Control+z'); await wait(1200);
+    check('Ctrl+Z puts the plan back after a fit', (await plan()).blocks.find(b => b.id === 'fitbox')?.start === '15:00');
+
     check('no page errors', !errors.length, errors.join('; '));
   } catch (e) {
     check('scenario run finished', false, e.message);

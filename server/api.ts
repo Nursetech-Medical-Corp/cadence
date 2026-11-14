@@ -1147,6 +1147,12 @@ If you did not ask for it, ignore this email.`)
           if (held('updateDayPlan', [person, date, patch])) return send(res, 202, propose(tasks, actor!, 'updateDayPlan', [person, date, patch]));
           return send(res, 200, tasks.updateDayPlan(person, date, patch));
         }
+        // Fit the boxes to time logged with timers, up to a moment (now) or the whole day.
+        if (b && c === 'fit' && m === 'POST') {
+          const opts = {upTo: body.upTo ? String(body.upTo) : null, offsetMinutes: typeof body.offsetMinutes === 'number' ? body.offsetMinutes : undefined};
+          if (held('fitDayToLogged', [person, date, opts])) return send(res, 202, propose(tasks, actor!, 'fitDayToLogged', [person, date, opts]));
+          return send(res, 200, tasks.fitDayToLogged(person, date, opts));
+        }
         if (b && c === 'auto' && m === 'POST') {
           const opts = {from: body.from ? String(body.from) : undefined, offsetMinutes: typeof body.offsetMinutes === 'number' ? body.offsetMinutes : undefined, include: Array.isArray(body.include) ? body.include : undefined};
           if (held('autoSchedule', [person, date, opts])) return send(res, 202, propose(tasks, actor!, 'autoSchedule', [person, date, opts]));

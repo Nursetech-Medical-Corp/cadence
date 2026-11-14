@@ -14,7 +14,11 @@ export type Block = Entry & {start: string; minutes: number; at?: string | null;
   links?: string[];
   /** The calendar event this box stands for (Cadence or synced Google event). */
   eventId?: string | null;
-  note?: string};
+  note?: string;
+  /** Where the box was planned before it was fitted to logged time, so the plan stays visible and can come back. */
+  planned?: {start: string; minutes: number} | null;
+  /** Fitted to time logged with timers. */
+  fitted?: boolean};
 export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; updated: string | null};
 
 const rid = () => randomBytes(5).toString('hex');
@@ -71,7 +75,8 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       const notified = !!old?.notified && old.start === b.start && old.at === (b.at ?? null) && !!b.remind;
       const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
       return {...e, start: b.start, minutes, at: b.at ?? null, remind: !!b.remind, ...(notified ? {notified: true} : {}),
-        ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {})};
+        ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {}),
+        ...(b.planned && TIME.test(String(b.planned.start)) && Number(b.planned.minutes) > 0 ? {planned: {start: b.planned.start, minutes: Math.round(Number(b.planned.minutes))}} : {}), ...(b.fitted ? {fitted: true} : {})};
     });
   }
   if (patch.dayStart !== undefined || patch.dayEnd !== undefined) {
@@ -146,4 +151,65 @@ export function dayPlanReminders(tasks: Tasks, now = new Date()) {
     }
     if (changed) tasks.db.prepare('update day_plans set data = ? where person = ? and date = ?').run(JSON.stringify(d), r.person, r.date);
   }
+}
+
+/**
+ * Fit the day to what was really done: each box for a task moves to the time logged on it (timers), up to a cutoff
+ * (now, at midday, to see the morning) or the whole day. Separate sessions of one task become separate boxes. Work
+ * logged with no box gets a box. The planned time is kept on the box (planned) so the plan still shows.
+ * offsetMinutes: the person's offset from UTC, to read logged times on their clock.
+ */
+export function fitToLogged(tasks: Tasks, person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) {
+  const plan = getDayPlan(tasks, person, date);
+  const off = opts.offsetMinutes ?? 0;
+  const local = (iso: string) => { const d = new Date(Date.parse(iso) + off * 60_000); return {day: d.toISOString().slice(0, 10), m: d.getUTCHours() * 60 + d.getUTCMinutes()}; };
+  const cut = opts.upTo ? Date.parse(opts.upTo) : Infinity;
+  if (opts.upTo && Number.isNaN(cut)) throw new Invalid('upTo must be a time');
+  const entries = tasks.listTime({person}).filter(e => e.kind !== 'review' && local(e.start).day === date && Date.parse(e.start) < cut);
+  // Sessions per task: timed entries (start to end, a running one to now), joined when less than 10 minutes apart.
+  const sessions = new Map<string, {s: number; e: number}[]>();
+  const loggedOnly = new Map<string, number>();
+  for (const e of entries) {
+    const end = Math.min(e.end ? Date.parse(e.end) : Date.now(), cut);
+    if (end - Date.parse(e.start) < 60_000) { if (e.minutes) loggedOnly.set(e.itemId, (loggedOnly.get(e.itemId) ?? 0) + e.minutes); continue; }
+    const s = local(e.start).m, m = s + Math.round((end - Date.parse(e.start)) / 60_000);
+    sessions.set(e.itemId, [...(sessions.get(e.itemId) ?? []), {s, e: Math.min(m, 24 * 60)}]);
+  }
+  for (const [k, list] of sessions) {
+    list.sort((a, b) => a.s - b.s);
+    const merged: {s: number; e: number}[] = [];
+    for (const x of list) { const last = merged[merged.length - 1]; if (last && x.s - last.e < 10) last.e = Math.max(last.e, x.e); else merged.push({...x}); }
+    sessions.set(k, merged);
+  }
+  const r5 = (m: number) => Math.round(m / 5) * 5;
+  const atOf = (m: number) => new Date(Date.parse(`${date}T${hhmm(m)}:00Z`) - off * 60_000).toISOString();
+  let blocks = [...plan.blocks];
+  let moved = 0, added = 0;
+  const ids = new Set([...sessions.keys(), ...loggedOnly.keys()]);
+  for (const itemId of ids) {
+    const mine = blocks.filter(b => b.itemId === itemId).sort((a, b) => mins(a.start) - mins(b.start));
+    const ss = sessions.get(itemId) ?? [];
+    const fit = (b: Block, s: number, len: number): Block => ({...b, planned: b.planned ?? {start: b.start, minutes: b.minutes}, start: hhmm(Math.min(r5(s), 24 * 60 - 5)), minutes: Math.max(5, r5(len)), at: atOf(r5(s)), fitted: true, notified: true});
+    if (!ss.length) {
+      // Logged as minutes only: the box keeps its time and takes the logged length.
+      const total = loggedOnly.get(itemId)!;
+      if (mine[0]) { blocks = blocks.map(b => b.id === mine[0].id ? fit(b, mins(b.start), total) : b); moved++; }
+      continue;
+    }
+    ss.forEach((x, i) => {
+      const b = mine[i];
+      if (b) { blocks = blocks.map(y => y.id === b.id ? fit(y, x.s, x.e - x.s) : y); moved++; }
+      else {
+        let title = 'Logged work';
+        try { title = tasks.item(itemId).title; } catch { /* task deleted */ }
+        blocks.push({id: rid(), text: title, itemId, start: hhmm(Math.min(r5(x.s), 24 * 60 - 5)), minutes: Math.max(5, r5(x.e - x.s)), at: atOf(r5(x.s)), remind: false, notified: true, fitted: true, planned: null});
+        added++;
+      }
+    });
+  }
+  const loggedMin = [...sessions.values()].flat().reduce((a, x) => a + x.e - x.s, 0) + [...loggedOnly.values()].reduce((a, x) => a + x, 0);
+  const cutM = opts.upTo ? local(opts.upTo).m : 24 * 60;
+  const plannedMin = plan.blocks.reduce((a, b) => { const s = mins((b.planned ?? b).start), e = s + (b.planned ?? b).minutes; return a + Math.max(0, Math.min(e, cutM) - s); }, 0);
+  const next = updateDayPlan(tasks, person, date, {blocks});
+  return {plan: next, summary: {plannedMinutes: plannedMin, loggedMinutes: loggedMin, moved, added, upTo: opts.upTo ?? null}};
 }

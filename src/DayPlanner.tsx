@@ -2,15 +2,16 @@
 // Drag lines and tasks onto the day, drag boxes to move them, drag the bottom edge to resize. Done boxes turn green.
 // Saved per person per day at /api/day/:date (server/dayplan.ts).
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
+import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Timer, Undo2, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {api, realProjects, type Store} from './store.ts';
-import {Avatars, Check, PriorityIcon, itemKey} from './components.tsx';
+import {Avatars, Check, Popover, PriorityIcon, itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
 type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
-type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string};
+type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean};
+type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number; added: number; upTo: string | null};
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
 type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null};
 type Plan = {date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number};
@@ -52,6 +53,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [editText, setEditText] = useState<string | null>(null);
   const dragging = useRef<DragData | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [fitMenu, setFitMenu] = useState(false);
+  const [fitInfo, setFitInfo] = useState<FitSummary | null>(null);
+  const [showPlanned, setShowPlanned] = useState(() => localStorage.getItem('day-planned') !== 'off');
   // Undo for the planner: earlier plans, and tasks a step created (removed again on undo).
   const history = useRef<{plan: Plan; created: string[]}[]>([]);
   const setDesign = (id: string) => { setDesignState(id); localStorage.setItem('day-design', id); };
@@ -208,6 +212,18 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     update(p => linkText({...p, blocks: p.blocks.map(x => x.id === b.id ? {...x, itemId: it.id, text: it.title} : x)}, b.text, it.id, it.title), [it.id]);
     store.startTimer(it.id);
   };
+  /** Boxes to the time really logged: up to now, or the whole day. Ctrl+Z puts the plan back. */
+  const fit = async (upToNow: boolean) => {
+    setFitMenu(false); setBusy(true);
+    try {
+      if (pending.current) { clearTimeout(pending.current); pending.current = null; const p0 = latest.current!; await api(`/day/${date}?person=${me}`, {method: 'PUT', body: {top: p0.top, dump: p0.dump, blocks: p0.blocks}}); dirty.current = false; }
+      const r = await api<{plan: Plan; summary: FitSummary}>(`/day/${date}/fit?person=${me}`, {method: 'POST', body: {upTo: upToNow ? new Date().toISOString() : null, offsetMinutes: -new Date(`${date}T12:00:00`).getTimezoneOffset()}});
+      if (latest.current) history.current.push({plan: latest.current, created: []});
+      version.current++; setPlan(r.plan); latest.current = r.plan;
+      setFitInfo(r.summary);
+      if (!r.summary.moved && !r.summary.added) store.flash(r.summary.loggedMinutes ? 'Boxes already match your logged time' : 'No time logged yet. Press play on a box to time it');
+    } catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
   const auto = async () => {
     const isToday = date === localDate();
     const from = isToday ? hhmm(now.getHours() * 60 + now.getMinutes()) : hhmm(plan.dayStart * 60);
@@ -313,6 +329,15 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         <option value="compact">Compact</option><option value="normal">Normal</option><option value="roomy">Roomy</option></select>
       <label className="small muted" title="Color boxes by where they came from: top 3, tasks, brain dump"><input type="checkbox" checked={bySource} onChange={e => { setBySource(e.target.checked); localStorage.setItem('day-bysource', e.target.checked ? '1' : ''); }} /> Color by source</label>
     </span>
+    <span className="picker">
+      <button className="btn small" disabled={busy} onClick={() => setFitMenu(o => !o)} title="Move and size your boxes to the time you logged with timers, to see what you really did"><Timer size={13} /> Fit to my time <ChevronDown size={12} /></button>
+      <Popover open={fitMenu} onClose={() => setFitMenu(false)}>
+        {date === localDate() && <button className="pop-row" onClick={() => fit(true)}>Up to now <span className="muted small">(the day so far)</span></button>}
+        <button className="pop-row" onClick={() => fit(false)}>Whole day</button>
+        <label className="pop-row small"><input type="checkbox" checked={showPlanned} onChange={e => { setShowPlanned(e.target.checked); localStorage.setItem('day-planned', e.target.checked ? 'on' : 'off'); }} /> Show where boxes were planned</label>
+        <div className="pop-label">Boxes keep their planned time (dashed outline). Ctrl+Z undoes.</div>
+      </Popover>
+    </span>
     <button className="btn primary small" disabled={busy} onClick={auto} title="Put the top 3, today's and overdue tasks, then the brain dump into the next free times, from now"><Wand2 size={13} /> Plan my day from now</button>
     <label className="small muted" title="Plan my day from now fills only these hours; the day shows all 24">Plan between <select className="plain-select" value={plan.dayStart} onChange={e => Number(e.target.value) < plan.dayEnd && save({...plan, dayStart: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h}>{label(h * 60)}</option>)}</select></label>
     <label className="small muted">and <select className="plain-select" value={plan.dayEnd} onChange={e => Number(e.target.value) > plan.dayStart && save({...plan, dayEnd: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h + 1}>{label((h + 1) * 60)}</option>)}</select></label>
@@ -406,6 +431,11 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       <b>{dayName(date, true)}</b>{date !== localDate() && <button className="btn small" onClick={() => setDate(localDate())}>Today</button>}
       <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))}>{dayName(addDays(date, 1))} <ChevronRight size={14} /></button>
     </div>}
+    {fitInfo && <div className="dp-fitinfo small">
+      <b>{fitInfo.upTo ? `Up to ${new Date(fitInfo.upTo).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}` : 'Whole day'}:</b> planned {fmtM(fitInfo.plannedMinutes)}, logged {fmtM(fitInfo.loggedMinutes)}
+      {fitInfo.plannedMinutes > 0 && <span className="muted"> ({Math.round(fitInfo.loggedMinutes / fitInfo.plannedMinutes * 100)}%)</span>}
+      {fitInfo.added > 0 && <span> · {fitInfo.added} unplanned box{fitInfo.added === 1 ? '' : 'es'} added</span>}
+      <button className="icon" title="Hide" onClick={() => setFitInfo(null)}><X size={12} /></button></div>}
     {!horiz && foldEnd > 0 && <button className="dp-early" onClick={() => { const v = !showEarly; setShowEarly(v); localStorage.setItem('day-early', v ? '1' : ''); }}>
       {showEarly ? <ChevronDown size={13} /> : <ChevronRight size={13} />} 12am to {label(foldEnd)}{earlyBoxes ? ` (${earlyBoxes} box${earlyBoxes === 1 ? '' : 'es'})` : ''}</button>}
     <div className="dp-grid" style={horiz ? {width: (endM - startM) * px + 20} : {height: (endM - startM) * px}} onDragOver={overGrid} onDragLeave={e => { if (!stillIn(e)) setDropGhost(null); }} onDrop={dropAt}
@@ -424,6 +454,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         addEventListener('mousemove', move); addEventListener('mouseup', up);
       }}>
       {ghost && <div className="dp-ghost" style={{top: (ghost.a - startM) * px, height: (ghost.b - ghost.a) * px}}>{label(ghost.a)} to {label(ghost.b)}</div>}
+      {showPlanned && !horiz && plan.blocks.filter(b => b.planned && (b.planned.start !== b.start || b.planned.minutes !== b.minutes) && mins(b.planned.start) + b.planned.minutes > startM).map(b => {
+        const ps = Math.max(startM, mins(b.planned!.start)), lane = lanes.get(b.id) ?? {i: 0, n: 1};
+        return <div key={'pl' + b.id} className="dp-planned" style={place(ps, b.planned!.minutes, lane)} title={`Planned ${label(mins(b.planned!.start))} to ${label(mins(b.planned!.start) + b.planned!.minutes)}`}>planned: {item(b)?.title ?? b.text}</div>;
+      })}
       {dropGhost && <div className="dp-ghost drop" style={horiz ? {left: (dropGhost.m - startM) * px, width: dropGhost.len * px, top: 26, bottom: 4} : {top: (dropGhost.m - startM) * px, height: dropGhost.len * px}}>{label(dropGhost.m)} to {label(dropGhost.m + dropGhost.len)}</div>}
       {!horiz && planStart > startM && <div className="dp-plan" style={{top: 0, height: (planStart - startM) * px}} title="Before your planning hours" />}
       {!horiz && planEnd < endM && <div className="dp-plan" style={{top: (planEnd - startM) * px, height: (endM - planEnd) * px}} title="After your planning hours" />}
@@ -452,6 +486,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
             <span className="dp-btitle">{it ? <button className="dp-btitle-link" title="Open the task" onClick={() => open(it.id)}><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button> : (b.text || <span className="muted">(untitled)</span>)}</span>
             <span className="dp-btime">{label(mins(b.start))} to {label(mins(b.start) + b.minutes)}</span>
             {b.eventId && <span title="On your calendar"><CalendarClock size={11} className="muted" /></span>}
+            {b.fitted && <span className="dp-fitted" title={b.planned ? `Fitted to logged time. Planned ${label(mins(b.planned.start))}, ${b.planned.minutes} min` : 'Logged work that had no box'}>{b.planned ? 'actual' : 'unplanned'}</span>}
             {blockTools(b, it, done, running)}
           </div>
           {(it || b.links?.length || b.note) && b.minutes * px >= 40 && <div className="dp-bmore">{it && taskInfo(it)}{linkChips(b)}{b.note && <span className="dp-note">{b.note}</span>}</div>}
@@ -591,6 +626,8 @@ function BoxEditor({store, b, date, space, open, patch, remove, close}: {store: 
       <select className="plain-select" value={b.minutes} onChange={e => patch({minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v} min` : `${v / 60} h`}</option>)}</select>
       <span className="muted small">to {label(s + b.minutes)}</span>
     </div>
+    {b.planned && <div className="row small muted">Planned {label(mins(b.planned.start))} for {b.planned.minutes} min
+      <button className="btn ghost small" onClick={() => patch({start: b.planned!.start, minutes: b.planned!.minutes, at: new Date(`${date}T${b.planned!.start}:00`).toISOString(), planned: null, fitted: false})}><Undo2 size={12} /> Back to plan</button></div>}
     <label className="row small"><input type="checkbox" checked={!!b.remind} onChange={e => patch({remind: e.target.checked, at: new Date(`${date}T${b.start}:00`).toISOString()})} /> Remind me when it starts</label>
     <textarea className="plain-input" rows={2} placeholder="Note or agenda" defaultValue={b.note ?? ''} onBlur={e => e.target.value !== (b.note ?? '') && patch({note: e.target.value})} />
     <div className="dp-field"><span className="muted small">Tasks tied to this box (done in it, or to discuss)</span>

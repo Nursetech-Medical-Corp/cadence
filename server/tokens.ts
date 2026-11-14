@@ -61,6 +61,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     dayPlan: (person) => self(person, 'read day plans'),
     updateDayPlan: (person) => self(person, 'plan days'),
     autoSchedule: (person) => self(person, 'plan days'),
+    fitDayToLogged: (person) => self(person, 'plan days'),
     createSubspace: (pid) => need(pid, 'settings'),
     boardsBySop: (o) => { if (o) o.visible = tasks.listProjects().filter(p => sees(p.id) && caps(p.id).has('edit')).map(p => p.id); else throw new Forbidden('Pass options'); },
     createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },

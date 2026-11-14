@@ -1743,3 +1743,9 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .wb-table tr:nth-child(odd) td { background: var(--bg2); }
 .wb-table input { width: 100%; border: 0; outline: 2px solid var(--accent); border-radius: 3px; font: inherit; background: var(--card); color: var(--text); padding: 1px 3px; }
 .wb-cell-empty { color: var(--muted); font-weight: 400; }
+
+/* Day planner: fit to logged time */
+.dp-planned { position: absolute; border: 1.5px dashed var(--muted); border-radius: 6px; font-size: 10.5px; color: var(--muted); padding: 1px 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; pointer-events: none; z-index: 1; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.dp-fitted { font-size: 10px; font-weight: 600; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 50%, transparent); border-radius: 999px; padding: 0 5px; }
+.dp-fitinfo { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: color-mix(in srgb, var(--ok) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+.dp-fitinfo .icon { margin-left: auto; }

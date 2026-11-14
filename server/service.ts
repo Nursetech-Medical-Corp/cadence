@@ -1619,6 +1619,7 @@ export class Tasks {
   dayPlan(person: string, date: string) { return dayplan.getDayPlan(this, person, date); }
   updateDayPlan(person: string, date: string, patch: dayplan.DayPatch) { return dayplan.updateDayPlan(this, person, date, patch); }
   autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
+  fitDayToLogged(person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) { return dayplan.fitToLogged(this, person, date, opts); }
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
   listBoards(q: {projectId?: string; itemId?: string; sop?: string} = {}) { return boards.listBoards(this, q); }

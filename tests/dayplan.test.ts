@@ -77,6 +77,28 @@ test('day planner: reminders fire once at the start, again after a move', () => 
   assert.equal(t.listNotifications(david.id).length, 2);
 });
 
+test('day planner: fit boxes to logged time, up to now or all day', () => {
+  const {t, david, p} = setup();
+  const a = t.createItem({projectId: p.id, title: 'Write report', assignees: [david.id]}, david.id);
+  const b = t.createItem({projectId: p.id, title: 'Email Sam', assignees: [david.id]}, david.id);
+  const c = t.createItem({projectId: p.id, title: 'Unplanned fix', assignees: [david.id]}, david.id);
+  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'a', text: '', itemId: a.id, start: '09:00', minutes: 60}, {id: 'b', text: '', itemId: b.id, start: '13:00', minutes: 30}]});
+  // Times are UTC here (offset 0): report 9:20 to 10:05 and 10:10 to 10:30 (joined), fix 11:00 to 11:40, email 13:10 to 13:25.
+  const log = (item: string, s: string, e: string) => t.logTime({itemId: item, person: david.id, start: `2026-11-14T${s}:00Z`, end: `2026-11-14T${e}:00Z`});
+  log(a.id, '09:20', '10:05'); log(a.id, '10:10', '10:30'); log(c.id, '11:00', '11:40'); log(b.id, '13:10', '13:25');
+  const noon = t.fitDayToLogged(david.id, '2026-11-14', {upTo: '2026-11-14T12:00:00Z', offsetMinutes: 0});
+  const box = (id: string) => noon.plan.blocks.find(x => x.id === id)!;
+  assert.deepEqual([box('a').start, box('a').minutes, box('a').planned], ['09:20', 70, {start: '09:00', minutes: 60}], 'sessions under 10 minutes apart join');
+  assert.equal(box('b').start, '13:00', 'after the cutoff nothing moves');
+  const fix = noon.plan.blocks.find(x => x.itemId === c.id)!;
+  assert.deepEqual([fix.start, fix.minutes, fix.fitted], ['11:00', 40, true], 'logged work with no box gets one');
+  assert.deepEqual([noon.summary.plannedMinutes, noon.summary.loggedMinutes, noon.summary.added], [60, 110, 1]);
+  const day = t.fitDayToLogged(david.id, '2026-11-14', {offsetMinutes: 0});
+  assert.deepEqual([day.plan.blocks.find(x => x.id === 'b')!.start, day.plan.blocks.find(x => x.id === 'b')!.minutes], ['13:10', 15]);
+  assert.equal(day.plan.blocks.find(x => x.id === 'a')!.planned!.start, '09:00', 'fitting again keeps the first plan');
+  assert.equal(day.plan.blocks.filter(x => x.itemId === c.id).length, 1, 'fitting again adds nothing twice');
+});
+
 test('day planner over MCP: only your own day', async () => {
   const {t, david, sam} = setup();
   const server = createMcpServer(guarded(t, david.id), david.id);
