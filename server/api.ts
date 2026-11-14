@@ -1140,9 +1140,12 @@ If you did not ask for it, ignore this email.`)
         const person = ws.requireLogin || bearer ? actor : (actor ?? q('person') ?? null);
         if (!person) throw new Invalid('Pick who you are first');
         const date = b ?? tasks.today();
-        if (b && !c && m === 'GET') return send(res, 200, tasks.dayPlan(person, date));
+        // ?tz= is where the person is now: a day not saved yet takes it (saved first for Plan and Fit).
+        const hint = q('tz');
+        if (b && !c && m === 'GET') return send(res, 200, tasks.dayPlan(person, date, hint));
+        if (b && (c === 'auto' || c === 'fit') && m === 'POST' && hint && !tasks.dayPlan(person, date).updated) tasks.updateDayPlan(person, date, {tz: tasks.dayPlan(person, date, hint).tz});
         if (b && !c && m === 'PUT') {
-          const patch = Object.fromEntries(['top', 'dump', 'blocks', 'dayStart', 'dayEnd', 'slot'].filter(k => body[k] !== undefined).map(k => [k, body[k]]));
+          const patch = Object.fromEntries(['top', 'dump', 'blocks', 'dayStart', 'dayEnd', 'slot', 'tz'].filter(k => body[k] !== undefined).map(k => [k, body[k]]));
           for (const e of [...(patch.top ?? []), ...(patch.dump ?? []), ...(patch.blocks ?? [])] as {itemId?: string}[]) if (e.itemId && !seesItem(tasks.findItem(e.itemId).id)) throw new NotFound('Task not found');
           if (held('updateDayPlan', [person, date, patch])) return send(res, 202, propose(tasks, actor!, 'updateDayPlan', [person, date, patch]));
           return send(res, 200, tasks.updateDayPlan(person, date, patch));

@@ -5,6 +5,7 @@ import {randomBytes} from 'node:crypto';
 import type {Tasks} from './service.ts';
 import {Invalid} from './errors.ts';
 import type {Item} from '../src/types.ts';
+import {calendarSettings, listEvents, localDay, localTime, validTz, zoned} from './events.ts';
 
 /** A line of the plan: plain text, or a task (itemId). done is only used for plain text; tasks are done when completed. */
 export type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
@@ -19,7 +20,8 @@ export type Block = Entry & {start: string; minutes: number; at?: string | null;
   planned?: {start: string; minutes: number} | null;
   /** Fitted to time logged with timers. */
   fitted?: boolean};
-export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; updated: string | null};
+/** tz: the time zone the day is planned in (IANA, like America/Denver). Box times are wall-clock times there. */
+export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; tz: string; updated: string | null};
 
 const rid = () => randomBytes(5).toString('hex');
 const migrated = new WeakSet<object>();
@@ -39,13 +41,19 @@ export function timeIn(text: string): number | null {
 const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-export function getDayPlan(tasks: Tasks, person: string, date: string): DayPlan {
+/** hintTz: where the person is now (their browser); a day not saved yet takes it, before the calendar settings' zone. */
+export function getDayPlan(tasks: Tasks, person: string, date: string, hintTz?: string): DayPlan {
   migrateDayPlans(tasks);
   if (!DATE.test(date)) throw new Invalid('Date must look like 2026-11-14');
   tasks.person(person);
   const r = tasks.db.prepare('select data, updated from day_plans where person = ? and date = ?').get(person, date) as {data: string; updated: string} | undefined;
   const d = r ? JSON.parse(r.data) : {};
-  return {person, date, top: d.top ?? [], dump: d.dump ?? [], blocks: d.blocks ?? [], dayStart: d.dayStart ?? 6, dayEnd: d.dayEnd ?? 22, slot: d.slot ?? 30, updated: r?.updated ?? null};
+  // New days start from the person's working hours and time zone (Team page, calendar settings).
+  let cs: {workStart: string; workEnd: string; tz: string};
+  try { cs = calendarSettings(tasks, person); } catch { cs = {workStart: '09:00', workEnd: '17:00', tz: 'UTC'}; }
+  const hour = (t: string, up = false) => { const m = mins(t); return Math.min(24, Math.max(0, up ? Math.ceil(m / 60) : Math.floor(m / 60))); };
+  return {person, date, top: d.top ?? [], dump: d.dump ?? [], blocks: d.blocks ?? [], dayStart: d.dayStart ?? hour(cs.workStart), dayEnd: d.dayEnd ?? Math.max(hour(cs.workStart) + 1, hour(cs.workEnd, true)),
+    slot: d.slot ?? 30, tz: d.tz ?? (hintTz && validTz(hintTz) ? hintTz : cs.tz), updated: r?.updated ?? null};
 }
 
 function cleanEntry(tasks: Tasks, e: Partial<Entry>, allowEmpty = false): Entry {
@@ -56,10 +64,14 @@ function cleanEntry(tasks: Tasks, e: Partial<Entry>, allowEmpty = false): Entry 
   if (e.done) out.done = true;
   return out;
 }
-export type DayPatch = Partial<Pick<DayPlan, 'top' | 'dump' | 'blocks' | 'dayStart' | 'dayEnd' | 'slot'>>;
+export type DayPatch = Partial<Pick<DayPlan, 'top' | 'dump' | 'blocks' | 'dayStart' | 'dayEnd' | 'slot' | 'tz'>>;
 export function updateDayPlan(tasks: Tasks, person: string, date: string, patch: DayPatch): DayPlan {
   const cur = getDayPlan(tasks, person, date);
   const next = {...cur};
+  if (patch.tz !== undefined) { if (!validTz(String(patch.tz))) throw new Invalid(`Unknown time zone ${patch.tz}`); next.tz = String(patch.tz); }
+  // The moment each box starts, from its wall-clock time in the plan's zone (daylight saving included).
+  const [y, mo, da] = date.split('-').map(Number);
+  const momentOf = (start: string) => zoned(y, mo, da, Number(start.slice(0, 2)), Number(start.slice(3, 5)), next.tz).toISOString();
   if (patch.top !== undefined) { if (!Array.isArray(patch.top) || patch.top.length > 3) throw new Invalid('Top priorities hold up to 3'); next.top = patch.top.map(e => cleanEntry(tasks, e)); }
   if (patch.dump !== undefined) { if (!Array.isArray(patch.dump) || patch.dump.length > 300) throw new Invalid('The brain dump holds up to 300 lines'); next.dump = patch.dump.map(e => cleanEntry(tasks, e)); }
   if (patch.blocks !== undefined) {
@@ -72,9 +84,9 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       if (b.at && Number.isNaN(Date.parse(b.at))) throw new Invalid('at must be an ISO time');
       const old = cur.blocks.find(x => x.id === e.id);
       // Moving a box or changing its reminder arms the reminder again.
-      const notified = !!old?.notified && old.start === b.start && old.at === (b.at ?? null) && !!b.remind;
+      const notified = !!old?.notified && old.start === b.start && old.at === momentOf(b.start) && !!b.remind;
       const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
-      return {...e, start: b.start, minutes, at: b.at ?? null, remind: !!b.remind, ...(notified ? {notified: true} : {}),
+      return {...e, start: b.start, minutes, at: momentOf(b.start), remind: !!b.remind, ...(notified ? {notified: true} : {}),
         ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {}),
         ...(b.planned && TIME.test(String(b.planned.start)) && Number(b.planned.minutes) > 0 ? {planned: {start: b.planned.start, minutes: Math.round(Number(b.planned.minutes))}} : {}), ...(b.fitted ? {fitted: true} : {})};
     });
@@ -87,19 +99,21 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
   if (patch.slot !== undefined) { if (![15, 30, 60].includes(Number(patch.slot))) throw new Invalid('Slots are 15, 30 or 60 minutes'); next.slot = Number(patch.slot); }
   const updated = new Date().toISOString();
   tasks.db.prepare('insert into day_plans (person, date, data, updated) values (?,?,?,?) on conflict(person, date) do update set data = excluded.data, updated = excluded.updated')
-    .run(person, date, JSON.stringify({top: next.top, dump: next.dump, blocks: next.blocks, dayStart: next.dayStart, dayEnd: next.dayEnd, slot: next.slot}), updated);
+    .run(person, date, JSON.stringify({top: next.top, dump: next.dump, blocks: next.blocks.map(b => ({...b, at: momentOf(b.start)})), dayStart: next.dayStart, dayEnd: next.dayEnd, slot: next.slot, tz: next.tz}), updated);
   tasks.emit({kind: 'dayplan', person});
-  return {...next, updated};
+  return {...next, blocks: next.blocks.map(b => ({...b, at: momentOf(b.start)})), updated};
 }
 
 /**
  * Fill the day from a time on: top 3 first, then tasks due today and overdue, then the brain dump, each in the
  * next free gap. Uses each task's estimate (30 minutes when it has none). Things already boxed or done are skipped.
- * offsetMinutes: the person's offset from UTC (like -420 for Mountain time) so reminders land at the right moment.
+ * Without from: today starts now (in the plan's time zone), any other day at the start of the planning hours.
+ * Meetings and other calendar events on the day are left free.
  */
 export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {from?: string; offsetMinutes?: number; include?: ('top' | 'due' | 'dump')[]} = {}): DayPlan {
   const plan = getDayPlan(tasks, person, date);
-  const from = opts.from && TIME.test(opts.from) ? mins(opts.from) : plan.dayStart * 60;
+  const nowHere = localTime(new Date(), plan.tz);
+  const from = opts.from && TIME.test(opts.from) ? mins(opts.from) : localDay(new Date(), plan.tz) === date ? nowHere.minutes : plan.dayStart * 60;
   const start = Math.max(plan.dayStart * 60, Math.ceil(from / plan.slot) * plan.slot), end = plan.dayEnd * 60;
   const include = new Set(opts.include ?? ['top', 'due', 'dump']);
   const isDone = (e: Entry) => { if (e.itemId) { try { return !!tasks.item(e.itemId).completed; } catch { return true; } } return !!e.done; };
@@ -110,13 +124,22 @@ export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {
   if (include.has('due')) { const w = tasks.myWork(person); [...w.overdue, ...w.today].forEach((i: Item) => addIf({id: rid(), text: i.title, itemId: i.id})); }
   if (include.has('dump')) plan.dump.forEach(addIf);
   const busy = plan.blocks.map(b => [mins(b.start), mins(b.start) + b.minutes] as const);
+  // Calendar events that day (meetings, synced Google events) are busy too, unless a box already stands for them.
+  try {
+    const tied = new Set(plan.blocks.map(b => b.eventId).filter(Boolean));
+    for (const ev of listEvents(tasks, {from: date, to: date, person, mine: true})) {
+      if (ev.allDay || tied.has(ev.id) || localDay(ev.start, plan.tz) !== date) continue;
+      const s = localTime(ev.start, plan.tz).minutes;
+      busy.push([s, s + Math.round((Date.parse(ev.end) - Date.parse(ev.start)) / 60000)]);
+    }
+  } catch { /* no calendar */ }
   const free = (s: number, len: number) => s + len <= end && busy.every(([a, b]) => s + len <= a || s >= b);
   const blocks = [...plan.blocks];
   // Lines that name a time ("2PM meeting") go at that time first, if it is free and later than now.
   for (const e of [...want]) {
     const t = e.itemId ? null : timeIn(e.text);
     if (t === null || t < start || !free(t, 30)) continue;
-    const at = opts.offsetMinutes !== undefined ? new Date(Date.parse(`${date}T${hhmm(t)}:00Z`) - opts.offsetMinutes * 60_000).toISOString() : null;
+    const at = null;
     blocks.push({id: rid(), text: e.text, start: hhmm(t), minutes: 30, at, remind: false});
     busy.push([t, t + 30]);
     want.splice(want.indexOf(e), 1);
@@ -127,7 +150,7 @@ export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {
     let s = start;
     while (s < end && !free(s, len)) s += plan.slot;
     if (s >= end) break;
-    const at = opts.offsetMinutes !== undefined ? new Date(Date.parse(`${date}T${hhmm(s)}:00Z`) - opts.offsetMinutes * 60_000).toISOString() : null;
+    const at = null;
     blocks.push({id: rid(), text: e.text, ...(e.itemId ? {itemId: e.itemId} : {}), start: hhmm(s), minutes: len, at, remind: false});
     busy.push([s, s + len]);
   }
@@ -157,12 +180,11 @@ export function dayPlanReminders(tasks: Tasks, now = new Date()) {
  * Fit the day to what was really done: each box for a task moves to the time logged on it (timers), up to a cutoff
  * (now, at midday, to see the morning) or the whole day. Separate sessions of one task become separate boxes. Work
  * logged with no box gets a box. The planned time is kept on the box (planned) so the plan still shows.
- * offsetMinutes: the person's offset from UTC, to read logged times on their clock.
+ * Logged times are read on the plan's clock (its time zone).
  */
 export function fitToLogged(tasks: Tasks, person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) {
   const plan = getDayPlan(tasks, person, date);
-  const off = opts.offsetMinutes ?? 0;
-  const local = (iso: string) => { const d = new Date(Date.parse(iso) + off * 60_000); return {day: d.toISOString().slice(0, 10), m: d.getUTCHours() * 60 + d.getUTCMinutes()}; };
+  const local = (iso: string) => ({day: localDay(iso, plan.tz), m: localTime(iso, plan.tz).minutes});
   const cut = opts.upTo ? Date.parse(opts.upTo) : Infinity;
   if (opts.upTo && Number.isNaN(cut)) throw new Invalid('upTo must be a time');
   const entries = tasks.listTime({person}).filter(e => e.kind !== 'review' && local(e.start).day === date && Date.parse(e.start) < cut);
@@ -182,7 +204,7 @@ export function fitToLogged(tasks: Tasks, person: string, date: string, opts: {u
     sessions.set(k, merged);
   }
   const r5 = (m: number) => Math.round(m / 5) * 5;
-  const atOf = (m: number) => new Date(Date.parse(`${date}T${hhmm(m)}:00Z`) - off * 60_000).toISOString();
+  const atOf = (_m: number) => null;
   let blocks = [...plan.blocks];
   let moved = 0, added = 0;
   const ids = new Set([...sessions.keys(), ...loggedOnly.keys()]);

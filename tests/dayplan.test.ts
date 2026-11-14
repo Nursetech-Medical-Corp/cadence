@@ -21,7 +21,8 @@ test('day planner: top 3, brain dump, time boxes, validation', () => {
   const {t, david, p} = setup();
   const it = t.createItem({projectId: p.id, title: 'Call Tim', assignees: [david.id]}, david.id);
   const empty = t.dayPlan(david.id, '2026-11-14');
-  assert.deepEqual([empty.top, empty.dump, empty.blocks, empty.dayStart, empty.dayEnd, empty.slot], [[], [], [], 6, 22, 30]);
+  assert.deepEqual([empty.top, empty.dump, empty.blocks, empty.dayStart, empty.dayEnd, empty.slot], [[], [], [], 9, 17, 30], 'a new day starts from working hours');
+  assert.throws(() => t.updateDayPlan(david.id, '2026-11-14', {tz: 'Mars/Base'}), /time zone/);
   const plan = t.updateDayPlan(david.id, '2026-11-14', {top: [{id: 'a', text: '', itemId: it.id}], dump: [{id: 'b', text: 'do laundry'}],
     blocks: [{id: 'c', text: 'Lunch with Lisa', start: '12:00', minutes: 60, at: '2026-11-14T19:00:00Z', remind: true}]});
   assert.equal(plan.top[0].text, 'Call Tim', 'a task entry takes its title');
@@ -39,22 +40,22 @@ test('day planner: schedule from now skips busy and done, uses estimates', () =>
   const due = t.createItem({projectId: p.id, title: 'Evaluate survey', assignees: [david.id], due: '2026-11-14', estimate: 1}, david.id);
   const late = t.createItem({projectId: p.id, title: 'Develop feature', assignees: [david.id], due: '2026-11-10'}, david.id);
   t.updateDayPlan(david.id, '2026-11-14', {top: [{id: 't', text: 'Write article'}], dump: [{id: 'd1', text: 'read book'}, {id: 'd2', text: 'old', done: true}],
-    blocks: [{id: 'm', text: '2PM meeting', start: '09:00', minutes: 60}]});
-  const plan = t.autoSchedule(david.id, '2026-11-14', {from: '08:10', offsetMinutes: -420});
+    blocks: [{id: 'm', text: '2PM meeting', start: '09:00', minutes: 60}], dayStart: 6, dayEnd: 22, tz: 'America/Denver'});
+  const plan = t.autoSchedule(david.id, '2026-11-14', {from: '08:10'});
   const at = (title: string) => plan.blocks.find(b => b.text === title);
   assert.equal(at('Write article')!.start, '08:30', 'starts at the next slot after now, top 3 first');
   assert.equal(at('Develop feature')!.start, '10:00', 'skips the meeting');
   assert.equal(at('Evaluate survey')!.minutes, 60, 'uses the estimate');
   assert.equal(at('read book')!.start, '11:30');
   assert.ok(!at('old'), 'done lines are left out');
-  assert.equal(at('Write article')!.at, '2026-11-14T15:30:00.000Z', 'reminder time uses the offset');
+  assert.equal(at('Write article')!.at, '2026-11-14T15:30:00.000Z', 'reminder time comes from the plan time zone');
   assert.equal(t.autoSchedule(david.id, '2026-11-14', {from: '08:10'}).blocks.length, plan.blocks.length, 'running it again adds nothing');
   void due; void late;
 });
 
 test('day planner: lines that name a time go at that time', () => {
   const {t, david} = setup();
-  t.updateDayPlan(david.id, '2026-11-14', {dump: [{id: 'a', text: '2PM meeting'}, {id: 'b', text: 'standup 09:15'}, {id: 'c', text: 'laundry'}]});
+  t.updateDayPlan(david.id, '2026-11-14', {dayStart: 6, dump: [{id: 'a', text: '2PM meeting'}, {id: 'b', text: 'standup 09:15'}, {id: 'c', text: 'laundry'}]});
   const plan = t.autoSchedule(david.id, '2026-11-14', {from: '08:00'});
   assert.equal(plan.blocks.find(b => b.text === '2PM meeting')!.start, '14:00');
   assert.equal(plan.blocks.find(b => b.text === 'standup 09:15')!.start, '09:15');
@@ -63,7 +64,7 @@ test('day planner: lines that name a time go at that time', () => {
 
 test('day planner: reminders fire once at the start, again after a move', () => {
   const {t, david} = setup();
-  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Call Tim', start: '09:00', minutes: 30, at: '2026-11-14T16:00:00Z', remind: true}]});
+  t.updateDayPlan(david.id, '2026-11-14', {tz: 'America/Denver', blocks: [{id: 'r', text: 'Call Tim', start: '09:00', minutes: 30, remind: true}]});
   dayPlanReminders(t, new Date('2026-11-14T15:59:00Z'));
   assert.equal(t.listNotifications(david.id).length, 0, 'not yet');
   dayPlanReminders(t, new Date('2026-11-14T16:01:00Z'));
@@ -72,7 +73,7 @@ test('day planner: reminders fire once at the start, again after a move', () => 
   assert.equal(n.length, 1);
   assert.equal(n[0].kind, 'reminder');
   assert.match(n[0].text, /Call Tim/);
-  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Call Tim', start: '09:30', minutes: 30, at: '2026-11-14T16:30:00Z', remind: true}]});
+  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Call Tim', start: '09:30', minutes: 30, remind: true}]});
   dayPlanReminders(t, new Date('2026-11-14T16:31:00Z'));
   assert.equal(t.listNotifications(david.id).length, 2);
 });
@@ -82,7 +83,7 @@ test('day planner: fit boxes to logged time, up to now or all day', () => {
   const a = t.createItem({projectId: p.id, title: 'Write report', assignees: [david.id]}, david.id);
   const b = t.createItem({projectId: p.id, title: 'Email Sam', assignees: [david.id]}, david.id);
   const c = t.createItem({projectId: p.id, title: 'Unplanned fix', assignees: [david.id]}, david.id);
-  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'a', text: '', itemId: a.id, start: '09:00', minutes: 60}, {id: 'b', text: '', itemId: b.id, start: '13:00', minutes: 30}]});
+  t.updateDayPlan(david.id, '2026-11-14', {tz: 'UTC', blocks: [{id: 'a', text: '', itemId: a.id, start: '09:00', minutes: 60}, {id: 'b', text: '', itemId: b.id, start: '13:00', minutes: 30}]});
   // Times are UTC here (offset 0): report 9:20 to 10:05 and 10:10 to 10:30 (joined), fix 11:00 to 11:40, email 13:10 to 13:25.
   const log = (item: string, s: string, e: string) => t.logTime({itemId: item, person: david.id, start: `2026-11-14T${s}:00Z`, end: `2026-11-14T${e}:00Z`});
   log(a.id, '09:20', '10:05'); log(a.id, '10:10', '10:30'); log(c.id, '11:00', '11:40'); log(b.id, '13:10', '13:25');
@@ -99,6 +100,19 @@ test('day planner: fit boxes to logged time, up to now or all day', () => {
   assert.equal(day.plan.blocks.filter(x => x.itemId === c.id).length, 1, 'fitting again adds nothing twice');
 });
 
+test('day planner: time zones and working hours', () => {
+  const {t, david} = setup();
+  const p = t.updateDayPlan(david.id, '2026-07-01', {tz: 'America/Denver', blocks: [{id: 'x', text: 'Standup', start: '09:00', minutes: 15}]});
+  assert.equal(p.blocks[0].at, '2026-07-01T15:00:00.000Z', 'summer time is used in July');
+  const moved = t.updateDayPlan(david.id, '2026-07-01', {tz: 'America/New_York'});
+  assert.equal(moved.blocks[0].start, '09:00', 'box times are wall-clock times in the plan zone');
+  assert.equal(moved.blocks[0].at, '2026-07-01T13:00:00.000Z', 'changing the zone moves the moment (reminders follow)');
+  const later = t.autoSchedule(david.id, '2030-01-07', {});
+  void later;
+  t.updateDayPlan(david.id, '2030-01-07', {dump: [{id: 'd', text: 'Write plan'}]});
+  assert.equal(t.autoSchedule(david.id, '2030-01-07', {}).blocks.find(b => b.text === 'Write plan')!.start, '09:00', 'another day starts at the start of working hours, not 6am');
+});
+
 test('day planner over MCP: only your own day', async () => {
   const {t, david, sam} = setup();
   const server = createMcpServer(guarded(t, david.id), david.id);
@@ -107,6 +121,7 @@ test('day planner over MCP: only your own day', async () => {
   await Promise.all([server.connect(a), client.connect(b)]);
   const call = async (name: string, args: Record<string, unknown>) => { const r = await client.callTool({name, arguments: args}); const text = (r.content as {text: string}[])[0].text; if (r.isError) throw new Error(text); return JSON.parse(text); };
   await call('update_day_plan', {dump: [{text: 'Call Tim'}], top: [{text: 'Develop feature'}]});
+  await call('update_day_plan', {dayStart: 6});
   const s = await call('schedule_day', {from: '07:00'});
   assert.equal(s.blocks.length, 2);
   assert.equal((await call('get_day_plan', {})).blocks[0].start, '07:00');

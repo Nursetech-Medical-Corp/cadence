@@ -1616,7 +1616,7 @@ export class Tasks {
   notifyPublic(person: string, actor: string | null, itemId: string | null, kind: string, text: string) { this.notify(person, actor, itemId, kind, text); }
 
   // ---- Day planner: top 3, brain dump and time boxes for one person's day (see dayplan.ts) ----
-  dayPlan(person: string, date: string) { return dayplan.getDayPlan(this, person, date); }
+  dayPlan(person: string, date: string, hintTz?: string) { return dayplan.getDayPlan(this, person, date, hintTz); }
   updateDayPlan(person: string, date: string, patch: dayplan.DayPatch) { return dayplan.updateDayPlan(this, person, date, patch); }
   autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
   fitDayToLogged(person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) { return dayplan.fitToLogged(this, person, date, opts); }

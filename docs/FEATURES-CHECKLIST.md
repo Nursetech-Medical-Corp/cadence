@@ -22,7 +22,12 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Drag a line or task onto the day: a preview shows the snapped time; the box lands there. (e2e)
 - Press and drag on an empty time makes a box (like a calendar); with an editor or task panel open, a click only closes it. (e2e)
 - Every box has a play button; on a plain box it makes a task first, then times it. (e2e)
-- Clicking a box opens its side editor (title, time, note, tied tasks, calendar); the task key opens the task. (e2e)
+- Clicking a task box opens the task (notes, status, people); the clock opens the time slot editor (time, length, reminder, agenda, tied tasks, calendar); a plain box opens the slot editor. (e2e)
+- Drag a box's top edge to move its start (the end stays), its bottom edge to change its length. (e2e)
+- The week strip shows 7 days with planned time, calendar events and tasks due; click a day to open it. (e2e)
+- The timesheet for the day lists every timer and logged entry in time order with totals. (e2e)
+- Each day is planned in one time zone (a new day takes the computer's); box times are wall-clock times there; reminders follow; a note offers to switch when the computer is elsewhere. (e2e)
+- Plan my day: today starts now; another day starts at the planning start (working hours from calendar settings), never 6am by default; meetings stay free.
 - Task boxes show status, priority, due, estimate, space, SOP and people; done boxes turn green and struck through.
 - The day runs midnight to midnight; 12am to 6am folds open; a red line marks now. (e2e)
 - Plan my day from now: top 3, then due and overdue, then the dump; lines with a time ("2PM meeting") go at that time.

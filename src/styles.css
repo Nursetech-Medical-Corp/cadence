@@ -1749,3 +1749,23 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-fitted { font-size: 10px; font-weight: 600; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 50%, transparent); border-radius: 999px; padding: 0 5px; }
 .dp-fitinfo { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: color-mix(in srgb, var(--ok) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
 .dp-fitinfo .icon { margin-left: auto; }
+
+/* Day planner: top edge, day timesheet, time zone note */
+.dp-resize.top { top: 0; bottom: auto; }
+.dp-block:hover .dp-resize { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.dp-tsrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-bottom: 1px solid var(--line2); font-size: .92em; }
+.dp-tsrow.running .dp-tstime { color: var(--ok); font-weight: 600; }
+.dp-tstime { width: 120px; flex: none; color: var(--text2); font-variant-numeric: tabular-nums; }
+.dp-tstotals { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px; }
+.dp-tznote { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: color-mix(in srgb, #f59e0b 12%, var(--card)); border: 1px solid color-mix(in srgb, #f59e0b 40%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; }
+
+.dp-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 0 0 8px 50px; }
+.dp-wday { display: flex; flex-direction: column; gap: 3px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); text-align: left; min-width: 0; }
+.dp-wday:hover { border-color: var(--accent-line); }
+.dp-wday.on { border-color: var(--accent); background: var(--accent-soft); }
+.dp-wday.today .dp-wname b { color: var(--danger); }
+.dp-wname { font-size: 11px; color: var(--muted); }
+.dp-wname b { color: var(--text); font-size: 13px; }
+.dp-wbar { height: 3px; background: var(--line2); border-radius: 2px; overflow: hidden; }
+.dp-wbar span { display: block; height: 100%; background: var(--accent); }
+.dp-wstats { display: flex; gap: 6px; font-size: 10.5px; color: var(--text2); flex-wrap: wrap; min-height: 14px; }

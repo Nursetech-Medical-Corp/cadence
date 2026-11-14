@@ -10,6 +10,7 @@ const {chromium} = require('playwright');
 const PORT = 5199, BASE = `http://127.0.0.1:${PORT}`;
 const results = [];
 const check = (name, ok, detail = '') => { results.push({name, ok, detail}); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  (' + detail + ')' : ''}`); };
+const mins = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 const wait = ms => new Promise(r => setTimeout(r, ms));
 /** Real hands keep moving a little at the target; headless Chromium only delivers dragover on moves. */
 const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.mouse.move(x + (i % 2), y + (i % 2)); await wait(60); } };
@@ -108,9 +109,13 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     const running = await api(`/time/running?person=${me}`, {}, me);
     check('play turns the box into a task and times it', !!b6?.itemId && running?.itemId === b6.itemId);
 
-    // 7. Clicking the box body opens the side editor; a click on the day then only closes it.
-    await page.locator('.dp-block', {hasText: 'call distributors'}).click({position: {x: 200, y: 30}});
-    check('clicking a box opens its editor', await page.locator('.dp-editor').isVisible());
+    // 7. Clicking a task box opens the task; the clock opens the time slot editor; a click on the day then only closes it.
+    await page.locator('.dp-block', {hasText: 'call distributors'}).click({position: {x: 200, y: 30}}); await wait(500);
+    check('clicking a task box opens the task itself', await page.locator('aside.panel').isVisible() && !(await page.locator('.dp-editor').count()));
+    await page.keyboard.press('Escape'); await page.locator('aside.panel button[title^="Close"]').click().catch(() => {}); await wait(300);
+    await page.locator('.dp-block', {hasText: 'call distributors'}).hover();
+    await page.locator('.dp-block', {hasText: 'call distributors'}).locator('button[title^="Edit this time slot"]').click(); await wait(300);
+    check('the clock on a box opens its time slot editor', await page.locator('.dp-editor').isVisible());
     const nBoxes = (await plan()).blocks.length;
     await page.mouse.move(gb2.x + 300, gb2.y + 600); await page.mouse.down(); await page.mouse.up(); await wait(700);
     check('with the editor open, a click on the day closes it and makes no box', !(await page.locator('.dp-editor').count()) && (await plan()).blocks.length === nBoxes);
@@ -133,7 +138,8 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     check('now is marked with a red line', (await page.locator('.dp-now').count()) === 1);
 
     // 10. Box titles are editable, for tasks too.
-    await page.locator('.dp-block').first().click({position: {x: 250, y: 30}});
+    await page.keyboard.press('Escape');
+    await page.locator('.dp-block').first().hover(); await page.locator('.dp-block').first().locator('button[title^="Edit this time slot"]').click(); await wait(300);
     const title = page.locator('.dp-editor .dp-etitle');
     check('box editor has an editable title', (await title.count()) === 1 && await title.isEditable());
 
@@ -155,6 +161,25 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     check('the planned time shows as an outline, with a planned vs logged summary', (await page.locator('.dp-planned').count()) >= 1 && (await page.locator('.dp-fitinfo').count()) === 1);
     await page.locator('body').click({position: {x: 5, y: 5}}); await page.keyboard.press('Control+z'); await wait(1200);
     check('Ctrl+Z puts the plan back after a fit', (await plan()).blocks.find(b => b.id === 'fitbox')?.start === '15:00');
+
+    // 12. Drag the top edge: the start moves, the end stays.
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(800);
+    const fbx = page.locator('.dp-block', {hasText: 'Fit me'}).first();
+    await fbx.scrollIntoViewIfNeeded(); await fbx.hover();
+    const tb2 = await fbx.locator('.dp-resize.top').boundingBox();
+    const before12 = (await plan()).blocks.find(b => b.id === 'fitbox');
+    await page.mouse.move(tb2.x + 20, tb2.y + 2); await page.mouse.down(); await page.mouse.move(tb2.x + 20, tb2.y + 2 - 42 * 1.4 / 1.4 * 1, {steps: 6}); await page.mouse.up(); await wait(900);
+    const after12 = (await plan()).blocks.find(b => b.id === 'fitbox');
+    check('dragging the top edge moves the start and keeps the end', after12.start < before12.start && mins(after12.start) + after12.minutes === mins(before12.start) + before12.minutes, `${before12.start}+${before12.minutes} -> ${after12.start}+${after12.minutes}`);
+
+    // 13. The week strip, the day's timesheet, and the time zone note.
+    check('the week strip shows 7 days', (await page.locator('.dp-wday').count()) === 7);
+    check('the timesheet for the day lists timed entries', (await page.locator('.dp-tsrow').count()) >= 2);
+    await api(`/day/${date}`, {method: 'PUT', body: {tz: 'Asia/Tokyo'}}, me);
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(800);
+    check('a day planned in another time zone says so', (await page.locator('.dp-tznote').count()) === 1);
+    await page.getByRole('button', {name: 'Use my time zone'}).click(); await wait(900);
+    check('Use my time zone switches the day to this computer\'s zone', (await plan()).tz === Intl.DateTimeFormat().resolvedOptions().timeZone);
 
     check('no page errors', !errors.length, errors.join('; '));
   } catch (e) {
