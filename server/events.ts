@@ -19,10 +19,12 @@ export type CalEvent = {
   rrule: string | null; recurringId: string | null; originalStart: string | null;
   organizer: string; visibility: 'space' | 'attendees' | 'private'; attendees: Attendee[];
   source: 'cadence' | 'google'; readonly: boolean; created: string; updated: string; deleted: string | null;
+  /** Google Calendar colorId '1' to '11', or null for the calendar's color. */
+  color?: string | null;
   /** Set on expanded occurrences of a repeating event: the master's id. */
   occurrenceOf?: string;
 };
-export type EventInput = Partial<Pick<CalEvent, 'projectId' | 'itemId' | 'kind' | 'title' | 'body' | 'location' | 'start' | 'end' | 'allDay' | 'tz' | 'rrule' | 'visibility'>> & {
+export type EventInput = Partial<Pick<CalEvent, 'projectId' | 'itemId' | 'kind' | 'title' | 'body' | 'location' | 'start' | 'end' | 'allDay' | 'tz' | 'rrule' | 'visibility' | 'color'>> & {
   attendees?: (string | {person?: string | null; email?: string | null; optional?: boolean})[]; meet?: boolean; duration?: number;
 };
 export type CalendarSettings = {linkId: string | null; calendarId: string; pushTasks: 'none' | 'due'; tasksCalendarId: string | null; doneRule: 'mark' | 'delete';
@@ -56,6 +58,8 @@ export function migrateEvents(tasks: Tasks) {
       primary key (person, item_id));
     create table if not exists calendar_settings (person text primary key, data text not null);
   `);
+  // Event color: a Google Calendar colorId, 1 to 11 (Lavender to Tomato).
+  if (!tasks.db.prepare('pragma table_info(events)').all().some(r => r.name === 'color')) tasks.db.exec('alter table events add column color text');
 }
 
 // ---- Time zones (no library: Intl gives the offset of any zone at any instant) ----
@@ -175,7 +179,7 @@ function row(r: Record<string, unknown>, attendees: Attendee[]): CalEvent {
     start: r.start as string, end: r.end as string, allDay: !!r.all_day, tz: r.tz as string, rrule: (r.rrule as string) ?? null,
     recurringId: (r.recurring_id as string) ?? null, originalStart: (r.original_start as string) ?? null, organizer: r.organizer as string,
     visibility: r.visibility as CalEvent['visibility'], attendees, source: r.source as CalEvent['source'], readonly: !!r.readonly,
-    created: r.created as string, updated: r.updated as string, deleted: (r.deleted as string) ?? null};
+    created: r.created as string, updated: r.updated as string, deleted: (r.deleted as string) ?? null, color: (r.color as string) ?? null};
 }
 function attendeesOf(tasks: Tasks, ids: string[]) {
   const m = new Map<string, Attendee[]>();
@@ -334,12 +338,14 @@ export function createEvent(tasks: Tasks, input: EventInput, actor: string | nul
     values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(e.id, e.projectId, e.itemId, e.kind, e.title, e.body, e.location, e.meetUrl, e.start, e.end, e.allDay ? 1 : 0, e.tz, e.rrule,
     e.recurringId, e.originalStart, e.organizer, e.visibility, e.source, e.readonly ? 1 : 0, e.created, e.updated);
   saveAttendees(tasks, e.id, e.attendees);
+  if (input.color !== undefined) { e.color = cleanColor(input.color); tasks.db.prepare('update events set color = ? where id = ?').run(e.color, e.id); }
   if (!opts.silent) {
     for (const a of e.attendees) if (a.person && a.person !== organizer) tasks.notifyPublic(a.person, organizer, e.itemId, 'meeting', `invited you to "${e.title}" ${describeWhen(e)}`);
     fire(tasks, h => h.created?.(e, {meet: input.meet}));
   } else tasks.emit({kind: 'events'});
   return e;
 }
+const cleanColor = (c: unknown) => { if (c === null || c === '' || c === undefined) return null; const v = String(c); if (!/^([1-9]|1[01])$/.test(v)) throw new Invalid('color is a Google Calendar color id, 1 to 11'); return v; };
 export function describeWhen(e: Pick<CalEvent, 'start' | 'allDay' | 'tz'>) {
   if (e.allDay) return `on ${e.start.slice(0, 10)}`;
   return 'on ' + new Date(e.start).toLocaleString('en-US', {timeZone: e.tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short'});
@@ -391,6 +397,7 @@ export function updateEvent(tasks: Tasks, eid: string, input: EventInput & {resp
   }
   tasks.db.prepare(`update events set project_id=?, item_id=?, kind=?, title=?, body=?, location=?, start=?, end=?, all_day=?, tz=?, rrule=?, visibility=?, updated=? where id=?`)
     .run(next.projectId, next.itemId, next.kind, next.title, next.body, next.location, next.start, next.end, next.allDay ? 1 : 0, next.tz, next.rrule, next.visibility, next.updated, eid);
+  if (input.color !== undefined) tasks.db.prepare('update events set color = ? where id = ?').run(cleanColor(input.color), eid);
   if (input.attendees) {
     saveAttendees(tasks, eid, next.attendees);
     if (!opts.system) for (const a of next.attendees) if (a.person && a.person !== base.organizer && !base.attendees.some(b => b.person === a.person))

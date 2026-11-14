@@ -1734,3 +1734,6 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .dp-daycol .dp-day { padding-top: 0; }
 .dp-daynav { position: static; }
 .dp-row3 > div { min-width: 0; }
+
+.ev-color { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; }
+.ev-color.on { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg) inset; }

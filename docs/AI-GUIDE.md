@@ -125,6 +125,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 ## Day planner
 
 - One plan per person per day, only for that person: `top` (up to 3 priorities), `dump` (brain dump lines) and `blocks` (time boxes). Each entry is text, or a task (`itemId`; done when the task is done).
+- Calendar events take `color`, a Google Calendar color id `1` to `11` (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil, Tomato); it syncs with Google both ways. Synced events carry `googleUrl`, their page in Google Calendar.
 - A block can stand for a calendar event (`eventId`) and carry `links` (tasks done in it or to discuss in it, like a meeting's agenda) and a `note`.
 - A block has `start` (HH:MM), `minutes`, `at` (the same moment as an ISO time, used for reminders) and `remind`. With `remind` on, the person gets a notification (kind `reminder`, to phone and desktop) when the box starts. Moving a box arms its reminder again.
 - `fit_day_to_time` (REST `POST /api/day/:date/fit` `{upTo?, offsetMinutes?}`) fits the boxes to time logged with timers: each task box moves to when the work happened, separate sessions become separate boxes, logged work with no box gets one (`fitted`), and each box keeps `planned` (its planned start and length). `upTo` (now) fits only the day so far. It returns `summary` with planned and logged minutes.

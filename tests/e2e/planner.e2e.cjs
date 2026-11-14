@@ -181,6 +181,25 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     await page.getByRole('button', {name: 'Use my time zone'}).click(); await wait(900);
     check('Use my time zone switches the day to this computer\'s zone', (await plan()).tz === Intl.DateTimeFormat().resolvedOptions().timeZone);
 
+    // 15. The full calendar editor: from a box (Add to calendar), and by clicking a calendar event on the day.
+    await page.evaluate(() => localStorage.setItem('day-design', 'focus')); await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);
+    const calBox = page.locator('.dp-block', {hasText: 'Fit me'}).first();
+    await calBox.hover(); await calBox.locator('button[title^="Edit this time slot"]').click(); await wait(300);
+    await page.locator('.dp-editor').getByRole('button', {name: /Add to calendar/}).click(); await wait(400);
+    check('Add to calendar opens the full calendar editor', await page.locator('.ev-editor').isVisible());
+    check('the calendar editor offers repeats, guests, Meet and colors', (await page.locator('.ev-editor .ev-color').count()) === 12 && (await page.locator('.ev-editor select').count()) >= 1);
+    await page.locator('.ev-editor .ev-color[title="Peacock"]').click();
+    await page.locator('.ev-editor').getByRole('button', {name: /^(Save|Schedule)$/}).click(); await wait(1200);
+    const calId = (await plan()).blocks.find(b => b.id === 'fitbox')?.eventId;
+    check('saving it ties the box to the new event', !!calId);
+    const evs = await api(`/meetings?from=${date}&to=${date}&mine=1`, {}, me);
+    check('the event keeps its color', evs.some(e => e.id === calId && e.color === '7'));
+    await api('/meetings', {method: 'POST', body: {title: 'Investor call', start: at(18, 0), end: at(18, 30), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, color: '11'}}, me);
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(900);
+    await page.locator('.dp-event', {hasText: 'Investor call'}).click({position: {x: 120, y: 10}}); await wait(600);
+    check('clicking a calendar event opens it in the full editor', await page.locator('.ev-editor').isVisible() && (await page.locator('.ev-editor .ev-color.on[title="Tomato"]').count()) === 1);
+    await page.keyboard.press('Escape'); await wait(200);
+
     // 14. Each view keeps the week row, Today and the day arrows (they stay put while the hours scroll).
     for (const view of ['columns', 'horizontal', 'focus']) {
       await page.evaluate(v => localStorage.setItem('day-design', v), view); await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);

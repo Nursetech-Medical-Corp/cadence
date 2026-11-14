@@ -186,6 +186,7 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     meet: z.boolean().optional().describe('Add a Google Meet link'), location: z.string().optional(), body: z.string().optional().describe('Notes or agenda'),
     project: z.string().optional(), item: z.string().optional().describe('Linked item (prep task)'), rrule: z.string().nullable().optional().describe('Repeat rule, like RRULE:FREQ=WEEKLY;BYDAY=MO'),
     visibility: z.enum(['space', 'attendees', 'private']).optional(),
+    color: z.string().nullable().optional().describe('Google Calendar color id 1 to 11 (1 Lavender, 2 Sage, 3 Grape, 4 Flamingo, 5 Banana, 6 Tangerine, 7 Peacock, 8 Graphite, 9 Blueberry, 10 Basil, 11 Tomato)'),
   };
   const toEvent = (i: any) => {
     const {project, item, ...rest} = i;

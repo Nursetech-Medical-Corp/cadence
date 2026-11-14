@@ -13,7 +13,7 @@ type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
 type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean};
 type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number; added: number; upTo: string | null};
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
-type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null};
+type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null; color?: string | null};
 type Plan = {tz: string; updated?: string | null; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number};
 type DragData = {from: 'top' | 'dump' | 'task' | 'block'; id: string; itemId?: string | null; text: string; grab?: number; grabX?: number};
 
@@ -34,6 +34,7 @@ const browserTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).toISOString();
 import {matchScore} from './match.ts';
+import {EventEditor, GCAL_COLORS, type CalEvent as FullEvent} from './Meetings.tsx';
 
 export function DayPlanner({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [date, setDate] = useState(localDate);
@@ -63,6 +64,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const dragging = useRef<DragData | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [fitMenu, setFitMenu] = useState(false);
+  // The full calendar editor (Meet link, repeats, guests, color), for an event or a box that becomes one.
+  const [evEdit, setEvEdit] = useState<{event?: FullEvent; draft?: Partial<FullEvent>; boxId?: string} | null>(null);
   const [fitInfo, setFitInfo] = useState<FitSummary | null>(null);
   const [showPlanned, setShowPlanned] = useState(() => localStorage.getItem('day-planned') !== 'off');
   // Undo for the planner: earlier plans, and tasks a step created (removed again on undo).
@@ -498,7 +501,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {dropGhost && <div className="dp-ghost drop" style={horiz ? {left: (dropGhost.m - startM) * px, width: dropGhost.len * px, top: 26, bottom: 4} : {top: (dropGhost.m - startM) * px, height: dropGhost.len * px}}>{label(dropGhost.m)} to {label(dropGhost.m + dropGhost.len)}</div>}
       {!horiz && planStart > startM && <div className="dp-plan" style={{top: 0, height: (planStart - startM) * px}} title="Before your planning hours" />}
       {!horiz && planEnd < endM && <div className="dp-plan" style={{top: (planEnd - startM) * px, height: (endM - planEnd) * px}} title="After your planning hours" />}
-      {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; return <div key={ev.id + ev.start} className="dp-event" style={place(ev.s, ev.len, lane)} title={`${ev.source === 'google' ? 'Google Calendar' : 'Calendar'}: ${ev.title}`}>
+      {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; const col = ev.color ? GCAL_COLORS[ev.color]?.[1] : undefined;
+        return <div key={ev.id + ev.start} className="dp-event" style={{...place(ev.s, ev.len, lane), ...(col ? {borderLeftColor: col, background: `color-mix(in srgb, ${col} 18%, var(--card))`} : {})}} title={`${ev.source === 'google' ? 'Google Calendar' : 'Calendar'}: ${ev.title}. Click to open it`}
+          onClick={async e => { if ((e.target as HTMLElement).closest('button, a')) return; try { setEvEdit({event: await api<FullEvent>(`/meetings/${ev.occurrenceOf ?? ev.id}`)}); } catch (err) { store.fail(err); } }}>
         <div className="dp-brow"><CalendarClock size={11} /><span className="dp-btitle">{ev.title || '(no title)'}</span>{ev.itemId && store.items.get(ev.itemId) && <button className="dp-linkchip" onClick={() => open(ev.itemId!)} title="The task this event is for">{itemKey(store.items.get(ev.itemId)!, store.projects)}</button>}<span className="dp-btime">{label(ev.s)} to {label(ev.s + ev.len)}</span>
           {ev.meetUrl && <a className="icon" href={ev.meetUrl} target="_blank" rel="noreferrer" title="Join"><Video size={11} /></a>}
           <button className="icon" title="Plan in this event: make it a box so you can tie tasks to it" onClick={() => { const id = rid(), start = hhmm(Math.max(startM, ev.s)); update(p => ({...p, blocks: [...p.blocks, {id, text: ev.title || 'Meeting', start, minutes: ev.len, at: ev.start, remind: false, eventId: ev.id, ...(ev.itemId ? {links: [ev.itemId]} : {})}]})); setEditing(id); }}><Plus size={11} /></button></div>
@@ -566,7 +571,13 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     <a className="small" href="#/timesheet">Week timesheet</a>
   </section>;
   const eb = editing ? plan.blocks.find(b => b.id === editing) : undefined;
-  const editor = eb && <BoxEditor key={eb.id} store={store} b={eb} date={date} space={space} open={open}
+  const openCalendar = async (b: Block) => {
+    if (b.eventId) { try { setEvEdit({event: await api<FullEvent>(`/meetings/${b.eventId}`), boxId: b.id}); return; } catch { /* the event is gone: make a new one */ } }
+    const it = item(b), s0 = new Date(b.at ?? atOf(date, b.start));
+    setEvEdit({boxId: b.id, draft: {title: it?.title ?? b.text, start: s0.toISOString(), end: new Date(s0.getTime() + b.minutes * 60000).toISOString(), itemId: b.itemId ?? null,
+      body: [b.note, ...(b.links ?? []).map(id => store.items.get(id)).filter(Boolean).map(x => `- ${itemKey(x!, store.projects)} ${x!.title}`)].filter(Boolean).join('\n')}});
+  };
+  const editor = eb && <BoxEditor key={eb.id} store={store} b={eb} date={date} space={space} open={open} onCalendar={() => openCalendar(eb)}
     patch={p => patchBlock(eb.id, p)} remove={() => { removeBlock(eb.id); setEditing(null); }} close={() => setEditing(null)} />;
   const fold = (k: string, title: string, body: React.ReactNode) => <details open={isOpen(k)} onToggle={e => { const v = (e.currentTarget as HTMLDetailsElement).open; if (v !== isOpen(k)) setOpen(k, v); }}><summary>{title}</summary>{body}</details>;
 
@@ -583,7 +594,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-row3"><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
     default: body = <div className="dp-main"><div className="dp-left">{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{dayGrid}</div>;
   }
-  return <div className={`dp d-${D.id}${bySource ? ' by-source' : ''}`}>{head}{body}{editor}</div>;
+  const evModal = evEdit && <EventEditor store={store} event={evEdit.event} draft={evEdit.draft} items={[...store.items.values()]} open={open}
+    onSaved={r => { if (evEdit.boxId) patchBlock(evEdit.boxId, {eventId: r.id}); }} onClose={() => { setEvEdit(null); load(); }} />;
+  return <div className={`dp d-${D.id}${bySource ? ' by-source' : ''}`}>{head}{body}{editor}{evModal}</div>;
 }
 
 type Density = 'compact' | 'normal' | 'roomy';
@@ -635,23 +648,13 @@ function lanesOf(blocks: Block[]) {
 const fmtM = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`;
 
 /** Edit one time box: title, time, note, tasks tied to it (done in or to discuss), make it a task, put it on the calendar. */
-function BoxEditor({store, b, date, space, open, patch, remove, close}: {store: Store; b: Block; date: string; space: string; open: (id: string) => void; patch: (p: Partial<Block>) => void; remove: () => void; close: () => void}) {
+function BoxEditor({store, b, date, space, open, patch, remove, close, onCalendar}: {store: Store; b: Block; date: string; space: string; open: (id: string) => void; patch: (p: Partial<Block>) => void; remove: () => void; close: () => void; onCalendar: () => void}) {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const it = b.itemId ? store.items.get(b.itemId) : undefined;
   const found = q.trim().length < 2 ? [] : [...store.items.values()].filter(i => !i.recur?.spawned && i.id !== b.itemId && !(b.links ?? []).includes(i.id) &&
     (itemKey(i, store.projects).toLowerCase() === q.trim().toLowerCase() || i.title.toLowerCase().includes(q.trim().toLowerCase()))).sort((a, c) => Number(!!a.completed) - Number(!!c.completed)).slice(0, 8);
   const s = mins(b.start);
-  const toCalendar = async () => {
-    setBusy(true);
-    try {
-      const start = new Date(`${date}T${b.start}:00`), end = new Date(start.getTime() + b.minutes * 60000);
-      const linked = (b.links ?? []).map(id => store.items.get(id)).filter(Boolean).map(x => `- ${itemKey(x!, store.projects)} ${x!.title}`);
-      const ev = await api<{id: string; google?: unknown}>('/meetings', {method: 'POST', body: {title: (it?.title ?? b.text) || 'Time block', start: start.toISOString(), end: end.toISOString(),
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone, body: [b.note, linked.length ? 'Tasks:\n' + linked.join('\n') : ''].filter(Boolean).join('\n\n'), ...(b.itemId ? {itemId: b.itemId} : {}), visibility: 'attendees'}});
-      patch({eventId: ev.id});
-    } catch (e) { store.fail(e); } finally { setBusy(false); }
-  };
   const makeTask = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
     if (!pid || !b.text.trim()) return;
@@ -682,8 +685,7 @@ function BoxEditor({store, b, date, space, open, patch, remove, close}: {store: 
     </div>
     <div className="row">
       {!it && <button className="btn small" disabled={!b.text.trim()} onClick={makeTask} title="Make this box a task (quick-add works)"><ListPlus size={12} /> Make it a task</button>}
-      {b.eventId ? <span className="muted small"><CalendarClock size={12} /> On your calendar</span>
-        : <button className="btn small" disabled={busy} onClick={toCalendar} title="Add it to your calendar (and Google Calendar when connected). Invite people from the meeting"><CalendarPlus size={12} /> Add to calendar</button>}
+      <button className="btn small" onClick={onCalendar} title="The full calendar editor: guests, Google Meet link, repeats, color, and Open in Google Calendar">{b.eventId ? <><CalendarClock size={12} /> Calendar event</> : <><CalendarPlus size={12} /> Add to calendar</>}</button>
       <span className="spacer" />
       <button className="btn small danger" onClick={remove}><Trash2 size={12} /> Remove</button>
     </div>

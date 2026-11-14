@@ -33,7 +33,9 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Task boxes show status, priority, due, estimate, space, SOP and people; done boxes turn green and struck through.
 - The day runs midnight to midnight; 12am to 6am folds open; a red line marks now. (e2e)
 - Plan my day from now: top 3, then due and overdue, then the dump; lines with a time ("2PM meeting") go at that time.
-- Calendar events show striped; + makes one a box to tie tasks to; Add to calendar makes an event (Google when connected).
+- Calendar events show on the day in their color; clicking one opens the full calendar editor (guests, Meet link, repeats, color, visibility, Open in Google Calendar); + makes one a box to tie tasks to. (e2e)
+- A box's Add to calendar opens the same editor prefilled (title, time, agenda, tied tasks); saving ties the box to the event. (e2e)
+- Event colors are Google Calendar colors and sync both ways.
 - Fit to my time (up to now, or whole day): boxes move to logged time, sessions of one task split into boxes, logged work with no box gets one, the plan shows as a dashed outline, Back to plan in the editor, Ctrl+Z undoes. (e2e)
 - Reminders fire once at the start of a box, again after a move.
 - List spaces (records) never show in Assigned.

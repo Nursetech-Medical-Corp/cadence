@@ -23,7 +23,7 @@ import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudb
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
-import {allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
+import {googleUrl, allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
 import {addAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
 import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
@@ -530,7 +530,7 @@ If you did not ask for it, ignore this email.`)
           const pid = q('project');
           const rollup = pid ? !!tasks.project(pid).settings.rollup : false;
           if (pid && !rollup) need(pid, 'view');
-          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee));
+          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee).map(e => ({...e, googleUrl: googleUrl(tasks, e.occurrenceOf ?? e.id)})));
         }
         if (!b && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
@@ -559,7 +559,7 @@ If you did not ask for it, ignore this email.`)
         if (b) {
           const e = getEvent(tasks, b);
           if (!visible(e) && !isAdmin(actor)) throw new Denied('You cannot see this event');
-          if (m === 'GET') return send(res, 200, e);
+          if (m === 'GET') return send(res, 200, {...e, googleUrl: googleUrl(tasks, e.id)});
           if (m === 'PATCH') {
             if (body.projectId) need(body.projectId, 'edit');
             const {scope, occurrence, ...patch} = body;
