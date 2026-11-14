@@ -69,16 +69,16 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Area | Tools |
 | --- | --- |
 | Read | `get_guide`, `get_workspace`, `list_job_roles` (job roles, the spaces and levels each opens, who has them; names only for non-admins), `search_items`, `get_item`, `my_work`, `project_summary`, `changes_since`, `history` |
-| Write | `create_item`, `quick_add`, `update_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
+| Write | `create_item`, `quick_add`, `update_item`, `complete_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
 | Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
 | Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
 | Inbox | `my_notifications`, `mark_notifications_read` |
-| Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations` |
+| Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations`, `trigger_automation` |
 | Sprints | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report` |
 | Planning | `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
-| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim` |
+| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
 | Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
 | Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
@@ -95,6 +95,7 @@ A person's review time is kept as a "review" time entry.
 | Area | Tools |
 | --- | --- |
 | Integrations | `upsert_external` (CRM or accounting records), `create_from_email`, `calendar_events`, `gmail_search` |
+| Webhooks (docs/WEBHOOKS.md) | `list_webhooks`, `set_webhooks`, `test_webhook`; every tool here is also an inbound action at `POST /api/hooks/in/<tool>` |
 
 `calendar_events` and `gmail_search` work after the person connects their Google account on the Team page.
 

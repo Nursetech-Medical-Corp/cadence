@@ -1,6 +1,6 @@
 // Outside connections that need no accounts:
 // - Calendar feed (iCalendar .ics): subscribe from Google Calendar, Outlook or Apple Calendar.
-// - Webhooks: POST a JSON payload to any URL (Zapier, Make, n8n, Slack workflows) when items change.
+// - Webhooks (server/webhooks.ts): POST a JSON payload to any URL (Zapier, Make, n8n, Slack workflows) when things change.
 import {lookup} from 'node:dns/promises';
 import {isIP} from 'node:net';
 import type {Tasks} from './service.ts';
@@ -40,21 +40,4 @@ export function calendarFeed(tasks: Tasks, q: {person?: string; project?: string
   lines.push('END:VCALENDAR');
   // Lines over 75 octets must be folded.
   return lines.map(l => l.length <= 74 ? l : l.match(/.{1,73}/g)!.join('\r\n ')).join('\r\n') + '\r\n';
-}
-
-/** Sends item events to each project's webhooks. Failures are logged, never block a save. */
-export function startWebhooks(tasks: Tasks) {
-  tasks.onLog(({kind, item, before, after, actor}) => {
-    const p = tasks.listProjects().find(x => x.id === item.projectId);
-    if (!p?.settings.webhooks.length) return;
-    const names = {create: 'item.created', update: 'item.updated', delete: 'item.deleted', revert: 'item.restored'} as const;
-    const event = kind === 'update' && (after as Record<string, unknown>)?.completed ? 'item.completed' : names[kind];
-    const body = JSON.stringify({event, project: {id: p.id, key: p.key, name: p.name}, item, changes: kind === 'update' ? {before, after} : undefined, actor, at: new Date().toISOString()});
-    for (const h of p.settings.webhooks) {
-      if (h.events.length && !h.events.includes(event)) continue;
-      safeTarget(h.url).then(ok => ok
-        ? fetch(h.url, {method: 'POST', headers: {'content-type': 'application/json'}, body, redirect: 'error'}).catch(e => console.error('Webhook failed', h.url, e.message))
-        : console.error('Webhook blocked: private or local address', h.url));
-    }
-  });
 }

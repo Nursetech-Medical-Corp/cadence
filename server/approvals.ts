@@ -71,6 +71,7 @@ export function requestApproval(tasks: Tasks, itemId: string, by: string | null,
   }
   tasks.logWork(itemId, by, 'review', `Approval requested from ${approvers.map(a => tasks.listPeople().find(p => p.id === a)?.name).join(', ')} (${meaning})${note ? ': ' + note : ''}`);
   tasks.emit({kind: 'comment', itemId});
+  tasks.event('approval.requested', {projectId: item.projectId, item, actor: by, details: {approvals: made}});
   return made;
 }
 
@@ -94,7 +95,9 @@ export function sign(tasks: Tasks, approvalId: string, signer: string, decision:
   if (comment.trim()) tasks.addComment(a.itemId, signer, `${decision === 'approved' ? 'Approved' : decision === 'changes' ? 'Changes requested' : 'Rejected'} (${a.meaning}). ${comment}`);
   if (a.requestedBy && a.requestedBy !== signer) tasks.notifyPublic(a.requestedBy, signer, a.itemId, 'approval', `${verb} on ${item.title}`);
   tasks.emit({kind: 'comment', itemId: a.itemId});
-  return listApprovals(tasks, {itemId: a.itemId}).find(x => x.id === approvalId)!;
+  const signed = listApprovals(tasks, {itemId: a.itemId}).find(x => x.id === approvalId)!;
+  tasks.event('approval.signed', {projectId: item.projectId, item, actor: signer, details: {approval: signed, decision}});
+  return signed;
 }
 
 /** Summary for an item: whether all requested approvals are signed, and whether the item changed since. */

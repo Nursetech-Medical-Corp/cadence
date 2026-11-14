@@ -649,7 +649,13 @@ a.btn { text-decoration: none; }
 .review-box.state-approved { border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 8%, transparent); }
 .review-box.state-changes { border-color: color-mix(in srgb, var(--danger) 35%, transparent); background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .review-head { display: flex; align-items: center; gap: 6px; font-size: .9em; }
+.review-box.state-redo, .review-box.state-discarded { border-color: color-mix(in srgb, var(--danger) 35%, transparent); background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .review-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.review-confirm { border-top: 1px solid var(--line2); margin-top: 8px; padding-top: 6px; }
+.artifacts { margin: 6px 0 0; } .artifacts .set-item { padding: 3px 2px; gap: 6px; }
+.tag.cleanup-pending, .tag.hook-failed { color: var(--danger); } .tag.cleanup-confirmed, .tag.cleanup-removed, .tag.hook-ok { color: var(--ok); }
+.hook-events { margin: 4px 0 2px 22px; } .hook-events summary { cursor: pointer; color: var(--text2); padding: 3px 0; }
+.hook-group { margin: 6px 0 0; } .hook-group .chips { margin: 4px 0 0; }
 .files { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .file-thumb img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
 .file-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; font-size: .85em; color: var(--text2); text-decoration: none; }
