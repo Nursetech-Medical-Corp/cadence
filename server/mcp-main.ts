@@ -3,6 +3,7 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {openDb} from './db.ts';
 import {createMcpServer} from './mcp.ts';
 import {Tasks} from './service.ts';
+import {migrateAiWork} from './aiwork.ts';
 import {listWorkspaces, workspaceDir} from './workspaces.ts';
 
 const asIdx = process.argv.indexOf('--as');
@@ -12,5 +13,7 @@ const ws = listWorkspaces().find(w => w.id === want || w.name.toLowerCase() === 
 if (!ws) { console.error(`Unknown workspace "${want}". Workspaces: ${listWorkspaces().map(w => w.name).join(', ')}`); process.exit(1); }
 const tasks = new Tasks(openDb(ws.db));
 tasks.dataDir = workspaceDir(ws);
+tasks.workspace = ws.id;
+migrateAiWork(tasks);
 if (ws.id === 'main') tasks.seedIfEmpty();
 await createMcpServer(tasks, asIdx > 0 ? process.argv[asIdx + 1] : null).connect(new StdioServerTransport());

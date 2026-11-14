@@ -51,6 +51,19 @@ create table if not exists activity (
 create index if not exists activity_item on activity(item_id);
 create index if not exists activity_project on activity(project_id, id);
 create table if not exists rule_runs (rule_id text not null, item_id text not null, primary key (rule_id, item_id));
+-- Date rules run once per rule, item and date value, so they run again when the date changes.
+create table if not exists rule_fires (rule_id text not null, item_id text not null, stamp text not null, primary key (rule_id, item_id, stamp));
+-- Date events (due soon, overdue, sprint started) sent once each.
+create table if not exists event_runs (key text primary key, at text not null);
+-- Outbound webhooks: every delivery with its status, and the signing secrets (kept out of settings so they are never sent to browsers).
+create table if not exists hook_deliveries (
+  id text primary key, hook text not null, scope text not null, url text not null, secret_key text, event text not null, body text not null,
+  status text not null, attempts integer not null default 0, next_at text, code integer, error text, created text not null, updated text
+);
+create index if not exists hook_deliveries_due on hook_deliveries(status, next_at);
+create index if not exists hook_deliveries_scope on hook_deliveries(scope, created);
+create table if not exists hook_secrets (key text primary key, secret text not null);
+create table if not exists workspace (key text primary key, value text not null);
 create table if not exists templates (
   id text primary key, kind text not null, name text not null, project_id text, data text not null, created text not null
 );
@@ -64,7 +77,14 @@ export function openDb(path = process.env.TASKS_DB ?? 'data/tasks.db') {
   if (path !== ':memory:') mkdirSync(dirname(path), {recursive: true});
   const db = new DatabaseSync(path);
   db.exec('pragma journal_mode = wal; pragma foreign_keys = on; pragma busy_timeout = 3000;');
+  const fresh = !db.prepare("select 1 from sqlite_master where type = 'table' and name = 'event_runs'").get() && !!db.prepare("select 1 from sqlite_master where type = 'table' and name = 'items'").get();
   db.exec(SCHEMA);
+  if (fresh) {
+    // Upgrading a workspace: due-date rules that already ran keep their mark for the current due date,
+    // and date events for dates already reached are not sent for old work (see Tasks.periodic).
+    db.exec("insert or ignore into rule_fires select r.rule_id, r.item_id, i.due from rule_runs r join items i on i.id = r.item_id where i.due is not null");
+    db.prepare("insert or ignore into event_runs (key, at) values ('baseline-pending', ?)").run(new Date().toISOString());
+  }
   // Columns added after the first release.
   const cols = db.prepare('pragma table_info(items)').all().map(r => r.name);
   if (!cols.includes('deps')) db.exec("alter table items add column deps text not null default '[]'");

@@ -20,10 +20,28 @@ Read this once, then call `get_workspace`. Everything a person can do on screen,
 ## Working as an AI worker
 
 1. `ai_queue` lists tasks marked for AI (or Either) and your own in-progress work.
-2. `claim_task` asks to take one. A person accepts it (you get assigned) or declines. Do not start before acceptance unless you are already assigned.
-3. While working, `log_step` short factual entries: what you did (`step`), links you used or produced (`link`, with `url`), and anything you could not do (`missed`). Attach screenshots with `attach_file` (base64), then reference them in reports as `![name](/api/files/<id>)`.
-4. `submit_work` with a Markdown report: what was done, links, screenshots, and `missed` for gaps. Status moves to review.
-5. `get_feedback` shows the reviewer's comments. If sent back, fix, log, and submit again.
+2. `claim_task` asks to take one. A person accepts it (you get assigned) or declines. Do not start before acceptance unless you are already assigned. Pass `session`: the id or URL of the chat, session or run you work in.
+3. While working, `log_step` short factual entries: what you did (`step`), links you used or produced (`link`, with `url`), and anything you could not do (`missed`). Attach screenshots with `attach_file` (base64), then reference them in reports as `![name](/api/files/<id>)`. Pass `session` again when it changes.
+4. Register what you make outside the task as artifacts, so it can be undone: `log_step` with `artifact`, or `artifacts` on `submit_work`. Each is `{kind: file|doc|design|commit|branch|pr|item|url|other, ref, url?, undo?}`; write `undo` for an agent that has none of your context ("git revert abc123 on main", "delete the page Draft memo"). Files you attach and subitems you create under the task are tracked for you.
+5. `submit_work` with a Markdown report: what was done, links, screenshots, `missed` for gaps, and `artifacts`. Status moves to review.
+6. `get_feedback` tells you what the reviewer decided and what to do next (below).
+
+### After review: continue, redo, discard, clean up
+
+A person decides with `review_work` (`decision`: `approve`, `changes`, `redo`, `discard`). `get_feedback` returns `decision`, `comment`, `session`, `context` and `cleanup`:
+
+| Decision | State | What you do |
+| --- | --- | --- |
+| `approve` | `approved` | Nothing. The task is done. |
+| `changes` | `changes` | Keep your work, fix what the comment asks, `log_step`, `submit_work` again. |
+| `redo` | `redo` | Start over from scratch, following the comment. First clean up (below). The task is still yours; `submit_work` when done. |
+| `discard` | `discarded` | Stop. The task went back to its earlier status and you are unassigned (unless the reviewer kept you). Clean up (below). |
+
+- `session` is where you worked last. Reopen that chat or run if you can. If you cannot, `context` carries what you need into a new one: your last `report`, the `missed` list, the `steps` you logged and the `artifacts` you registered.
+- On redo and discard Cadence hides the files you uploaded in that attempt. On discard it also undoes your changes to the item (where nobody changed the same field after you) and deletes the subitems you created; both can be restored from history.
+- Everything else you made is in `cleanup`: `[{id, kind, ref, url, undo}]`. Undo each one (revert the commit, delete the branch, close the PR, remove the document), then call `confirm_cleanup` with `item`, `artifact` (the id) and a `note` saying what you did. The reviewer sees which are confirmed and which are outstanding. If you cannot undo one, say so in a comment; do not confirm it.
+- `agent_inbox` lists redo and sent-back work under `sentBack` (with `decision` and `session`) and everything you still owe under `cleanup`.
+- After a redo your next attempt is separate: register its artifacts again.
 
 Agents belong to a person (their owner, set on the Team page under My AI agents):
 
@@ -50,11 +68,14 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Sprints and planning | Sprint view, Plan and forecast | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report`, `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Meetings and calendar | Calendar view, Meetings, two-way Google sync | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item`, `calendar_events` |
 | Templates | Templates page, gallery packs | `list_templates`, `get_template`, `create_template`, `update_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack`, `delete_template` |
-| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim`, `suggest_work`, `my_proposals` |
+| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim`, `suggest_work`, `my_proposals` |
 | Time | Timers, Timesheet | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
 | Inbox, comments | Inbox | `my_notifications`, `mark_notifications_read`, `add_comment`, `resolve_comment` |
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
+| Webhooks (docs/WEBHOOKS.md) | Space settings, Integrations (that space); Team page, Workspace webhooks (every space). Name, URL, secret, events, on or off, test, recent deliveries | `list_webhooks`, `set_webhooks`, `test_webhook` |
+| Automations | Space settings, Automations | `set_automations`, `trigger_automation` |
+| Inbound webhooks | `POST /api/hooks/in/<tool name>` with a Bearer token runs any tool; `trigger` runs rules waiting for a key | every tool, plus `complete_item` |
 | Approvals | Approvals page | `request_approval`, `list_approvals` |
 | Job roles and access | Team page: Job roles matrix (company roles by space; drag to reorder), People (job roles shown and set per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
 | Personal workspaces | Workspace switcher: New workspace (any signed-in member, unless the server owner turns it off) | none (app only) |
@@ -76,7 +97,8 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
   - `skip`: done for this cycle without doing it; moves to the next date.
   - `delay` with `to` (YYYY-MM-DD): moves only this copy. The next copy stays on the original schedule (kept in `recur.slot`). To move the whole schedule, change `due` with `update_item` instead.
   - `wait` with `on` (item ids or keys): hidden until all of those are done (a hire, a W-2 setup). Then it starts by itself on its next date from that day and its assignees are told. Use this for "start after X".
-  - `pause`: hidden from views, sprints, plans and open lists. History kept. `resume` brings it back on its next date from today.
+  - `pause`: hidden from views, sprints, plans and open lists. History kept. `resume` brings it back on its next date from today. `resume` on a waiting routine ends the wait now, without waiting for the items it depends on.
+  - How wait ends: the moment the last item it waits for is finished, the routine shows again, its assignees are told, the event `routine.resumed` is sent to webhooks, and rules with the trigger `routine-resumed` run (in the same change, no delay). Its due date is the next date on its schedule from that day, so a monthly routine released on the 3rd is due on the 1st of next month. To have it due sooner, `update_item` its `due` after it starts.
   - `end`: stop repeating. The copy stays as a normal task.
 - Paused, waiting, archived and snoozed items are left out of `search_items` with `openOnly`, My work, sprints and plans.
 - Conventions: tag every routine with its SOP code and one mode tag (`auto-job`: an AI job runs it and a person checks the output; `hybrid`: AI drafts, a person decides; `manual`: a person does it). The estimate is the human time per copy.
@@ -147,13 +169,16 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - **Onboard a vendor**: `use_template` with "New vendor onboarding" and `title` set to the vendor name (fills `{name}`) and a `due`; AI steps are marked `worker: ai`.
 - **Sync with a CRM**: `upsert_external` with `source` (for example `zoho-crm`) and `externalId` to create or update the linked item; poll `changes_since` with the last `now` it returned.
 - **Status update**: `project_summary`, `sprint_report`, and `history` for what changed.
-- **Automations**: `set_automations` replaces a project's rules: triggers `created`, `status` (with `to`), `completed`, `assigned`, `due-passed`; conditions on type, parent type, priority, tag, assignee; actions `status`, `assign`, `priority`, `tag`, `sprint` (current, next, none), `due` (days), `notify`, `template`, `parent-status`.
+- **Automations**: `set_automations` replaces a project's rules (checked on save; a bad rule is refused with the reason). Triggers: `created`, `status` (with `to`), `completed`, `assigned`, `unassigned`, `comment-added`, `review` (with `to`: an AI review state), `routine-resumed`, `webhook-received` (with `key`), and the date triggers `due-soon` (with `days`), `due-today`, `due-passed`, `overdue-by` (with `days`), `start-reached`, which run hourly, once per item and date, and again when the date changes. Conditions on type, parent type, priority, tag, assignee. Actions: `status`, `assign`, `priority`, `tag`, `sprint` (current, next, none), `due` (days), `notify`, `template`, `parent-status`, `webhook` (`value` is the URL, optional `secret`), `routine-resume`. `trigger_automation` with `project` and `key` runs the rules waiting for that key.
+- **Tell another system when something happens**: `set_webhooks` with an endpoint and the events it wants (`list_webhooks` returns every event name), then `test_webhook`. For one rule only, use the `webhook` action in `set_automations`. Payloads, signature and retries: docs/WEBHOOKS.md.
 
 ## REST quick reference
 
 - `GET /api/bootstrap` everything visible. `GET /api/items?projectId=&assignee=&open=true`
 - `POST /api/items` create, `POST /api/items/quick` `{projectId, text}`, `PATCH /api/items/:id`, `DELETE /api/items/:id`
-- `POST /api/ai/claim|decide|submit|review|log` `{itemId, ...}`; `GET /api/ai/queue`; `GET /api/items/:id/log`; `POST /api/items/:id/files` `{name, mime, data(base64)}`
+- `POST /api/ai/claim|decide|submit|review|log|cleanup` `{itemId, ...}` (claim, submit and log take `session`; submit takes `artifacts`, log takes `artifact`; review takes `decision: approve|changes|redo|discard`, `comment`, `keep`; cleanup takes `artifact`, `note`); `GET /api/ai/queue`; `GET /api/items/:id/log|artifacts|feedback`; `POST /api/items/:id/files` `{name, mime, data(base64)}`
+- `GET /api/hooks?scope=<spaceId|workspace>`; `PUT /api/hooks` `{scope, webhooks: [{id?, name, url, secret?, events, active}], dueSoonDays?}`; `POST /api/hooks/test` `{scope, id}`; `GET /api/hooks/deliveries?scope=&hook=`
+- `POST /api/hooks/in/<tool name>` with the tool's arguments as JSON runs that tool as the token's person (Bearer header only); `POST /api/hooks/in/trigger` `{project, key, item?, ...}` runs rules waiting for the key. See docs/WEBHOOKS.md
 - `GET /api/plan/estimates|replan|forecast`, `POST /api/plan/estimates|apply`
 - `GET /api/changes?since=ISO`, `PUT /api/external/:source/:id` `{projectId, title, ...}`
 - `GET /api/routines`; `POST /api/routines/act` `{ids, action, to?, on?}` (action: skip, delay, wait, pause, resume, end)
