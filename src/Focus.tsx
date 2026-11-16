@@ -9,8 +9,8 @@
 import {TaskClock} from './TimeTracker.tsx';
 import {useEffect, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Calendar, CheckCircle2, ExternalLink, Focus as FocusIcon, Play, Settings2, Square, X} from 'lucide-react';
-import {fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
+import {Calendar, CheckCircle2, ExternalLink, Focus as FocusIcon, Maximize2, Minimize2, Play, Settings2, Square, X} from 'lucide-react';
+import {fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {BlockEditor} from './BlockEditor.tsx';
 import {Check, InlineText, Popover, PriorityIcon, StatusIcon, itemKey} from './components.tsx';
 import type {Item, Project} from './types.ts';
@@ -80,9 +80,13 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
 }
 
 function Clock({start, className = 'fx-clock'}: {start: string; className?: string}) {
-  const now = useNow(true);
+  const now = useSharedNow(true);
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
+
+/** Whether the focus view fills the screen (kept per browser). */
+const isFullPage = () => localStorage.getItem('fv-full') === '1';
+const fullPage = (on: boolean) => { try { localStorage.setItem('fv-full', on ? '1' : ''); } catch { /* private mode */ } };
 
 /** What starting a timer does, for this person. */
 function FocusChoices({store}: {store: Store}) {
@@ -125,6 +129,7 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
             : <button className="fb-btn" title="Start the timer on this task" onClick={() => store.startTimer(i.id)}><Play size={10} fill="currentColor" /></button>}
           {on && <TaskClock store={store} itemId={i.id} className="fx-clock" />}
           <button className="fb-title" title={`${i.title}. Click for the focus view`} onClick={() => store.setFocusId(i.id)}>{i.title}</button>
+          <button className="fb-btn" title="Full page focus on this task" onClick={() => { fullPage(true); store.setFocusId(i.id); }}><Maximize2 size={12} /></button>
           <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
           <button className="fb-btn" title="Open the task" onClick={() => open(i.id)}><ExternalLink size={12} /></button>
           <button className="fb-btn" title="Take out of focus" onClick={() => store.focusRemove(i.id)}><X size={12} /></button>
@@ -138,7 +143,8 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
 
 function FocusView({store, item, list, close, popOut}: {store: Store; item: Item; list: Item[]; close: () => void; popOut: () => void}) {
   const project = store.projects.find(p => p.id === item.projectId);
-  const now = useNow(store.running?.itemId === item.id);
+  const now = useSharedNow(store.running?.itemId === item.id);
+  const [full, setFull] = useState(isFullPage);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input,textarea,[contenteditable=true],.popover')) { e.stopPropagation(); close(); } };
     document.addEventListener('keydown', k, true);
@@ -152,11 +158,12 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
   const pct = est ? Math.min(100, Math.round(logged / est * 100)) : 0;
   const status = project.statuses.find(s => s.id === item.status);
   const others = list.filter(i => i.id !== item.id);
-  return <div className="fv-backdrop" role="dialog" aria-label="Focus" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
+  return <div className={'fv-backdrop' + (full ? ' full' : '')} role="dialog" aria-label="Focus" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
     <div className="fv">
       <header className="fv-head">
         <span className="fv-crumb"><span className="fv-space">{project.name}</span> {itemKey(item, store.projects)}</span>
         <span className="spacer" />
+        <button className="btn small" onClick={() => { fullPage(!full); setFull(!full); }} title={full ? 'Back to a window over the page' : 'Fill the whole screen'}>{full ? <><Minimize2 size={13} /> Window</> : <><Maximize2 size={13} /> Full page</>}</button>
         <button className="btn small" onClick={popOut} title="A small timer that stays on top of other windows"><ExternalLink size={13} /> Pop out</button>
         <FocusSettings store={store} />
         <button className="fb-btn" title="Leave the focus view (Esc)" onClick={close}><X size={18} /></button>
@@ -212,7 +219,7 @@ function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id
         {on ? <TaskClock store={store} itemId={i.id} className="fx-clock" /> : null}
         <span className="pip-title" title={i.title}>{i.title}</span>
         <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
-        <button className="fb-btn" title="Focus view in Cadence" onClick={() => focus(i.id)}><FocusIcon size={12} /></button>
+        <button className="fb-btn pip-full" title="Full page focus in Cadence" onClick={() => { fullPage(true); focus(i.id); }}><Maximize2 size={12} /> Full page</button>
       </div>;
     })}
   </div>;

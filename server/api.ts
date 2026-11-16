@@ -196,6 +196,10 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
     }
   };
   tasks.on(broadcast);
+  // A comment line every 25 seconds keeps the event stream open through proxies that close quiet connections
+  // (a closed stream misses events: a timer stopped in one tab would still show running in another).
+  const beat = setInterval(() => { for (const c of clients.keys()) { try { c.write(': ping\n\n'); } catch { /* closed */ } } }, 25000);
+  beat.unref?.();
 
   // Writes from another process (the MCP server) bump data_version; tell clients to refetch.
   let version = (tasks.db.prepare('pragma data_version').get() as {data_version: number}).data_version;

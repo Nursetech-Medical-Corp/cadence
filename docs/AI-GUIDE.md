@@ -166,7 +166,8 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - The side panels resize by dragging their edge (double-click resets), in every view; hovering a line shows its full name. "Color by space" tints task lines and boxes with their space's color (a box's own color wins).
 - Event colors: events you organize take a real `color` (synced to Google). Any other event (from someone else's Google calendar) takes a personal color only you see, saved in your prefs as `eventColors` (`{eventId: colorId}`).
 - The header shows the Google Calendar connection: the connected account, or Connect Google Calendar (returns to the day planner), or Set up Google Calendar (Team page) when an admin has not added Google yet. REST: `GET /api/auth/google/start?mode=link&want=calendar&as=<person>&back=/day`.
-- Timers: there is one running timer per person. Every clock for a task (focus bar, pop-out, focus view, task panel, top bar) shows the same number: all time logged on the task plus the running session. Time logged with timers shows beside the boxes.
+- Timers: there is one running timer per person. Every clock for a task (focus bar, pop-out, focus view, task panel, top bar) shows the same number: all time logged on the task plus the running session. Starting or stopping anywhere (app, another tab, `start_timer`/`stop_timer`) updates every open tab.
+- Preferences (`PUT /api/prefs` `{key, value}`) accept: `view:<id>`, `views:<space>`, `projects`, `cover:mywork`, `cover:everything`, `focus`, `focusList`, `newItems`, `newDefaults`, `rollupAdd`, `eventColors`. Time logged with timers shows beside the boxes.
 
 ## Email alerts
 

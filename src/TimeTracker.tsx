@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {ChevronDown, ChevronRight, Play, Square, Trash2} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
-import {api, fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
+import {api, fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {parseDuration} from './dates.ts';
 import {Avatar, Popover} from './components.tsx';
 
@@ -22,7 +22,7 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, {weekday: 
 
 /** Time since start, counting up every second. Only this re-renders while a timer runs. */
 export function Elapsed({start, className}: {start: string; className?: string}) {
-  const now = useNow(true);
+  const now = useSharedNow(true);
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
 
@@ -30,7 +30,7 @@ export function Elapsed({start, className}: {start: string; className?: string})
  *  its timer runs. Every place reads the one running timer, so starting or stopping it anywhere updates them all. */
 export function TaskClock({store, itemId, className}: {store: Store; itemId: string; className?: string}) {
   const run = store.running?.itemId === itemId ? store.running : null;
-  const now = useNow(!!run);
+  const now = useSharedNow(!!run);
   const before = store.timeTotals.get(itemId) ?? 0;
   const session = run ? Math.max(0, now - Date.parse(run.start)) : 0;
   return <span className={className} title={run ? `This run ${fmtClock(session)}; total on the task` : 'Total on the task'}>{fmtClock(before * 60000 + session)}</span>;

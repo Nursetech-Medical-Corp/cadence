@@ -171,6 +171,8 @@ export type ItemQuery = {
 export type HookEvent = {event: string; projectId?: string | null; project?: {id: string; key: string; name: string}; item?: Item | null; changes?: {before: unknown; after: unknown};
   actor?: string | null; details?: Record<string, unknown>; target?: {hook: string; scope: string; url: string; secretKey: string | null}};
 
+/** Preference keys a person may save: view and space order, covers, focus, new-item defaults, rollup targets, event colors. */
+export const PREF_KEY = /^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything)|focus|focusList|newItems|newDefaults|rollupAdd|eventColors)$/;
 export class Tasks {
   private listeners = new Set<(e: ChangeEvent) => void>();
   /** Folder for this workspace's uploaded files. */
@@ -1521,7 +1523,8 @@ export class Tasks {
     return Object.fromEntries(this.db.prepare('select key, value from prefs where person = ?').all(person).map(r => [r.key as string, j(r.value, null)]));
   }
   setPref(person: string, key: string, value: unknown) {
-    if (!/^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything))$/.test(key)) throw new Invalid('Unknown preference');
+    // Keep in step with the keys the app saves (tests/prefs-keys.test.ts checks every setPref in src against this).
+    if (!PREF_KEY.test(key)) throw new Invalid('Unknown preference');
     if (value === null || value === undefined) { this.db.prepare('delete from prefs where person = ? and key = ?').run(person, key); return; }
     const text = JSON.stringify(value);
     if (text.length > 50_000) throw new Invalid('That layout is too large');
