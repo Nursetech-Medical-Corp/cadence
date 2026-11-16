@@ -5,6 +5,7 @@ import type {BurnPoint, Item, Person, Sprint} from './types.ts';
 import {api, type Store} from './store.ts';
 import {daysBetween} from './dates.ts';
 import {Avatar, DateInput, InlineText, Check, PeoplePicker, TypeBadge, EstimateText} from './components.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 export function sprintState(s: Sprint, today: string) {
   return today < s.start ? 'upcoming' : today > s.end ? 'closed' : 'current';
@@ -56,7 +57,7 @@ export function SprintCard({store, sprint, items, over, onDragOver, onDrop, curr
       <div className="sc-head">
         <InlineText value={sprint.name} onSave={name => store.updateSprint(sprint.id, {name})} />
         <span className={'small ' + (state === 'current' ? 'sprint-chip' : 'muted')}>{state}</span>
-        <button className="icon" title="Delete sprint (items go back to the backlog)" onClick={() => confirm(`Delete ${sprint.name}? Its items return to the backlog.`) && store.deleteSprint(sprint.id)}><Trash2 size={13} /></button>
+        <button className="icon" title="Delete sprint (items go back to the backlog)" onClick={async () => (await uiConfirm(`Delete ${sprint.name}? Its items return to the backlog.`)) && store.deleteSprint(sprint.id)}><Trash2 size={13} /></button>
       </div>
       <div style={{display: 'flex', alignItems: 'center', gap: 4}} className="small">
         <DateInput value={sprint.start} onChange={start => start && store.updateSprint(sprint.id, {start})} /> to

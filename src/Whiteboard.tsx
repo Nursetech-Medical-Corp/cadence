@@ -6,6 +6,7 @@ import {MessageSquarePlus, Download, CirclePlay, Diamond, Heading, Info, Table2,
 import type {Item, Person, Project} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Avatars, itemKey} from './components.tsx';
+import {uiAlert, uiChoose, uiConfirm, uiPrompt} from './dialogs.tsx';
 
 type Kind = 'task' | 'sticky' | 'text' | 'shape' | 'frame' | 'link' | 'trigger' | 'webhook' | 'end' | 'terminal' | 'decision' | 'info' | 'table' | 'title';
 type TriggerOn = 'manual' | 'webhook' | 'completed' | 'schedule';
@@ -147,7 +148,7 @@ function BoardList({store}: {store: Store}) {
     // Takes the elements as JSON: an array, an object by id, or one document per line (as Claude's artifact tools list them).
     let elements: unknown;
     try { elements = JSON.parse(paste); } catch {
-      try { elements = paste.split('\n').map(l => l.trim()).filter(l => l.startsWith('{')).map(l => JSON.parse(l)); } catch { alert('That is not JSON. Paste the board\'s elements.'); return; }
+      try { elements = paste.split('\n').map(l => l.trim()).filter(l => l.startsWith('{')).map(l => JSON.parse(l)); } catch { void uiAlert('That is not JSON. Paste the board\'s elements.'); return; }
     }
     if (elements && typeof elements === 'object' && !Array.isArray(elements) && 'elements' in (elements as object)) elements = (elements as {elements: unknown}).elements;
     setBusy(true);
@@ -157,7 +158,9 @@ function BoardList({store}: {store: Store}) {
     catch (e) { store.fail(e); } finally { setBusy(false); }
   };
   const bySop = async () => {
-    const aiDraw = confirm('One board per SOP: each SOP gets a board with its routines, a title and its SOP document.\n\nOK: also make a task for an AI agent to draw each SOP\'s full flow from its document, following the drawing rules (it waits for your approval like all AI work).\nCancel: boards only.');
+    const pick = await uiChoose('One board per SOP: each SOP gets a board with its routines, a title and its SOP document. An AI agent can also get a task to draw each full flow from its document, following the drawing rules (it waits for your approval like all AI work).', [['boards', 'Boards only'], ['ai', 'Boards and AI drawing tasks']]);
+    if (!pick) return;
+    const aiDraw = pick === 'ai';
     setBusy(true);
     try {
       const r = await api<{made: Board[]; kept: Board[]; drawTasks?: unknown[]}>('/boards/by-sop', {method: 'POST', body: {aiDraw}});
@@ -170,16 +173,16 @@ function BoardList({store}: {store: Store}) {
   const shown = (boards ?? []).filter(b => (folder === null || (folder === '' ? !b.folder : b.folder === folder)) && (!q || `${b.name} ${b.sop ?? ''} ${b.description}`.toLowerCase().includes(q.toLowerCase())));
   const toggle = (id: string) => setSel(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const move = async (ids: string[]) => {
-    const f = prompt(`Move ${ids.length} board${ids.length === 1 ? '' : 's'} to which folder? Type a new or existing name; empty for none.`, folder ?? '');
+    const f = (await uiPrompt(`Move ${ids.length} board${ids.length === 1 ? '' : 's'} to which folder? Type a new or existing name; empty for none.`, folder ?? ''));
     if (f === null) return;
     try { for (const id of ids) await api(`/boards/${id}`, {method: 'PATCH', body: {folder: f.trim() || null}}); setSel(new Set()); load(); } catch (e) { store.fail(e); }
   };
   const remove = async (ids: string[]) => {
     const names = (boards ?? []).filter(b => ids.includes(b.id)).map(b => `- ${b.name}`);
-    if (!confirm(`Delete ${ids.length} whiteboard${ids.length === 1 ? '' : 's'}? Their run history goes too. Tasks they made stay.\n\n${names.slice(0, 25).join('\n')}${names.length > 25 ? `\n...and ${names.length - 25} more` : ''}`)) return;
+    if (!(await uiConfirm(`Delete ${ids.length} whiteboard${ids.length === 1 ? '' : 's'}? Their run history goes too. Tasks they made stay.\n\n${names.slice(0, 25).join('\n')}${names.length > 25 ? `\n...and ${names.length - 25} more` : ''}`))) return;
     try { for (const id of ids) await api(`/boards/${id}`, {method: 'DELETE'}); setSel(new Set()); store.flash(`Deleted ${ids.length}`); load(); } catch (e) { store.fail(e); }
   };
-  const rename = async (b: Board) => { const n = prompt('Board name', b.name); if (n?.trim() && n !== b.name) { try { await api(`/boards/${b.id}`, {method: 'PATCH', body: {name: n.trim()}}); load(); } catch (e) { store.fail(e); } } };
+  const rename = async (b: Board) => { const n = (await uiPrompt('Board name', b.name)); if (n?.trim() && n !== b.name) { try { await api(`/boards/${b.id}`, {method: 'PATCH', body: {name: n.trim()}}); load(); } catch (e) { store.fail(e); } } };
   return <div className="wb-list">
     <header className="head"><div className="head-top"><h1><Workflow size={20} /> Whiteboards</h1></div>
       <p className="muted small space-note">Map how work flows: routines, automations, webhooks and who does each step, person or AI. Link cards to tasks and SOP documents, turn ideas into tasks, and run a board to make its tasks in order.</p></header>
@@ -530,8 +533,8 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
   };
   const toTasks = async () => {
     const n = nodes.filter(x => x.kind === 'task' && !x.itemId).length;
-    if (!n) { alert('Every task card is already linked to a task.'); return; }
-    if (!confirm(`Create ${n} task${n === 1 ? '' : 's'} from the unlinked cards? Arrows become dependencies.`)) return;
+    if (!n) { void uiAlert('Every task card is already linked to a task.'); return; }
+    if (!(await uiConfirm(`Create ${n} task${n === 1 ? '' : 's'} from the unlinked cards? Arrows become dependencies.`))) return;
     if (timer.current) { clearTimeout(timer.current); timer.current = null; await api(`/boards/${boardId}`, {method: 'PATCH', body: {nodes: latest.current.nodes, edges: latest.current.edges}}).catch(() => {}); dirty.current = false; }
     try { const r = await api<{board: Board}>(`/boards/${boardId}/to-tasks`, {method: 'POST', body: {}}); setBoard(r.board); setNodes(r.board.nodes); setEdges(r.board.edges); } catch (e) { store.fail(e); }
   };
@@ -696,7 +699,7 @@ function NodeInspector({store, n, space, sops, patch, remove, duplicate, open}: 
   const matches = q.trim().length < 2 ? [] : [...store.items.values()].filter(i => !i.recur?.spawned && (itemKey(i, store.projects).toLowerCase() === q.trim().toLowerCase() || i.title.toLowerCase().includes(q.trim().toLowerCase())))
     .sort((a, b) => Number(!!a.completed) - Number(!!b.completed)).slice(0, 8);
   const makeTask = async () => {
-    if (!space) { alert('Put the board in a space first (board settings).'); return; }
+    if (!space) { void uiAlert('Put the board in a space first (board settings).'); return; }
     const it = await store.createItem({projectId: space.id, title: n.text.split('\n')[0] || 'Untitled', body: n.text.split('\n').slice(1).join('\n').trim(), assignees: n.assignees ?? [], estimate: n.estimate ?? null, tags: n.sop ? [n.sop] : [], fields: {worker: n.worker ?? 'either'}});
     if (it) patch({itemId: it.id});
   };
@@ -720,7 +723,7 @@ function NodeInspector({store, n, space, sops, patch, remove, duplicate, open}: 
       <label>SOP code<input className="plain-input" placeholder="Like SOP-07.2" defaultValue={n.sop ?? ''} key={n.id + 's'} onBlur={e => patch({sop: e.target.value.trim().toUpperCase() || null})} /></label>
       {n.sop && (sops[n.sop] ? <a className="small" href={sops[n.sop]} target="_blank" rel="noreferrer"><ExternalLink size={11} /> Open {n.sop}</a> : <span className="muted small">No document linked to {n.sop} yet. Admins set SOP links in Settings, or connect a Link card.</span>)}
     </>}
-    {(n.kind === 'link' || n.kind === 'webhook') && <label>{n.kind === 'link' ? 'Link (Google Drive, Docs, any page)' : 'Webhook URL (POST)'}<input className="plain-input" placeholder="https://..." defaultValue={n.url ?? ''} key={n.id + 'u'} onBlur={e => { const v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) { alert('Links start with https://'); return; } patch({url: v || null}); }} /></label>}
+    {(n.kind === 'link' || n.kind === 'webhook') && <label>{n.kind === 'link' ? 'Link (Google Drive, Docs, any page)' : 'Webhook URL (POST)'}<input className="plain-input" placeholder="https://..." defaultValue={n.url ?? ''} key={n.id + 'u'} onBlur={e => { const v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) { void uiAlert('Links start with https://'); return; } patch({url: v || null}); }} /></label>}
     {n.kind === 'webhook' && <p className="muted small">When every step before it is done, this posts JSON with the board, the run, its input and the finished tasks.</p>}
     {n.kind === 'trigger' && <>
       <label>Starts<select className="plain-input" value={n.trigger?.on ?? 'manual'} onChange={e => patch({trigger: {on: e.target.value as TriggerOn, tag: n.trigger?.tag ?? null, every: n.trigger?.every ?? 'week'}})}>
@@ -762,13 +765,13 @@ function BoardSettings({store, board, save, nodes}: {store: Store; board: Board;
     <p className="muted small">{steps.length} step{steps.length === 1 ? '' : 's'}, {nodes.filter(n => n.kind === 'task' && n.itemId).length} linked to tasks.</p>
     {board.hookUrl && <div className="wb-field"><span className="muted small">Inbound webhook: POST JSON here to start a run (Zapier, n8n, a form). Keep it secret.</span>
       <div className="row"><input className="plain-input grow" readOnly value={board.hookUrl} onFocus={e => e.target.select()} /><button className="btn small" onClick={() => navigator.clipboard?.writeText(board.hookUrl!)}><Copy size={12} /></button></div>
-      <button className="btn ghost small" onClick={() => confirm('Make a new link? The old one stops working.') && save({rotateKey: true})}>New link</button></div>}
+      <button className="btn ghost small" onClick={async () => (await uiConfirm('Make a new link? The old one stops working.')) && save({rotateKey: true})}>New link</button></div>}
     <div className="wb-field"><span className="muted small">Outbound webhooks: told when runs start, steps finish, runs end or fail</span>
       {board.webhooks.map(h => <div key={h.id} className="row small"><span className="grow" style={{overflow: 'hidden', textOverflow: 'ellipsis'}}>{h.url}</span><span className="muted">{h.events.join(', ') || 'all'}</span>
         <button className="icon" onClick={() => save({webhooks: board.webhooks.filter(x => x.id !== h.id)})}><Trash2 size={12} /></button></div>)}
       <div className="row"><input className="plain-input grow" placeholder="https://hooks.zapier.com/..." value={url} onChange={e => setUrl(e.target.value)} />
         <button className="btn small" disabled={!/^https?:\/\//.test(url)} onClick={() => { save({webhooks: [...board.webhooks, {id: rid(), url, events: []}]}); setUrl(''); }}><Plus size={12} /> Add</button></div></div>
-    <div className="row" style={{marginTop: 16}}><button className="btn small danger" onClick={async () => { if (!confirm(`Delete "${board.name}" and its run history? Tasks made from it stay.`)) return; try { await api(`/boards/${board.id}`, {method: 'DELETE'}); location.hash = '/boards'; } catch (e) { store.fail(e); } }}><Trash2 size={12} /> Delete board</button></div>
+    <div className="row" style={{marginTop: 16}}><button className="btn small danger" onClick={async () => { if (!(await uiConfirm(`Delete "${board.name}" and its run history? Tasks made from it stay.`))) return; try { await api(`/boards/${board.id}`, {method: 'DELETE'}); location.hash = '/boards'; } catch (e) { store.fail(e); } }}><Trash2 size={12} /> Delete board</button></div>
     <p className="muted small">Drag on the board to select; middle mouse, Space+drag or the hand (P) to move around; Shift+wheel scrolls sideways; Ctrl+wheel zooms. Drag from a card's dot toward another card: the arrow snaps to it.</p>
     <p className="muted small">Keys: {KINDS.map(k => `${k.key} ${k.label.toLowerCase()}`).join(', ')}. V select. Enter edits, Delete removes, Ctrl+D duplicates. Paste a link to add it.</p>
   </div>;

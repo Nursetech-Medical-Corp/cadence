@@ -10,6 +10,7 @@ import {addDays} from './dates.ts';
 
 export {skippable, skipRoutine} from './skip.ts';
 import {skipRoutine} from './skip.ts';
+import {uiAlert, uiPrompt} from './dialogs.tsx';
 
 export function RoutineControls({store, item}: {store: Store; item: Item}) {
   const r = item.recur;
@@ -17,7 +18,7 @@ export function RoutineControls({store, item}: {store: Store; item: Item}) {
   const sched = r.slot ?? item.due;
   const next = sched ? nextOccurrence(r, sched, sched) : null;
   const act = async (action: string, extra: Record<string, unknown> = {}) => {
-    try { const res = await api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [item.id], action, ...extra}}); if (res.errors?.length) alert(res.errors.join('\n')); } catch (e) { store.fail(e); }
+    try { const res = await api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [item.id], action, ...extra}}); if (res.errors?.length) void uiAlert(res.errors.join('\n')); } catch (e) { store.fail(e); }
   };
   const waitingOn = r.waiting ? item.deps.map(d => store.items.get(d)).filter(d => d && !d.completed).map(d => itemKey(d!, store.projects)) : [];
   const live = !r.paused && !r.waiting;
@@ -29,8 +30,8 @@ export function RoutineControls({store, item}: {store: Store; item: Item}) {
     </div>
     <div className="rt-actions">
       {live && <button title="Not done this time: keeps a Skipped record and moves to the next date" onClick={() => skipRoutine(store, item)}><SkipForward size={12} /> Skip</button>}
-      {live && <button title="Push only this copy; the next one stays on schedule" onClick={() => { const to = prompt(`Delay only this copy to (YYYY-MM-DD). The next stays on ${next ?? 'schedule'}.`, item.due ? addDays(item.due, 3) : store.today); if (to) act('delay', {to}); }}><Clock3 size={12} /> Delay</button>}
-      <button title="Start only after other work is done, like a hire or a W-2 setup" onClick={() => { const k = prompt('Wait until which item is done? Its key, like GEN-12 (comma for several).'); if (!k) return; const on = k.split(/[,\s]+/).filter(Boolean).map(x => [...store.items.values()].find(i => itemKey(i, store.projects).toUpperCase() === x.toUpperCase())?.id ?? x); act('wait', {on}); }}><Hourglass size={12} /> Wait</button>
+      {live && <button title="Push only this copy; the next one stays on schedule" onClick={async () => { const to = (await uiPrompt(`Delay only this copy to (YYYY-MM-DD). The next stays on ${next ?? 'schedule'}.`, item.due ? addDays(item.due, 3) : store.today)); if (to) act('delay', {to}); }}><Clock3 size={12} /> Delay</button>}
+      <button title="Start only after other work is done, like a hire or a W-2 setup" onClick={async () => { const k = (await uiPrompt('Wait until which item is done? Its key, like GEN-12 (comma for several).')); if (!k) return; const on = k.split(/[,\s]+/).filter(Boolean).map(x => [...store.items.values()].find(i => itemKey(i, store.projects).toUpperCase() === x.toUpperCase())?.id ?? x); act('wait', {on}); }}><Hourglass size={12} /> Wait</button>
       {r.paused ? <button onClick={() => act('resume')}><Play size={12} /> Turn on</button> : <button title="Hide from views, sprints and plans; history kept" onClick={() => act('pause')}><Pause size={12} /> Pause</button>}
     </div>
   </div>;

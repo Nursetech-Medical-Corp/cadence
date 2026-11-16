@@ -35,6 +35,7 @@ const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() 
 const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).toISOString();
 import {matchScore} from './match.ts';
 import {EventEditor, GCAL_COLORS, type CalEvent as FullEvent} from './Meetings.tsx';
+import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 export function DayPlanner({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [date, setDate] = useState(localDate);
@@ -190,10 +191,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   };
   const createTasks = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
-    if (!pid) { alert('Make a space first.'); return; }
+    if (!pid) { void uiAlert('Make a space first.'); return; }
     const todo = latest.current!.dump.filter(e => !e.itemId && !e.done);
     if (!todo.length) { store.flash('Every line is already a task'); return; }
-    if (!confirm(`Make ${todo.length} new task${todo.length === 1 ? '' : 's'} in ${realProjects(store.projects).find(p => p.id === pid)?.name}, assigned to you?${matchOn ? '' : ' Tip: turn on Match first to tie lines to tasks you already have.'}`)) return;
+    if (!(await uiConfirm(`Make ${todo.length} new task${todo.length === 1 ? '' : 's'} in ${realProjects(store.projects).find(p => p.id === pid)?.name}, assigned to you?${matchOn ? '' : ' Tip: turn on Match first to tie lines to tasks you already have.'}`))) return;
     setBusy(true);
     const made = new Map<string, string>();
     for (const e of todo) {

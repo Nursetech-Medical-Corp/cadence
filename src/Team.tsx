@@ -3,13 +3,14 @@ import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
 import {Check as CheckIcon, CircleUser, Copy, KeyRound, Mail, Plus, Shield, Trash2} from 'lucide-react';
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
-import {BUILT_IN_AGENT_RULES} from './agentRules.ts';
+import {BUILT_IN_AGENT_RULES, DEFAULT_AGENT_GUIDE} from './agentRules.ts';
 import {FocusSettingsCard} from './Focus.tsx';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 import {WebhooksEditor} from './Webhooks.tsx';
 import {ConnectedAppsCard, pendingConnect} from './ConnectedApps.tsx';
 import {DomainJoinCard, JobRolePicker, JobRolesCard, jobRoleNames, type DomainJoin, type JobRole} from './JobRoles.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
@@ -275,7 +276,7 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {people.map(p => (
           <div key={p.id} className={'set-item team-row' + (p.active ? '' : ' off')}>
             <Avatar person={{id: p.id, name: p.name, email: p.email, color: p.color}} size={26} />
-            <div className="grow" style={{minWidth: 140}}>
+            <div className="grow person-name-email" style={{minWidth: 140}}>
               <input className="inline" defaultValue={p.name} disabled={!isAdmin} onBlur={e => e.target.value !== p.name && patch(p.id, {name: e.target.value})} />
               <input className="inline small" placeholder="email for sign-in" defaultValue={p.email} disabled={!isAdmin && p.id !== me.person?.id} onBlur={e => e.target.value !== p.email && patch(p.id, {email: e.target.value})} />
               <div className="jr-names small">{jobRoleNames(jobRoles ?? [], p.jobRoles).join(', ') || <span className="muted">No job role</span>}</div>
@@ -417,7 +418,7 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
         ? 'Personal space: only the people given a role here can see it. Workspace admins do not see it unless added.'
         : 'Shared space: people see it as their job roles say (Team page), else as set below, else with their default level. Inviting someone never gives them anyone\'s personal spaces.'}</span></div>
       {!personal && canEdit && me && <div className="set-item"><span className="grow muted small">Keep this space to yourself and the people you pick, like a private Google Doc.</span>
-        <button className="btn small" onClick={() => { if (confirm('Make this space private? Only you and people you give a role below will see it.')) save({default: 'none', members: {...access.members, [me]: 'admin'}, private: true}); }}>Make private</button></div>}
+        <button className="btn small" onClick={async () => { if ((await uiConfirm('Make this space private? Only you and people you give a role below will see it.'))) save({default: 'none', members: {...access.members, [me]: 'admin'}, private: true}); }}>Make private</button></div>}
       {!personal && jobRoles.some(j => j.spaces && (j.spaces[project.id] ?? j.others ?? 'inherit') !== 'inherit') && <div className="set-item"><span className="grow small"><b>Job roles here:</b> {jobRoles.filter(j => j.spaces && (j.spaces[project.id] ?? j.others ?? 'inherit') !== 'inherit').map(j => { const l = j.spaces[project.id] ?? j.others; return `${j.name} ${l === 'none' ? 'no access' : roles.find(r => r.id === l)?.name ?? l}`; }).join(', ')}. <span className="muted">Change on the Team page. A person set below overrides their job role.</span></span></div>}
       <div className="set-item">
         <span className="grow">Everyone else in the workspace</span>
@@ -434,7 +435,7 @@ export function AccessCard({store, project}: {store: Store; project: Project}) {
         </div>
       ))}
       {personal && canEdit && <div className="set-item"><span className="grow muted small">Make it a regular workspace space (admins can then see and manage it).</span>
-        <button className="btn small" onClick={() => { if (confirm('Turn this into a regular workspace space? Admins will see it.')) save({default: access.default === 'none' ? 'inherit' : access.default, members: access.members}); }}>Make shared space</button></div>}
+        <button className="btn small" onClick={async () => { if ((await uiConfirm('Turn this into a regular workspace space? Admins will see it.'))) save({default: access.default === 'none' ? 'inherit' : access.default, members: access.members}); }}>Make shared space</button></div>}
     </section>
   );
 }
@@ -450,8 +451,9 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
   useEffect(() => { if (!who && people.length) setWho(people.find(p => p.kind === 'ai')?.id ?? people[0].id); }, [people]);
   const mcpUrl = `${location.origin}/mcp?ws=${wsId()}`;
   return (
-    <section className="set-card">
-      <div className="set-card-head"><h3>AI agents and tokens (advanced)</h3><span className="muted small">For Claude, Connect Claude above is simpler. An AI agent is a person marked AI agent above, with the role you choose. Give it a token; it can then use the API or MCP and do only what its role allows.</span></div>
+    <details className="set-card tokens-card">
+      <summary className="set-card-head"><h3>Keys for scripts and agents (advanced)</h3><span className="muted small">{tokens.length} key{tokens.length === 1 ? '' : 's'}. A key logs in as one team member. You rarely need this: Connect Claude and My AI agents make keys for you.</span></summary>
+      <p className="small muted">Each row is one key and who it acts as. "Connector" keys are the ones My AI agents made with Get connection key. A key that acts as a person (not an AI agent) works with that person's name and permissions; revoke those if an AI should not act as you.</p>
       <div className="set-add" style={{flexWrap: 'wrap'}}>
         <select className="plain-select" value={who} onChange={e => setWho(e.target.value)}>{people.filter(p => admin || p.id === me).map(p => <option key={p.id} value={p.id}>{p.name}{p.kind === 'ai' ? ' (AI)' : ''}</option>)}</select>
         <input className="plain-select" style={{flex: 1, minWidth: 140}} placeholder="Token name, e.g. Claude Desktop" value={name} onChange={e => setName(e.target.value)} />
@@ -465,12 +467,12 @@ function TokensCard({people, admin, me}: {people: Member[]; admin: boolean; me: 
       </div>}
       {tokens.map(t => (
         <div key={t.id} className="set-item">
-          <span className="grow small"><b>{t.name}</b> for {people.find(p => p.id === t.person)?.name ?? 'unknown'}</span>
+          <span className="grow small"><b>{t.name}</b>, acts as {people.find(p => p.id === t.person)?.name ?? 'unknown'} {people.find(p => p.id === t.person)?.kind === 'ai' ? <span className="tag">AI agent</span> : <span className="tag warn">a person</span>}</span>
           <span className="muted small">{t.lastUsed ? `used ${new Date(t.lastUsed).toLocaleString()}` : 'never used'}</span>
-          <button className="btn ghost small" onClick={async () => { if (confirm(`Revoke "${t.name}"? Anything using it stops working.`)) { await api(`/tokens/${t.id}`, {method: 'DELETE'}); load(); } }}><Trash2 size={12} /> Revoke</button>
+          <button className="btn ghost small" onClick={async () => { if ((await uiConfirm(`Revoke "${t.name}"? Anything using it stops working.`))) { await api(`/tokens/${t.id}`, {method: 'DELETE'}); load(); } }}><Trash2 size={12} /> Revoke</button>
         </div>
       ))}
-    </section>
+    </details>
   );
 }
 
@@ -664,7 +666,7 @@ function AccountCard({me}: {me: Me}) {
     try { const r = await api<{linked: string[]}>('/auth/link', {method: 'POST', body: {email, password: pw}}); setLinked(r.linked); setEmail(''); setPw(''); setMsg('Linked. Its workspaces are in the switcher and on Everything.'); }
     catch (e) { setMsg(e instanceof Error ? e.message : String(e)); }
   };
-  const unlink = async (e: string) => { if (!confirm(`Unlink ${e}? Its workspaces leave this sign-in; the account itself stays.`)) return; const r = await api<{linked: string[]}>(`/auth/link/${encodeURIComponent(e)}`, {method: 'DELETE'}); setLinked(r.linked); };
+  const unlink = async (e: string) => { if (!(await uiConfirm(`Unlink ${e}? Its workspaces leave this sign-in; the account itself stays.`))) return; const r = await api<{linked: string[]}>(`/auth/link/${encodeURIComponent(e)}`, {method: 'DELETE'}); setLinked(r.linked); };
   return (
     <section className="set-card">
       <div className="set-card-head"><h3>Your account</h3><span className="muted small">Signed in as <b>{me.account}</b>. Link your other accounts (for example a personal email) to see all their workspaces with one sign-in.</span></div>
@@ -744,6 +746,24 @@ function ConnectSteps({provider, url, prompt}: {provider: string; url: string; p
     </ol>{promptBox}</div>;
 }
 
+/** Admins: every rule text agents get, in one place. Empty means the built-in text. */
+function AgentRulesEditor({ws, setMsg}: {ws: {aiRules: string; agentBaseRules: string; agentGuide: string}; setMsg: (m: string) => void}) {
+  const defaults: Record<string, string> = {agentBaseRules: BUILT_IN_AGENT_RULES.map(r => `- ${r}`).join('\n'), agentGuide: DEFAULT_AGENT_GUIDE, aiRules: ''};
+  const save = (key: string, label: string) => async (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    try { await api('/workspace', {method: 'PUT', body: {[key]: e.target.value === defaults[key] ? '' : e.target.value}}); setMsg(`Saved ${label}.`); } catch (x) { setMsg(String(x instanceof Error ? x.message : x)); }
+  };
+  return <details className="agent-rules-all small">
+    <summary><b>Rules for AI agents</b> (admins edit; agents read these)</summary>
+    <label className="agent-rules">1. Base rules, sent every run (agent_inbox). Cadence enforces these in code; rewording changes what agents read, not what is enforced. Keep it short: every line is read every run.
+      <textarea className="plain-input" rows={8} defaultValue={ws.agentBaseRules || defaults.agentBaseRules} onBlur={save('agentBaseRules', 'the base rules')} /></label>
+    <label className="agent-rules">2. Workspace rules for every agent, sent every run. Your business rules: what agents never do, how to report, dates.
+      <textarea className="plain-input" rows={8} placeholder="Like: Never pay, send, sign or delete. Kickoff comment first. Deliverables are new files." defaultValue={ws.aiRules} onBlur={save('aiRules', 'the workspace rules')} /></label>
+    <label className="agent-rules">3. Onboarding guide, read once when an agent is set up (get_guide): scanning without rescanning everything, suggesting work, handing in, the setup checklist.
+      <textarea className="plain-input" rows={12} defaultValue={ws.agentGuide || defaults.agentGuide} onBlur={save('agentGuide', 'the onboarding guide')} /></label>
+    <div className="muted">4. Each agent's own role and rules: on the agent, below. 5. Drawing rules for whiteboards: Whiteboards page, Drawing rules.</div>
+  </details>;
+}
+
 /** Your own AI agents: add one, connect it with its key, and set what it may do. */
 function AgentsCard() {
   const [list, setList] = useState<AgentRow[]>([]);
@@ -753,20 +773,21 @@ function AgentsCard() {
   const [key, setKey] = useState<{agent: string; url: string; token: string} | null>(null);
   const [msg, setMsg] = useState('');
   // Rules for every agent in the workspace: admins only (null when this person cannot change them).
-  const [rules, setRules] = useState<string | null>(null);
+  const [ws, setWs] = useState<{aiRules: string; agentBaseRules: string; agentGuide: string; drawingRules: string} | null>(null);
   const load = () => api<AgentRow[]>('/agents').then(setList).catch(e => setMsg(String(e instanceof Error ? e.message : e)));
-  useEffect(() => { load(); api<Project[]>('/projects').then(ps => setProjects(ps.filter(p => !p.settings.rollup))).catch(() => {}); api<{aiRules?: string}>('/workspace').then(w => setRules(w.aiRules ?? '')).catch(() => setRules(null)); }, []);
+  useEffect(() => { load(); api<Project[]>('/projects').then(ps => setProjects(ps.filter(p => !p.settings.rollup))).catch(() => {}); api<{aiRules?: string; agentBaseRules?: string; agentGuide?: string; drawingRules?: string}>('/workspace').then(w => setWs({aiRules: w.aiRules ?? '', agentBaseRules: w.agentBaseRules ?? '', agentGuide: w.agentGuide ?? '', drawingRules: w.drawingRules ?? ''})).catch(() => setWs(null)); }, []);
   const save = async (a: AgentRow, patch: Partial<AgentSettings>) => {
     try { const r = await api<{settings: AgentSettings}>(`/agents/${a.id}`, {method: 'PATCH', body: patch}); setList(list.map(x => x.id === a.id ? {...x, settings: r.settings} : x)); setMsg('Saved.'); }
     catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
   };
   return (
     <section className="set-card agents-card">
-      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">Three ways to bring an AI in. Pick one per AI so it shows up once.</span></div>
+      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">Ways to bring an AI in. Pick one per AI so it shows up once.</span></div>
       <ol className="agent-ways small">
-        <li><b>Your own Claude, as you.</b> Nothing to set up here: the Cadence connector in Claude acts as you, logged as you, applied right away. Use this when you are at the keyboard.</li>
-        <li><b>An agent with no email</b> (your Claude, ChatGPT or Muse working on its own): type a name below, Add agent, then Get connection key and follow the steps shown. Its changes wait for your approval.</li>
-        <li><b>An agent with its own email</b> (it can sign in to the app): Invite people on this page, tick <i>AI agent</i>. It joins as one agent row owned by you.</li>
+        <li><b>Claude, no email needed</b> (simplest): Connect Claude on this page. When you allow it, keep <i>Its own AI agent</i>. It shows up here as an agent you own.</li>
+        <li><b>ChatGPT, Muse or a scheduled Claude</b>, no email needed: type a name below, Add agent, then Get connection key and follow the steps shown.</li>
+        <li><b>An AI with its own email</b> (it signs in to the app itself): Invite people, tick <i>AI agent</i>. It joins as an agent you own.</li>
+        <li>An agent is a team member marked AI. It belongs to one person (its owner), never has an email requirement, is never an admin, and its changes wait for its owner's approval. Agents do not have agents.</li>
       </ol>
       <div className="small muted">Guided walk-throughs: <a className="link" href="#/help">Help</a>, guides "Connect Claude as an agent", "Connect ChatGPT as an agent" and "Connect Muse (Meta AI) as an agent". Agents you own show under "Agents I own" on AI work; admins see every agent there.</div>
       <div className="time-row">
@@ -774,10 +795,8 @@ function AgentsCard() {
         <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Muse (Meta AI)</option><option value="other">Other</option></select>
         <button className="btn primary" disabled={!name.trim()} onClick={async () => { try { await api('/agents', {method: 'POST', body: {name, provider}}); setName(''); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><Plus size={13} /> Add agent</button>
       </div>
-      <details className="agent-builtin small"><summary>Rules Cadence enforces for every agent (always on)</summary><ul>{BUILT_IN_AGENT_RULES.map(r => <li key={r}>{r}</li>)}</ul></details>
-      {rules !== null && <label className="agent-rules small">Rules for every AI agent in this workspace (admins). Agents get them each time they check for work.
-        <textarea className="plain-input" rows={4} placeholder="Like: Never email customers. Draft only. Follow the SOP linked in the task. Ask in a comment when unsure." defaultValue={rules}
-          onBlur={async e => { try { await api('/workspace', {method: 'PUT', body: {aiRules: e.target.value}}); setMsg('Saved the rules for all agents.'); } catch (x) { setMsg(String(x instanceof Error ? x.message : x)); } }} /></label>}
+      {ws ? <AgentRulesEditor ws={ws} setMsg={setMsg} />
+        : <details className="agent-builtin small"><summary>Rules every agent works under</summary><ul>{BUILT_IN_AGENT_RULES.map(r => <li key={r}>{r}</li>)}</ul></details>}
       {list.map(a => (
         <div key={a.id} className="agent-card">
           <div className="time-row"><b className="grow">{a.name}</b><span className="tag">{a.settings.provider}</span>

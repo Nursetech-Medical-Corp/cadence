@@ -78,7 +78,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Sprints | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report` |
 | Planning | `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
-| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim` |
+| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `move_ai_work` (drag work to working, review, done or discarded), `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
 | Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
 | Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |

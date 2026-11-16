@@ -1676,6 +1676,8 @@ export class Tasks {
 
   // ---- Approvals and signatures (see approvals.ts) ----
   requestApproval(itemId: string, by: string | null, approvers: string[], meaning: approvals.Meaning, note = '') { return approvals.requestApproval(this, itemId, by, approvers, meaning, note); }
+  signApprovals(ids: string[], signer: string, decision: 'approved' | 'changes' | 'rejected', comment = '', password?: string) { return approvals.signMany(this, ids, signer, decision, comment, password); }
+  signNeeds(person: string) { return approvals.signNeeds(this, person); }
   signApproval(approvalId: string, signer: string, decision: 'approved' | 'changes' | 'rejected', comment = '', password?: string) { return approvals.sign(this, approvalId, signer, decision, comment, password); }
   listApprovals(q: {itemId?: string; approver?: string; pending?: boolean}) { return approvals.listApprovals(this, q); }
   approvalState(itemId: string) { return approvals.approvalState(this, itemId); }
@@ -1711,6 +1713,8 @@ export class Tasks {
 
   // ---- Human and AI workers (see aiwork.ts) ----
   claimTask(itemId: string, agent: string, note = '', session: string | null = null) { return ai.claim(this, itemId, agent, note, session); }
+  /** Drag AI work to another lane: working, review, done or discarded. */
+  moveWork(itemId: string, reviewer: string | null, to: ai.Lane, comment = '') { return ai.moveWork(this, itemId, reviewer, to, comment); }
   decideClaim(itemId: string, reviewer: string | null, accept: boolean, note = '') { return ai.decide(this, itemId, reviewer, accept, note); }
   submitWork(itemId: string, agent: string, report: string, missed = '', opts: {session?: string | null; artifacts?: ai.ArtifactInput[]} = {}) { return ai.submit(this, itemId, agent, report, missed, opts); }
   /** decision: approve, changes, redo or discard (true and false still mean approve and changes). keep: on discard, leave the agent assigned. */

@@ -7,6 +7,7 @@ import {useEffect, useState} from 'react';
 import {CalendarClock, Sparkles, TrendingUp, Users} from 'lucide-react';
 import {api, type Store} from './store.ts';
 import {Avatar, itemKey} from './components.tsx';
+import {uiAlert, uiPrompt} from './dialogs.tsx';
 
 type Est = {itemId: string; title: string; hours: number; basis: string; confidence: string};
 type Change = {itemId: string; title: string; from: {start: string | null; due: string | null; assignees: string[]}; to: {start: string; due: string; assignees: string[]}; reason: string; late: number};
@@ -60,7 +61,7 @@ function Replan({store, q}: {store: Store; q: string}) {
         <span className="spacer" />
         <button className="btn primary" disabled={!pick.size} onClick={async () => {
           const changes = data.changes.filter(c => pick.has(c.itemId)).map(c => ({itemId: c.itemId, start: c.to.start, due: c.to.due, assignees: c.to.assignees}));
-          try { const r = await api<{applied: number}>('/plan/apply', {method: 'POST', body: {changes}}); alert(`Applied ${r.applied} changes. Undo any of them from History.`); load(); } catch (e) { store.fail(e); }
+          try { const r = await api<{applied: number}>('/plan/apply', {method: 'POST', body: {changes}}); void uiAlert(`Applied ${r.applied} changes. Undo any of them from History.`); load(); } catch (e) { store.fail(e); }
         }}>Approve {pick.size} changes</button>
       </div>
       <table className="ins-table">
@@ -159,6 +160,6 @@ function PeoplePlanning({store}: {store: Store}) {
         <td><input type="checkbox" checked={p.plannedHire} onChange={e => save(p.id, {plannedHire: e.target.checked})} /></td>
       </tr>)}</tbody>
     </table>
-    <button className="btn" style={{marginTop: 10}} onClick={async () => { const name = prompt('Planned hire, e.g. "Hire: Regulatory specialist"'); if (!name) return; const p = await store.createPerson(name); if (p) { await save(p.id, {plannedHire: true, start: store.today}); } }}>+ Add a planned hire</button>
+    <button className="btn" style={{marginTop: 10}} onClick={async () => { const name = (await uiPrompt('Planned hire, e.g. "Hire: Regulatory specialist"')); if (!name) return; const p = await store.createPerson(name); if (p) { await save(p.id, {plannedHire: true, start: store.today}); } }}>+ Add a planned hire</button>
   </>;
 }

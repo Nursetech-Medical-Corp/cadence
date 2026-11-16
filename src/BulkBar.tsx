@@ -5,6 +5,7 @@ import type {ItemPatch, Project, Sprint} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import type {Store} from './store.ts';
 import {Avatar, Menu, PriorityIcon, StatusIcon, TypeBadge} from './components.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 export function BulkBar({store, project, sprints, selected, clear}: {store: Store; project: Project; sprints: Sprint[]; selected: Set<string>; clear: () => void}) {
   const [date, setDate] = useState('');
@@ -30,7 +31,7 @@ export function BulkBar({store, project, sprints, selected, clear}: {store: Stor
       {doneId && <button className="btn" onClick={() => apply(() => ({status: doneId}))}>Mark done</button>}
       {doneId && <label className="bulk-date" title="Mark done on a past date"><span className="small">Done on</span><input type="date" value={doneOn} max={store.today}
         onChange={e => { setDoneOn(e.target.value); if (e.target.value) apply(() => ({status: doneId, completed: e.target.value})); }} /></label>}
-      <button className="btn danger" onClick={() => { if (confirm(`Delete ${ids.length} items and their subitems?`)) { for (const id of ids) store.deleteItem(id); clear(); } }}><Trash2 size={13} /></button>
+      <button className="btn danger" onClick={async () => { if ((await uiConfirm(`Delete ${ids.length} items and their subitems?`))) { for (const id of ids) store.deleteItem(id); clear(); } }}><Trash2 size={13} /></button>
       <button className="icon" title="Clear selection (Esc)" onClick={clear}><X size={15} /></button>
     </div>
   );

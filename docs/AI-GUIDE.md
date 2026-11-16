@@ -72,7 +72,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Sprints and planning | Sprint view, Plan and forecast | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report`, `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Meetings and calendar | Calendar view, Meetings, two-way Google sync | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item`, `calendar_events` |
 | Templates | Templates page, gallery packs | `list_templates`, `get_template`, `create_template`, `update_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack`, `delete_template` |
-| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim`, `suggest_work`, `my_proposals` |
+| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `move_ai_work`, `decide_claim`, `suggest_work`, `my_proposals` |
 | Time | Timers, Timesheet, timer bar, focus mode, pop-out timer | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
 | Plugins (docs/PLUGINS.md) | Plugins page: store, search, install for me or everyone, on/off, settings, make, submit, review | `plugin_format`, `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 | Inbox, comments, email alerts | Inbox; Team page, My account (Email me notifications, Email me about) | `my_notifications`, `mark_notifications_read`, `email_alerts`, `add_comment`, `resolve_comment` |
@@ -129,7 +129,13 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 
 ## Where people see AI work
 
-- AI work (sidebar) is the approval dashboard: claims to accept, work ready for review, and "Changes to approve" (your held proposals: moves, new tasks, dates, sprints, views). Each card is the real task, not a copy.
+- AI work (sidebar) is the approval dashboard: claims to accept, work ready for review, and "Changes to approve" (your held proposals: moves, new tasks, dates, sprints, views).
+- People drag AI work cards between columns (working, review, approved, discarded): `move_ai_work` (REST `POST /api/ai/move` `{itemId, to, comment?}`). Only the agent's owner, someone assigned or an admin. Work with a pending approval shows under Ready for review.
+- Suggested tasks: when several agents suggest the same new task (same title, same space), approving one makes it once and closes the others. The person approving picks who does it: the suggesting agent, another agent, or a person (REST `POST /api/proposals/:id/decide` `{approve, note?, doer?: agentId | 'none'}`).
+- Signing approvals: the workspace chooses how often a password is asked (`signPassword`: `session` once per 8 hours, the default; `every`; `never`). Sign several at once on the Approvals page (REST `POST /api/approvals/sign-many` `{ids, decision, comment?, password?}`, `GET /api/approvals/needs`). Each signature records how identity was confirmed (`auth`: password, session, none). Tokens and agents never sign.
+- Agent rules, all editable by admins on the Team page (Rules for AI agents): base rules (sent every run, `agentBaseRules`; enforcement stays in code), workspace rules (`aiRules`, every run), the onboarding guide (`agentGuide`, returned by `get_guide` as `agentGuide`, read once), each agent's own rules, and drawing rules. Keep run-time rules short: they are read every run.
+- Scanning without rescanning: full scan once, then `agent_inbox(since)` and `changes_since(since)` each run; stop when both are empty; keep a ledger per task; reconcile counts weekly. The onboarding guide has the details.
+- Connect Claude (OAuth): on the consent page the person picks who Claude works as: its own AI agent they own (default; existing or new) or themselves. A connected app can be switched later on the Team page (REST `POST /api/auth/apps/:client/as` `{workspace, agent: id | 'new' | 'me', name?}`). Each card is the real task, not a copy.
 - Every board and list shows the same task with a small chip while AI work is open: Claim, AI working, Review, Sent back. Click it to open AI work.
 
 ## Focus mode and the timer bar

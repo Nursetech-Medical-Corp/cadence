@@ -5,6 +5,7 @@ import {Briefcase, ChevronDown, GripVertical, Plus, Trash2} from 'lucide-react';
 import type {Project} from './types.ts';
 import {api} from './store.ts';
 import {Popover} from './components.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 export type JobRole = {id: string; name: string; spaces: Record<string, string>; others: string};
 export type DomainJoin = {domains: string[]; level: string; jobRoles: string[]};
@@ -75,7 +76,7 @@ export function JobRolesCard({jobRoles, levels, projects, counts, onSave}: {jobR
           <td className="jr-sticky jr-name" title={r.name}><input className="inline" defaultValue={r.name} onBlur={e => e.target.value.trim() && e.target.value !== r.name && set(r.id, {name: e.target.value.trim()})} /><div className="muted small">{counts[r.id] ?? 0} people</div></td>
           {spaces.map(p => <td key={p.id}><select className={'plain-select jr-cell' + ((r.spaces[p.id] ?? 'inherit') === 'none' ? ' none' : (r.spaces[p.id] ?? 'inherit') === 'inherit' ? ' inherit' : '')} value={r.spaces[p.id] ?? 'inherit'} onChange={e => cell(r, p.id, e.target.value)}>{levelOptions(levels, 'Default')}</select></td>)}
           <td><select className="plain-select jr-cell" value={r.others} onChange={e => set(r.id, {others: e.target.value})}>{levelOptions(levels, 'Default')}</select></td>
-          <td><button className="icon" title="Delete job role" onClick={() => { if (confirm(`Delete the job role "${r.name}"? People who have it keep their other access.`)) save(rows.filter(x => x.id !== r.id)); }}><Trash2 size={12} /></button></td>
+          <td><button className="icon" title="Delete job role" onClick={async () => { if ((await uiConfirm(`Delete the job role "${r.name}"? People who have it keep their other access.`))) save(rows.filter(x => x.id !== r.id)); }}><Trash2 size={12} /></button></td>
         </tr>)}</tbody>
       </table></div>}
       <button className="btn" style={{marginTop: 8}} onClick={() => save([...rows, {id: 'job-' + Math.random().toString(36).slice(2, 7), name: 'New job role', spaces: {}, others: 'inherit'}])}><Plus size={14} /> New job role</button>

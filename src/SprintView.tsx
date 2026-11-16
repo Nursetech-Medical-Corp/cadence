@@ -9,6 +9,7 @@ import {DateInput, Empty, InlineText, Popover, TypeBadge, itemKey} from './compo
 import {Board} from './BoardView.tsx';
 import {Burndown, Capacity, Velocity, sprintState} from './SprintParts.tsx';
 import type {ViewProps} from './viewProps.ts';
+import {uiConfirm} from './dialogs.tsx';
 
 export function SprintView(props: ViewProps) {
   const {store, project, items, allItems, sprints, open, config, setConfig} = props;
@@ -41,10 +42,10 @@ export function SprintView(props: ViewProps) {
         </span>
         <button className="btn" disabled={!unfinished}
           title={unfinished ? `Move the ${unfinished} unfinished item${unfinished === 1 ? '' : 's'} to the next sprint (made for you if there is none). Settings, Automations can do this when a sprint ends.` : 'Nothing unfinished to move. When the sprint ends, unfinished items can move to the next one here.'} onClick={async () => {
-          if (!confirm(`Move ${unfinished} unfinished item${unfinished === 1 ? '' : 's'} from ${sprint.name} to the next sprint?`)) return;
+          if (!(await uiConfirm(`Move ${unfinished} unfinished item${unfinished === 1 ? '' : 's'} from ${sprint.name} to the next sprint?`))) return;
           try { const r = await api<{moved: number; to: {id: string}}>(`/sprints/${sprint.id}/rollover`, {method: 'POST'}); setConfig({sprint: r.to.id}); } catch (e) { store.fail(e); }
         }}><ArrowRightToLine size={14} /> Roll over unfinished</button>
-        <button className="icon" title="Delete sprint (items return to the backlog)" onClick={() => confirm(`Delete ${sprint.name}? Its items return to the backlog.`) && store.deleteSprint(sprint.id)}><Trash2 size={14} /></button>
+        <button className="icon" title="Delete sprint (items return to the backlog)" onClick={async () => (await uiConfirm(`Delete ${sprint.name}? Its items return to the backlog.`)) && store.deleteSprint(sprint.id)}><Trash2 size={14} /></button>
       </div>
       <div className="sprint-head">
         <InlineText value={sprint.name} onSave={name => store.updateSprint(sprint.id, {name})} className="h2" />
