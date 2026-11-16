@@ -157,7 +157,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   tasks.workspace = info.id;
   startWebhooks(tasks);
   startBoards(tasks);
-  tasks.onNotify(n => { sendNotificationEmail(tasks.db, n).catch(e => console.error('Email notification failed', e.message)); });
+  tasks.onNotify(n => { sendNotificationEmail(tasks.db, n, {smtp: sendSmtp, base: publicUrl()}).catch(e => console.error('Email notification failed', e.message)); });
   // Push to the person's phones and desktops (every device of their linked accounts), unless they turned that kind off or it is quiet time.
   const personEmail = (id: string) => (tasks.db.prepare('select email from people where id = ? and active = 1').get(id) as {email: string | null} | undefined)?.email?.trim().toLowerCase() || null;
   const pushTo = async (emails: string[], msg: push.PushMessage) => {
@@ -238,8 +238,8 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
       const person = memberId(w.tasks, email)!;
       return [{id: w.id, name: w.name, email, person, personName: (w.tasks.db.prepare('select name from people where id = ?').get(person) as {name: string}).name}];
     })});
-  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, job_roles, password is not null as has_password from people order by name').all()
-    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human',
+  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, notify_kinds, kind, job_roles, password is not null as has_password from people order by name').all()
+    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, notifyKinds: (() => { try { return r.notify_kinds ? JSON.parse(String(r.notify_kinds)) : null; } catch { return null; } })(), hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human',
       jobRoles: (() => { try { return JSON.parse(String(r.job_roles ?? '[]')); } catch { return []; } })()}));
   // Domain join: a Google-verified address on a listed company domain joins every workspace that lists it (jobroles.ts).
   const joinDomains = (email: string) => {
@@ -692,7 +692,7 @@ If you did not ask for it, ignore this email.`)
             if (body.kind === 'ai') makeAgent(tasks, b, actor);
             else tasks.db.prepare("update people set kind = 'human' where id = ?").run(b);
           }
-          if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
+          if (body.notifyEmail !== undefined || body.notifyKinds !== undefined) tasks.setEmailAlerts(b, {on: body.notifyEmail, kinds: body.notifyKinds});
           if (body.password) {
             // Passwords belong to accounts, which can be used in other workspaces. An existing account's password
             // changes only from that account, with its current password (pnpm reset-password is the owner's way out).
@@ -728,6 +728,7 @@ If you did not ask for it, ignore this email.`)
           if (body.custom) patch.custom = body.custom;
           if (body.features) patch.features = body.features;
           if (body.aiRules !== undefined) patch.aiRules = body.aiRules;
+          if (body.drawingRules !== undefined) patch.drawingRules = body.drawingRules;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});
@@ -1202,9 +1203,18 @@ If you did not ask for it, ignore this email.`)
         const one = (ref: string) => { const bd = tasks.board(ref); if (!seesB(bd)) throw new NotFound('No such whiteboard'); return bd; };
         const edit = (ref: string) => { const bd = one(ref); if (!editsB(bd)) throw new Denied('You cannot change this whiteboard'); return bd; };
         const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
-        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
+        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'folder', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
         const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
         if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), sop: q('sop'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        if (b === 'conventions' && m === 'GET') return send(res, 200, tasks.boardConventions());
+        // Ask for a change on a board: a task (person or AI) linked to the board, and a sticky note on it.
+        if (b && c === 'request' && m === 'POST') {
+          const bd = one(b), pid = body.projectId ?? bd.projectId;
+          if (pid) need(pid, 'create');
+          const args = [bd.id, String(body.text ?? ''), actor, {node: body.node ?? null, worker: body.worker, assignees: Array.isArray(body.assignees) ? body.assignees : undefined, projectId: body.projectId}] as const;
+          if (held('requestBoardChange', [...args])) return send(res, 202, propose(tasks, actor!, 'requestBoardChange', [...args]));
+          return send(res, 201, tasks.requestBoardChange(...args));
+        }
         // Bring in a board made with Claude Whiteboards: {elements, name?, projectId?}.
         if (b === 'import' && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
@@ -1215,9 +1225,9 @@ If you did not ask for it, ignore this email.`)
         }
         // One board per SOP for every routine (existing SOP boards are kept).
         if (b === 'by-sop' && m === 'POST') {
-          if (held('boardsBySop', [{actor}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor}]));
-          const r = tasks.boardsBySop({actor, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
-          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out)});
+          if (held('boardsBySop', [{actor, aiDraw: !!body.aiDraw}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor, aiDraw: !!body.aiDraw}]));
+          const r = tasks.boardsBySop({actor, aiDraw: !!body.aiDraw, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
+          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out), drawTasks: r.drawTasks});
         }
         if (!b && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');

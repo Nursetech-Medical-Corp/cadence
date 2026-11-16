@@ -1445,6 +1445,19 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .wb-card { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: inherit; text-decoration: none; text-align: left; box-shadow: var(--shadow); }
 .wb-card:hover { border-color: var(--accent-line); }
 .wb-mini { width: 100%; height: 110px; background: var(--bg2); border-radius: 6px; }
+.wb-card { position: relative; }
+.wb-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.wb-card-open { display: flex; flex-direction: column; gap: 4px; color: inherit; text-decoration: none; }
+.wb-check { position: absolute; top: 14px; left: 14px; z-index: 1; background: var(--card); border-radius: 4px; padding: 2px 3px; line-height: 0; opacity: .55; }
+.wb-card:hover .wb-check, .wb-card.sel .wb-check { opacity: 1; }
+.wb-card-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+.wb-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.wb-bar .search { min-width: 200px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--text); }
+.wb-folders { display: flex; gap: 4px; flex-wrap: wrap; }
+.wb-folders button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--text2); font-size: 12px; cursor: pointer; }
+.wb-folders button span { color: var(--muted); }
+.wb-folders button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.wb-selbar { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .wb-pick { padding: 18px 24px; }
 .wb { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
 .content > .wb { height: calc(100vh - 170px); }
@@ -1838,3 +1851,5 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .row-actions { display: inline-flex; gap: 6px; }
 .handed-in { margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--line2); }
 .handed-text { margin-top: 4px; white-space: pre-wrap; max-height: 180px; overflow: auto; }
+.alert-kinds { flex-wrap: wrap; gap: 6px; }
+.alert-kinds .chip-toggle input { display: none; }

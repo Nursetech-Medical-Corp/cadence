@@ -54,6 +54,8 @@ export type BoardHook = {id: string; url: string; events: string[]};
 export type Board = {id: string; projectId: string | null; name: string; description: string;
   /** The SOP this board maps (one board per SOP), so routines link to it. */
   sop: string | null; nodes: BoardNode[]; edges: BoardEdge[];
+  /** Folder on the Whiteboards page, to keep many boards in order. */
+  folder: string | null;
   webhooks: BoardHook[]; hookKey: string; createdBy: string | null; created: string; updated: string; lastScheduled: string | null};
 export type StepState = 'waiting' | 'open' | 'done' | 'firing' | 'fired' | 'failed' | 'skipped';
 export type Step = {node: string; kind: NodeKind; title: string; itemId: string | null; state: StepState; at: string | null; note: string | null};
@@ -94,8 +96,8 @@ export function migrateBoards(tasks: Tasks) {
 }
 
 const toBoard = (r: Record<string, unknown>): Board => {
-  const d = j<{nodes?: BoardNode[]; edges?: BoardEdge[]; sop?: string | null}>(r.data, {});
-  return {id: r.id as string, projectId: (r.project_id as string) ?? null, name: r.name as string, description: r.description as string, sop: d.sop ?? null, nodes: d.nodes ?? [], edges: d.edges ?? [],
+  const d = j<{nodes?: BoardNode[]; edges?: BoardEdge[]; sop?: string | null; folder?: string | null}>(r.data, {});
+  return {id: r.id as string, projectId: (r.project_id as string) ?? null, name: r.name as string, description: r.description as string, sop: d.sop ?? null, folder: d.folder ?? null, nodes: d.nodes ?? [], edges: d.edges ?? [],
     webhooks: j(r.webhooks, []), hookKey: r.hook_key as string, createdBy: (r.created_by as string) ?? null, created: r.created as string, updated: r.updated as string, lastScheduled: (r.last_scheduled as string) ?? null};
 };
 const toRun = (r: Record<string, unknown>): Run => ({id: r.id as string, boardId: r.board_id as string, state: r.state as Run['state'], trigger: r.trigger as string, by: (r.by as string) ?? null,
@@ -209,15 +211,16 @@ function cleanHooks(v: unknown): BoardHook[] {
   });
 }
 
-export type BoardInput = {name?: string; description?: string; projectId?: string | null; nodes?: BoardNode[]; edges?: BoardEdge[]; webhooks?: BoardHook[]; sop?: string | null};
+export type BoardInput = {name?: string; description?: string; projectId?: string | null; nodes?: BoardNode[]; edges?: BoardEdge[]; webhooks?: BoardHook[]; sop?: string | null; folder?: string | null};
+const cleanFolder = (v: unknown) => { const f = String(v ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 80); return f || null; };
 const cleanSop = (v: unknown) => v ? sopCode(String(v)) : null;
-const dataOf = (b: {nodes: BoardNode[]; edges: BoardEdge[]; sop: string | null}) => JSON.stringify({nodes: b.nodes, edges: b.edges, ...(b.sop ? {sop: b.sop} : {})});
+const dataOf = (b: {nodes: BoardNode[]; edges: BoardEdge[]; sop: string | null; folder?: string | null}) => JSON.stringify({nodes: b.nodes, edges: b.edges, ...(b.sop ? {sop: b.sop} : {}), ...(b.folder ? {folder: b.folder} : {})});
 export function createBoard(tasks: Tasks, input: BoardInput, actor: string | null): Board {
   migrateBoards(tasks);
   const name = str(input.name, 200).trim() || 'Untitled board';
   if (input.projectId) { const p = tasks.project(input.projectId); if (p.settings.rollup) throw new Invalid('Put a whiteboard in a real space, not a rollup'); }
   const g = cleanGraph(tasks, input.nodes ?? [], input.edges ?? []);
-  const t = now(), b: Board = {id: rid(), projectId: input.projectId ?? null, name, description: str(input.description, 5000), sop: cleanSop(input.sop), ...g, webhooks: cleanHooks(input.webhooks ?? []),
+  const t = now(), b: Board = {id: rid(), projectId: input.projectId ?? null, name, description: str(input.description, 5000), sop: cleanSop(input.sop), folder: cleanFolder(input.folder), ...g, webhooks: cleanHooks(input.webhooks ?? []),
     hookKey: 'wb_' + randomBytes(18).toString('base64url'), createdBy: actor, created: t, updated: t, lastScheduled: null};
   tasks.db.prepare('insert into boards (id, project_id, name, description, data, webhooks, hook_key, created_by, created, updated) values (?,?,?,?,?,?,?,?,?,?)')
     .run(b.id, b.projectId, b.name, b.description, dataOf(b), JSON.stringify(b.webhooks), b.hookKey, actor, t, t);
@@ -247,6 +250,7 @@ export function updateBoard(tasks: Tasks, ref: string, patch: BoardInput & Board
   const next: Board = {...b, ...g, projectId, name: patch.name !== undefined ? (str(patch.name, 200).trim() || b.name) : b.name,
     description: patch.description !== undefined ? str(patch.description, 5000) : b.description,
     webhooks: patch.webhooks !== undefined ? cleanHooks(patch.webhooks) : b.webhooks, sop: patch.sop !== undefined ? cleanSop(patch.sop) : b.sop,
+    folder: patch.folder !== undefined ? cleanFolder(patch.folder) : b.folder,
     hookKey: patch.rotateKey ? 'wb_' + randomBytes(18).toString('base64url') : b.hookKey, updated: now()};
   tasks.db.prepare('update boards set project_id = ?, name = ?, description = ?, data = ?, webhooks = ?, hook_key = ?, updated = ? where id = ?')
     .run(next.projectId, next.name, next.description, dataOf(next), JSON.stringify(next.webhooks), next.hookKey, next.updated, b.id);
@@ -372,7 +376,7 @@ export function boardFromItems(tasks: Tasks, q: {name?: string; projectId?: stri
 }
 
 /** One board per SOP for every routine with an SOP tag. Boards already made for an SOP are kept, not duplicated. */
-export function boardsBySop(tasks: Tasks, actor: string | null, canSee: (projectId: string) => boolean = () => true, visible?: string[]) {
+export function boardsBySop(tasks: Tasks, actor: string | null, canSee: (projectId: string) => boolean = () => true, visible?: string[], opts: {aiDraw?: boolean} = {}) {
   const see = (pid: string) => canSee(pid) && (!visible || visible.includes(pid));
   const codes = [...new Set(tasks.listRoutines().filter(i => see(i.projectId)).flatMap(i => i.tags.map(t => sopCode(t)).filter((c): c is string => !!c)))].sort();
   const made: Board[] = [], kept: Board[] = [];
@@ -381,7 +385,10 @@ export function boardsBySop(tasks: Tasks, actor: string | null, canSee: (project
     if (have) { kept.push(have); continue; }
     made.push(boardFromItems(tasks, {routines: true, tag: code}, actor, canSee));
   }
-  return {made, kept};
+  // A board drawn from routines shows the routine cards, not the SOP's steps. With aiDraw, each new board gets a task
+  // for an AI agent to draw the SOP's real flow from its document, following the drawing rules.
+  const drawTasks = opts.aiDraw ? made.filter(b => b.projectId).map(b => requestBoardChange(tasks, b.id, `Draw the full ${b.sop} flow from its SOP document: every step, decision, hand-off and wait, following the drawing rules (board_conventions). Keep the routine cards and link them where they belong.`, actor, {worker: 'ai', title: `Draw the ${b.sop} flow on its whiteboard`})) : [];
+  return {made, kept, drawTasks};
 }
 
 // ---- Runs ----
@@ -641,4 +648,24 @@ export function importClaudeBoard(tasks: Tasks, input: {name?: string; projectId
   const name = input.name || input.title || String(list.find(e => e.type === 'text' && (e.size === 'title' || e.size === 'huge'))?.text ?? 'Imported board').slice(0, 200);
   const board = createBoard(tasks, {name, projectId: input.projectId ?? null, nodes, edges: kept}, actor);
   return {board, imported: nodes.length + kept.length, skipped};
+}
+
+/** A change someone wants on a board: a task in the board's space (for a person or an AI agent) that links to the
+ *  board and, if given, the card it is about, plus a sticky note on the board so the request is visible there. */
+export function requestBoardChange(tasks: Tasks, ref: string, text: string, actor: string | null, opts: {node?: string | null; worker?: 'human' | 'ai' | 'either'; assignees?: string[]; projectId?: string | null; title?: string} = {}) {
+  const b = getBoard(tasks, ref);
+  const what = String(text ?? '').trim();
+  if (!what) throw new Invalid('Say what should change on the board');
+  const projectId = opts.projectId ?? b.projectId;
+  if (!projectId) throw new Invalid('This board is not in a space. Put it in one (board settings) or pick the space for the task.');
+  const node = opts.node ? b.nodes.find(n => n.id === opts.node) : null;
+  if (opts.node && !node) throw new Invalid(`No card ${opts.node} on this board`);
+  const sop = b.sop ? [b.sop] : [];
+  const item = tasks.createItem({projectId, title: (opts.title ?? `Whiteboard change: ${what}`).slice(0, 300),
+    body: `Board: [${b.name}](#/boards/${b.id})${node ? `\nCard: "${node.text.slice(0, 80)}" (${node.id})` : ''}\n\n${what}\n\nDo it with update_board on board ${b.id}. Drawing rules: board_conventions.`,
+    tags: ['whiteboard', ...sop], assignees: opts.assignees ?? [], fields: {worker: opts.worker ?? 'either', board: b.id, ...(node ? {boardNode: node.id} : {})}}, actor);
+  const key = `${tasks.project(projectId).key}-${item.number}`;
+  const at = node ? {x: node.x + node.w + 30, y: node.y} : {x: Math.max(0, ...b.nodes.map(n => n.x + n.w)) + 60, y: 0};
+  updateBoard(tasks, b.id, {addNodes: [{id: rid(), kind: 'sticky', x: at.x, y: at.y, w: 200, h: 120, text: `Change requested (${key}): ${what.slice(0, 160)}`, fill: 'peach', itemId: null} as BoardNode]}, actor);
+  return item;
 }

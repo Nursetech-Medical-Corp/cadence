@@ -35,6 +35,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - An agent's time is recorded from its first step, comment or file to hand-in; with no timer, from acceptance to hand-in.
 
 ## Team page
+- Email alerts: My account, Email me notifications, then Email me about (assigned, comments, approvals, completed, reminders, automations, other). Only picked groups are emailed; the email has the task key, title and an open link; SMTP first, else the Gmail sender. Bug found: emails went only through Gmail and had no link. (unit)
 - Job roles table: the name column is readable and stays put while scrolling sideways; every column resizes by dragging its header edge, double-click resets.
 
 ## Plugins
@@ -90,6 +91,11 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Section titles sit above their frame. (e2e)
 - New boards open with a title; boards drawn from work have a title, a summary line and the SOP document.
 - One board per SOP; SOPs that have a board keep it; the Routines page links each SOP to its board.
+- One board per SOP can also make one AI task per new board to draw the full flow; new SOP boards go in the folder "SOP flows". (unit)
+- Whiteboards page: search, folder chips with counts, tick boards to move or delete together (confirm lists names), rename, move and delete on each card, SOP doc link on each card. (manual)
+- Thumbnails show each board's own shapes, fills, diamonds and arrows, not the same blank box. Bug found: every thumbnail looked the same. (manual)
+- Request a change on a board makes a task linked to it (worker, assignee, card) and a peach sticky note; a missing card or empty text is refused. (unit)
+- Drawing rules: built in by default; admins replace them with their own; agents read them with board_conventions. (unit)
 - Create tasks turns unlinked cards into tasks; arrows become dependencies; running it again makes nothing new.
 - Runs: tasks in order, webhooks fire after the steps before them, retry and skip, run log; triggers by hand, webhook, schedule, finished tag.
 

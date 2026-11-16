@@ -147,6 +147,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('resolve_comment', 'Mark a comment (often one assigned to someone) resolved, or open it again.', {comment: z.string().describe('Comment id'), resolved: z.boolean().optional()}, false,
     i => tasks.resolveComment(i.comment, actor, i.resolved ?? true));
   tool('my_notifications', 'Your notifications, newest first.', {unread_only: z.boolean().optional()}, true, i => tasks.listNotifications(me(), !!i.unread_only));
+  tool('email_alerts', 'Your email alerts: whether notifications also come by email, and which groups (assigned, comments, approvals, completed, reminders, automations, other; null means all). Pass on or kinds to change them.',
+    {on: z.boolean().optional(), kinds: z.array(z.enum(['assigned', 'comments', 'approvals', 'completed', 'reminders', 'automations', 'other'])).nullable().optional()}, false,
+    i => i.on === undefined && i.kinds === undefined ? tasks.emailAlerts(me()) : tasks.setEmailAlerts(me(), {on: i.on, kinds: i.kinds}));
   tool('mark_notifications_read', 'Mark your notifications read (all, or these ids).', {ids: z.array(z.string()).optional()}, false, i => { tasks.markRead(me(), i.ids); return {ok: true}; });
 
   // ---- Time ----
@@ -294,8 +297,12 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('import_board', 'Bring in a board made with Claude Whiteboards: pass its elements (shape, text, container, table, arrow, link, as an array or an object by id). Sections become frames, blocks keep their color and shape, text keeps its size, tables keep their columns, arrows keep labels and dashes. Pen strokes, pictures, embeds and stickers are skipped and counted.',
     {elements: z.union([z.array(z.record(z.string(), z.any())), z.record(z.string(), z.any())]), name: z.string().optional(), project: z.string().optional()}, false,
     i => { const r = tasks.importBoard({elements: i.elements as any, name: i.name, projectId: i.project ? projectId(i.project) : null}, actor) as any; return r?.proposal ? r : {id: r.board.id, name: r.board.name, imported: r.imported, skipped: r.skipped}; });
-  tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it.', {}, false,
-    () => { const r = tasks.boardsBySop({actor}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop}))}; });
+  tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it. ai_draw: also make a task per new board for an AI agent to draw the full flow from the SOP document.', {ai_draw: z.boolean().optional()}, false,
+    i => { const r = tasks.boardsBySop({actor, aiDraw: i.ai_draw}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), drawTasks: (r.drawTasks ?? []).map((t: any) => ({id: t.id, title: t.title}))}; });
+  tool('board_conventions', 'How to draw SOP flows on whiteboards: which card or shape for each kind of step, lanes and colors by who does it, arrows, and what every board needs. Read before drawing or changing a flow.', {}, true, () => tasks.boardConventions());
+  tool('request_board_change', 'Ask for a change on a whiteboard: makes a task in the board\'s space (for a person or an AI agent) linked to the board and, if given, the card, and puts a sticky note on the board.',
+    {board: z.string(), text: z.string(), node: z.string().optional().describe('Card id the change is about'), worker: z.enum(['human', 'ai', 'either']).optional(), assign: z.array(z.string()).optional()}, false,
+    i => tasks.requestBoardChange(i.board, i.text, actor, {node: i.node, worker: i.worker, assignees: i.assign?.map(personId)}));
   tool('board_to_tasks', 'Create real tasks from a whiteboard\'s task cards that have no item yet (in the board\'s space, or project), with arrows as dependencies and repeat as routines. Linked cards are left alone.',
     {board: z.string(), project: z.string().optional(), parent: z.string().optional()}, false,
     i => tasks.boardToTasks(boardRef(i.board), actor, {projectId: i.project ? projectId(i.project) : undefined, parentId: i.parent ? tasks.findItem(i.parent).id : undefined}));
