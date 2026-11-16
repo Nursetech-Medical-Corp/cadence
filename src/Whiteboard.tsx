@@ -2,7 +2,7 @@
 // open documents (Google Drive SOPs), triggers and webhooks show where automations start and what they call.
 // Saved to /api/boards; runs to /api/boards/:id/run. Agents reach the same through MCP (server/boards.ts).
 import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {Download, CirclePlay, Diamond, Heading, Info, Table2, MousePointer2, Hand, Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
+import {MessageSquarePlus, Download, CirclePlay, Diamond, Heading, Info, Table2, MousePointer2, Hand, Bot, CheckSquare, Circle, Copy, ExternalLink, Frame, Link2, Maximize, Minus, Play, Plus, Repeat, Square, StickyNote, Trash2, Type, User, Webhook, Workflow, X, Zap, Flag, ListPlus, Map as MapIcon, History, Settings2} from 'lucide-react';
 import type {Item, Person, Project} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Avatars, itemKey} from './components.tsx';
@@ -77,7 +77,7 @@ function routeOf(a: WbNode, b: WbNode, e: WbEdge): {d: string; mid: {x: number; 
   return horiz(s1) ? {d: `M${p1.x},${p1.y} H${p2.x} V${p2.y}`, mid: {x: p2.x, y: p1.y}} : {d: `M${p1.x},${p1.y} V${p2.y} H${p2.x}`, mid: {x: p1.x, y: p2.y}};
 }
 type Hook = {id: string; url: string; events: string[]};
-export type Board = {id: string; projectId: string | null; name: string; description: string; sop?: string | null; nodes: WbNode[]; edges: WbEdge[]; webhooks: Hook[]; hookKey?: string; hookUrl?: string; createdBy: string | null; updated: string};
+export type Board = {id: string; projectId: string | null; name: string; description: string; sop?: string | null; folder?: string | null; nodes: WbNode[]; edges: WbEdge[]; webhooks: Hook[]; hookKey?: string; hookUrl?: string; createdBy: string | null; updated: string};
 type Step = {node: string; kind: Kind; title: string; itemId: string | null; state: string; at: string | null; note: string | null};
 type Run = {id: string; boardId: string; state: string; trigger: string; started: string; finished: string | null; parentItem: string | null; steps: Step[]; log: {at: string; text: string}[]};
 
@@ -127,7 +127,15 @@ export function WhiteboardsPage({store, id, open}: {store: Store; id?: string; o
 function BoardList({store}: {store: Store}) {
   const [boards, setBoards] = useState<Board[] | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api<Board[]>('/boards').then(setBoards).catch(e => store.fail(e)); }, [store.tick]);
+  const [q, setQ] = useState('');
+  const [folder, setFolder] = useState<string | null>(() => localStorage.getItem('wb-folder'));
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [sops, setSops] = useState<Record<string, string>>({});
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const load = () => api<Board[]>('/boards').then(setBoards).catch(e => store.fail(e));
+  useEffect(() => { load(); }, [store.tick]);
+  useEffect(() => { api<{code: string; url: string}[]>('/sops').then(l => setSops(Object.fromEntries(l.map(x => [x.code, x.url])))).catch(() => {}); }, []);
+  const pickFolder = (f: string | null) => { setFolder(f); if (f === null) localStorage.removeItem('wb-folder'); else localStorage.setItem('wb-folder', f); setSel(new Set()); };
   const make = async (path: string, body: unknown) => {
     setBusy(true);
     try { const b = await api<Board>(path, {method: 'POST', body}); location.hash = `/boards/${b.id}`; } catch (e) { store.fail(e); } finally { setBusy(false); }
@@ -149,44 +157,141 @@ function BoardList({store}: {store: Store}) {
     catch (e) { store.fail(e); } finally { setBusy(false); }
   };
   const bySop = async () => {
+    const aiDraw = confirm('One board per SOP: each SOP gets a board with its routines, a title and its SOP document.\n\nOK: also make a task for an AI agent to draw each SOP\'s full flow from its document, following the drawing rules (it waits for your approval like all AI work).\nCancel: boards only.');
     setBusy(true);
-    try { const r = await api<{made: Board[]; kept: Board[]}>('/boards/by-sop', {method: 'POST', body: {}}); store.flash(r.made.length ? `Made ${r.made.length} SOP board${r.made.length === 1 ? '' : 's'}${r.kept.length ? `, ${r.kept.length} already had one` : ''}` : r.kept.length ? 'Every SOP already has a board' : 'No routines have an SOP tag yet'); setBoards(await api<Board[]>('/boards')); }
-    catch (e) { store.fail(e); } finally { setBusy(false); }
+    try {
+      const r = await api<{made: Board[]; kept: Board[]; drawTasks?: unknown[]}>('/boards/by-sop', {method: 'POST', body: {aiDraw}});
+      for (const b of r.made) await api(`/boards/${b.id}`, {method: 'PATCH', body: {folder: 'SOP flows'}}).catch(() => {});
+      store.flash(r.made.length ? `Made ${r.made.length} SOP board${r.made.length === 1 ? '' : 's'} in the folder "SOP flows"${r.drawTasks?.length ? `, and ${r.drawTasks.length} tasks for an AI agent to draw them` : ''}` : `Every SOP already has a board (${r.kept.length})`);
+      load();
+    } catch (e) { store.fail(e); } finally { setBusy(false); }
   };
+  const folders = [...new Set((boards ?? []).map(b => b.folder).filter((f): f is string => !!f))].sort();
+  const shown = (boards ?? []).filter(b => (folder === null || (folder === '' ? !b.folder : b.folder === folder)) && (!q || `${b.name} ${b.sop ?? ''} ${b.description}`.toLowerCase().includes(q.toLowerCase())));
+  const toggle = (id: string) => setSel(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const move = async (ids: string[]) => {
+    const f = prompt(`Move ${ids.length} board${ids.length === 1 ? '' : 's'} to which folder? Type a new or existing name; empty for none.`, folder ?? '');
+    if (f === null) return;
+    try { for (const id of ids) await api(`/boards/${id}`, {method: 'PATCH', body: {folder: f.trim() || null}}); setSel(new Set()); load(); } catch (e) { store.fail(e); }
+  };
+  const remove = async (ids: string[]) => {
+    const names = (boards ?? []).filter(b => ids.includes(b.id)).map(b => `- ${b.name}`);
+    if (!confirm(`Delete ${ids.length} whiteboard${ids.length === 1 ? '' : 's'}? Their run history goes too. Tasks they made stay.\n\n${names.slice(0, 25).join('\n')}${names.length > 25 ? `\n...and ${names.length - 25} more` : ''}`)) return;
+    try { for (const id of ids) await api(`/boards/${id}`, {method: 'DELETE'}); setSel(new Set()); store.flash(`Deleted ${ids.length}`); load(); } catch (e) { store.fail(e); }
+  };
+  const rename = async (b: Board) => { const n = prompt('Board name', b.name); if (n?.trim() && n !== b.name) { try { await api(`/boards/${b.id}`, {method: 'PATCH', body: {name: n.trim()}}); load(); } catch (e) { store.fail(e); } } };
   return <div className="wb-list">
     <header className="head"><div className="head-top"><h1><Workflow size={20} /> Whiteboards</h1></div>
       <p className="muted small space-note">Map how work flows: routines, automations, webhooks and who does each step, person or AI. Link cards to tasks and SOP documents, turn ideas into tasks, and run a board to make its tasks in order.</p></header>
     <div className="wb-new">
-      <button className="btn primary" disabled={busy} onClick={() => make('/boards', {name: 'Untitled board', projectId: spaces[0]?.id ?? null, nodes: [titleNode('Untitled board')]})}><Plus size={14} /> New whiteboard</button>
+      <button className="btn primary" disabled={busy} onClick={() => make('/boards', {name: 'Untitled board', projectId: spaces[0]?.id ?? null, folder: folder || null, nodes: [titleNode('Untitled board')]})}><Plus size={14} /> New whiteboard</button>
       <button className="btn ghost" disabled={busy} onClick={() => setImporting(true)} title="Bring in a board made with Claude Whiteboards"><Download size={14} /> Import</button>
-      <button className="btn" disabled={busy} onClick={bySop} title="One board for each SOP: its routines in order, a title and the SOP document. SOPs that have a board keep it"><Repeat size={14} /> One board per SOP</button>
+      <button className="btn" disabled={busy} onClick={bySop} title="One board for each SOP: its routines in order, a title and the SOP document; optionally a task for an AI agent to draw each full flow. SOPs that have a board keep it"><Repeat size={14} /> One board per SOP</button>
       <button className="btn ghost" disabled={busy} onClick={() => make('/boards/from-items', {routines: true})} title="Every routine on one big board, a frame per SOP"><MapIcon size={14} /> All routines on one board</button>
+      <button className="btn ghost" onClick={() => setRulesOpen(o => !o)} title="How SOP flows are drawn: shapes, lanes, colors. Agents follow these"><Info size={14} /> Drawing rules</button>
     </div>
+    {rulesOpen && <DrawingRules store={store} />}
     {importing && <div className="wb-import">
       <b>Import a Claude Whiteboards board</b>
       <p className="muted small">Paste the board's elements as JSON (shape, text, container, table, arrow and link come in; pen lines, pictures and embeds are skipped). Ask Claude for "the elements of my whiteboard as JSON".</p>
       <textarea className="plain-input" rows={8} value={paste} onChange={e => setPaste(e.target.value)} placeholder='[{"id": "e1", "type": "shape", "x": 0, "y": 0, "w": 200, "h": 100, "text": "Step"}]' />
       <div className="row"><button className="btn primary" disabled={busy || !paste.trim()} onClick={doImport}>Import</button><button className="btn ghost" onClick={() => setImporting(false)}>Cancel</button></div>
     </div>}
-    {!boards ? <div className="loading">Loading...</div> : !boards.length ? <p className="muted">No whiteboards yet.</p> :
-      <div className="wb-cards">{boards.map(b => {
+    <div className="wb-bar">
+      <input className="search" placeholder="Search boards" value={q} onChange={e => setQ(e.target.value)} />
+      <div className="wb-folders">
+        <button className={folder === null ? 'on' : ''} onClick={() => pickFolder(null)}>All <span>{boards?.length ?? 0}</span></button>
+        {folders.map(f => <button key={f} className={folder === f ? 'on' : ''} onClick={() => pickFolder(f)}><Frame size={11} /> {f} <span>{boards!.filter(b => b.folder === f).length}</span></button>)}
+        {folders.length > 0 && <button className={folder === '' ? 'on' : ''} onClick={() => pickFolder('')}>No folder <span>{boards!.filter(b => !b.folder).length}</span></button>}
+      </div>
+      {sel.size > 0 ? <span className="wb-selbar"><b>{sel.size} selected</b>
+          <button className="btn small" onClick={() => setSel(new Set(shown.map(b => b.id)))}>Select all {shown.length}</button>
+          <button className="btn small" onClick={() => move([...sel])}><Frame size={12} /> Move to folder</button>
+          <button className="btn small danger" onClick={() => remove([...sel])}><Trash2 size={12} /> Delete</button>
+          <button className="btn ghost small" onClick={() => setSel(new Set())}>Clear</button></span>
+        : <span className="muted small">Tick boards to move or delete several at once.</span>}
+    </div>
+    {!boards ? <div className="loading">Loading...</div> : !shown.length ? <p className="muted">{boards.length ? 'No boards here.' : 'No whiteboards yet.'}</p> :
+      <div className="wb-cards">{shown.map(b => {
         const sp = store.projects.find(p => p.id === b.projectId);
         const tasks = b.nodes.filter(n => n.kind === 'task'), linked = tasks.filter(n => n.itemId).length;
-        return <a key={b.id} className="wb-card" href={`#/boards/${b.id}`}>
-          <MiniMap board={b} />
-          <b>{b.name}</b>
-          <span className="muted small">{b.sop ? <span className="tag">{b.sop}</span> : null} {sp ? sp.name : 'No space'} · {tasks.length} task card{tasks.length === 1 ? '' : 's'}{tasks.length ? `, ${linked} linked` : ''}</span>
-        </a>;
+        const doc = (b.sop ? sops[b.sop] : null) ?? b.nodes.find(n => n.kind === 'link' && n.url)?.url;
+        return <div key={b.id} className={'wb-card' + (sel.has(b.id) ? ' sel' : '')}>
+          <label className="wb-check" title="Select"><input type="checkbox" checked={sel.has(b.id)} onChange={() => toggle(b.id)} /></label>
+          <a className="wb-card-open" href={`#/boards/${b.id}`}>
+            <MiniMap board={b} />
+            <b>{b.name}</b>
+          </a>
+          <span className="muted small">{b.sop ? <span className="tag">{b.sop}</span> : null} {sp ? sp.name : 'No space'} · {b.nodes.length} card{b.nodes.length === 1 ? '' : 's'}{tasks.length ? `, ${tasks.length} task${tasks.length === 1 ? '' : 's'} (${linked} linked)` : ''}{b.folder ? ` · ${b.folder}` : ''}</span>
+          <span className="wb-card-actions">
+            {doc && <a className="btn ghost small" href={doc} target="_blank" rel="noreferrer" title="Open the SOP document"><ExternalLink size={12} /> {b.sop ? 'SOP doc' : 'Document'}</a>}
+            <button className="btn ghost small" onClick={() => rename(b)}>Rename</button>
+            <button className="btn ghost small" onClick={() => move([b.id])}>Move</button>
+            <button className="btn ghost small" title="Delete this board" onClick={() => remove([b.id])}><Trash2 size={12} /></button>
+          </span>
+        </div>;
       })}</div>}
   </div>;
 }
 
+/** Ask for a change on a board: a task linked to it (for a person or an AI agent) and a sticky note on the board. */
+function ChangeRequest({store, board, card, done}: {store: Store; board: Board; card?: WbNode; done: () => void}) {
+  const [text, setText] = useState('');
+  const [worker, setWorker] = useState<'ai' | 'human' | 'either'>('ai');
+  const [who, setWho] = useState('');
+  const [about, setAbout] = useState(!!card);
+  const [busy, setBusy] = useState(false);
+  const people = store.people.filter(p => worker === 'either' || (p.kind ?? 'human') === worker);
+  const send = async () => {
+    setBusy(true);
+    try {
+      const r = await api<Partial<Item> & {proposal?: unknown}>(`/boards/${board.id}/request`, {method: 'POST', body: {text, worker, node: about && card ? card.id : null, assignees: who ? [who] : []}});
+      store.flash(r.title ? `Made the task "${r.title.slice(0, 50)}" and a sticky note on the board` : 'Sent for approval');
+      setText(''); done();
+    } catch (e) { store.fail(e); } finally { setBusy(false); }
+  };
+  return <div className="wb-insp">
+    <h4>Request a change</h4>
+    <p className="muted small">Makes a task linked to this board and leaves a sticky note where it applies. An AI agent finds it in its queue and edits the board following the drawing rules; its work waits for your approval.</p>
+    {card && <label className="row"><input type="checkbox" checked={about} onChange={e => setAbout(e.target.checked)} /> About the selected card: <b className="small">{card.text.slice(0, 40) || card.kind}</b></label>}
+    <label>What should change<textarea className="plain-input" rows={5} value={text} onChange={e => setText(e.target.value)} placeholder="Add the approval step after QA review, as a diamond with yes and no exits" /></label>
+    <label>Who does it<select className="plain-input" value={worker} onChange={e => { setWorker(e.target.value as 'ai'); setWho(''); }}><option value="ai">An AI agent</option><option value="human">A person</option><option value="either">Either</option></select></label>
+    <label>Assign to<select className="plain-input" value={who} onChange={e => setWho(e.target.value)}><option value="">Nobody yet (goes to the queue)</option>{people.map(p => <option key={p.id} value={p.id}>{p.name}{p.kind === 'ai' ? ' (AI)' : ''}</option>)}</select></label>
+    <div className="row"><button className="btn primary" disabled={busy || !text.trim()} onClick={send}>Create the task</button></div>
+  </div>;
+}
+
+/** The drawing rules for SOP flows: the workspace's own (admins edit) or the built-in ones. Agents get these. */
+function DrawingRules({store}: {store: Store}) {
+  const [r, setR] = useState<{rules: string; custom: boolean} | null>(null);
+  const [text, setText] = useState('');
+  useEffect(() => { api<{rules: string; custom: boolean}>('/boards/conventions').then(x => { setR(x); setText(x.rules); }).catch(e => store.fail(e)); }, []);
+  if (!r) return null;
+  const save = async (v: string) => {
+    try { await api('/workspace', {method: 'PUT', body: {drawingRules: v}}); const x = await api<{rules: string; custom: boolean}>('/boards/conventions'); setR(x); setText(x.rules); store.flash(v ? 'Saved your drawing rules' : 'Back to the built-in rules'); }
+    catch (e) { store.fail(e); }
+  };
+  return <div className="wb-import">
+    <b>Drawing rules {r.custom ? '(your own)' : '(built in)'}</b>
+    <p className="muted small">Every AI agent drawing or changing a flow reads these (board_conventions). Admins can replace them with your own standard, like the format from a book.</p>
+    <textarea className="plain-input" rows={16} value={text} onChange={e => setText(e.target.value)} disabled={!store.settings.admin} />
+    {store.settings.admin && <div className="row"><button className="btn primary" onClick={() => save(text)}>Save</button>{r.custom && <button className="btn ghost" onClick={() => save('')}>Use the built-in rules</button>}</div>}
+  </div>;
+}
+
+/** A small picture of the board: shapes by kind, colored by who does each step, with the arrows. */
 function MiniMap({board}: {board: Board}) {
   const ns = board.nodes;
   if (!ns.length) return <div className="wb-mini empty" />;
   const x0 = Math.min(...ns.map(n => n.x)), y0 = Math.min(...ns.map(n => n.y)), x1 = Math.max(...ns.map(n => n.x + n.w)), y1 = Math.max(...ns.map(n => n.y + n.h));
-  return <svg className="wb-mini" viewBox={`${x0 - 20} ${y0 - 20} ${x1 - x0 + 40} ${y1 - y0 + 40}`} preserveAspectRatio="xMidYMid meet">
-    {ns.map(n => <rect key={n.id} x={n.x} y={n.y} width={n.w} height={n.h} rx={8} fill={n.kind === 'frame' ? 'none' : n.kind === 'sticky' ? (n.color ?? STICKY[0]) : 'var(--accent-soft)'} stroke="var(--line)" strokeWidth={4} />)}
+  const at = new Map(ns.map(n => [n.id, n]));
+  const fill = (n: WbNode) => n.kind === 'frame' ? 'none' : n.kind === 'sticky' ? (n.color ?? STICKY[0]) : n.fill && FILLS[n.fill] ? FILLS[n.fill] : n.kind === 'title' ? 'var(--text)' : n.kind === 'link' ? '#dbe8fb'
+    : n.kind === 'decision' ? '#fdf0c2' : n.kind === 'terminal' || n.kind === 'end' || n.kind === 'trigger' || n.kind === 'webhook' ? '#dcf2df' : n.worker === 'ai' ? '#e9e2fb' : n.worker === 'human' ? '#dbe8fb' : 'var(--card)';
+  return <svg className="wb-mini" viewBox={`${x0 - 30} ${y0 - 30} ${x1 - x0 + 60} ${y1 - y0 + 60}`} preserveAspectRatio="xMidYMid meet">
+    {board.edges.map(e => { const a = at.get(e.from), c = at.get(e.to); return a && c ? <line key={e.id} x1={a.x + a.w / 2} y1={a.y + a.h / 2} x2={c.x + c.w / 2} y2={c.y + c.h / 2} stroke="var(--muted)" strokeWidth={5} /> : null; })}
+    {ns.map(n => n.kind === 'decision' || n.shape === 'diamond'
+      ? <polygon key={n.id} points={`${n.x + n.w / 2},${n.y} ${n.x + n.w},${n.y + n.h / 2} ${n.x + n.w / 2},${n.y + n.h} ${n.x},${n.y + n.h / 2}`} fill={fill(n)} stroke="var(--line)" strokeWidth={4} />
+      : <rect key={n.id} x={n.x} y={n.y} width={n.w} height={n.kind === 'title' ? Math.min(n.h, 36) : n.h} rx={n.kind === 'terminal' || n.kind === 'end' ? n.h / 2 : 10} fill={fill(n)} stroke={n.kind === 'frame' ? 'var(--muted)' : 'var(--line)'} strokeWidth={4} strokeDasharray={n.kind === 'frame' ? '16 10' : undefined} />)}
   </svg>;
 }
 
@@ -235,7 +340,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
     addEventListener('keydown', dn); addEventListener('keyup', up);
     return () => { removeEventListener('keydown', dn); removeEventListener('keyup', up); };
   }, []);
-  const [panel, setPanel] = useState<'auto' | 'runs' | 'board'>('auto');
+  const [panel, setPanel] = useState<'auto' | 'runs' | 'board' | 'change'>('auto');
   const [runs, setRuns] = useState<Run[]>([]);
   const [showRun, setShowRun] = useState<string | null>(null);
   const [sops, setSops] = useState<Record<string, string>>({});
@@ -449,6 +554,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
       <span className="spacer" />
       <button className="btn small" title="Create a task for every task card that has none. Arrows become dependencies" onClick={toTasks}><ListPlus size={13} /> Create tasks</button>
       <button className="btn small primary" title={space ? `Run it: makes its tasks in ${space.name}, in order, and fires its webhooks` : 'Put the board in a space first'} disabled={!space} onClick={doRun}><Play size={13} /> Run</button>
+      <button className={'btn small' + (sideMode === 'change' ? ' on' : '')} onClick={() => setPanel(p => p === 'change' ? 'auto' : 'change')} title="Ask a person or an AI agent to change this board: makes a task linked to it and a sticky note on it"><MessageSquarePlus size={13} /> Request a change</button>
       <button className={'btn small' + (sideMode === 'runs' ? ' on' : '')} onClick={() => setPanel(p => p === 'runs' ? 'auto' : 'runs')}><History size={13} /> Runs{runs.some(r => r.state === 'running') ? ` (${runs.filter(r => r.state === 'running').length})` : ''}</button>
       <button className={'btn small' + (sideMode === 'board' && panel === 'board' ? ' on' : '')} onClick={() => setPanel(p => p === 'board' ? 'auto' : 'board')} title="Space, webhooks and the inbound link"><Settings2 size={13} /></button>
     </div>
@@ -516,6 +622,7 @@ export function BoardCanvas({store, boardId, open, back, onGone}: {store: Store;
             <button className="btn small danger" onClick={removeSel}><Trash2 size={12} /> Delete</button></div>
         </div>}
         {sideMode === 'board' && <BoardSettings store={store} board={board} save={saveBoard} nodes={nodes} />}
+        {sideMode === 'change' && <ChangeRequest store={store} board={board} card={one} done={() => { setPanel('auto'); load(); }} />}
         {sideMode === 'runs' && <RunsPanel store={store} runs={runs} shown={run?.id ?? null} show={setShowRun} open={open} board={board} reload={load} />}
       </aside>
     </div>

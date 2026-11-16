@@ -13,7 +13,8 @@ import {DomainJoinCard, JobRolePicker, JobRolesCard, jobRoleNames, type DomainJo
 
 type Cap = string;
 type Role = {id: string; name: string; caps: Cap[]};
-type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; hasPassword: boolean; kind: 'human' | 'ai'; jobRoles: string[]};
+const EMAIL_GROUPS: [string, string][] = [['assigned', 'Assigned to me'], ['comments', 'Comments and mentions'], ['approvals', 'Approvals and reviews'], ['completed', 'Work done'], ['reminders', 'Reminders and meetings'], ['automations', 'Automations'], ['other', 'Other']];
+type Member = {id: string; name: string; email: string; color: string; role: string; admin: boolean; active: boolean; notifyEmail: boolean; notifyKinds?: string[] | null; hasPassword: boolean; kind: 'human' | 'ai'; jobRoles: string[]};
 export type Me = {required: boolean; forced?: boolean; account?: string | null; linked?: string[]; signup?: 'open' | 'invite'; memberWorkspaces?: 'on' | 'off'; owner?: boolean; setup?: boolean; memberOf?: {id: string; name: string}[];
   person: {id: string; name: string} | null; admin: boolean; googleReady: boolean; signInGoogle?: boolean; signInLink?: boolean; caps: Record<string, string[]>};
 
@@ -225,6 +226,12 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
             <span className="grow">Email me notifications</span>
             <input type="checkbox" checked={self.notifyEmail} onChange={e => patch(self.id, {notifyEmail: e.target.checked})} />
           </div>
+          {self.notifyEmail && <div className="set-item alert-kinds">
+            <span className="grow small muted">Email me about</span>
+            {EMAIL_GROUPS.map(([k, label]) => { const on = !self.notifyKinds || self.notifyKinds.includes(k); return <label key={k} className={'chip-toggle' + (on ? ' on' : '')}>
+              <input type="checkbox" checked={on} onChange={() => { const cur = self.notifyKinds ?? EMAIL_GROUPS.map(g => g[0]); const next = on ? cur.filter(x => x !== k) : [...cur, k]; patch(self.id, {notifyKinds: next.length === EMAIL_GROUPS.length ? null : next}); }} /> {label}</label>; })}
+          </div>}
+          {self.notifyEmail && <p className="small muted" style={{margin: '0 0 6px'}}>Emails go out when the workspace has a mail sender: an admin connects Gmail below (Google and Gmail), or the server has SMTP set. Without one, notifications stay in the Inbox.</p>}
           <div className="set-item">
             <span className="grow">Password</span>
             <SetPassword has={self.hasPassword} self={me.required} disabled={false} onSet={(pw, cur) => patch(self.id, {password: pw, currentPassword: cur})} />

@@ -3,6 +3,7 @@
 // Needs an OAuth client (Google Cloud console, type "Web application") with the redirect URI
 //   http://<host>/api/auth/google/callback
 // Client ID and secret are entered by an admin on the Team page and kept in the local database.
+import {emailGroup} from './alerts.ts';
 import {randomBytes} from 'node:crypto';
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import type {Db} from './db.ts';
@@ -71,14 +72,21 @@ export async function googleCallback(db: Db, req: IncomingMessage, res: ServerRe
   }
 }
 
-/** Sends a notification by email when the workspace has a connected sender and the person opted in. */
-export async function sendNotificationEmail(db: Db, n: {person: string; text: string; actor: string | null; itemId: string | null}) {
-  const g = getWorkspace(db).google;
-  if (!g.refreshToken || !g.senderEmail) return;
-  const to = db.prepare('select email, notify_email from people where id = ?').get(n.person) as {email: string | null; notify_email: number} | undefined;
-  if (!to?.email || !to.notify_email || /[\r\n,;<>]/.test(to.email)) return;
+/** Sends a notification by email when the person opted in for this kind and mail can go out:
+ *  the server's SMTP when set, else the workspace's connected Gmail sender. */
+export async function sendNotificationEmail(db: Db, n: {person: string; text: string; actor: string | null; itemId: string | null; kind?: string},
+  mail: {smtp?: (to: string, subject: string, text: string) => Promise<boolean>; base?: string | null} = {}) {
+  const to = db.prepare('select email, notify_email, notify_kinds from people where id = ?').get(n.person) as {email: string | null; notify_email: number; notify_kinds: string | null} | undefined;
+  if (!to?.email || !to.notify_email || /[\r\n,;<>]/.test(to.email)) return false;
+  if (to.notify_kinds) { try { const ks = JSON.parse(to.notify_kinds) as string[]; if (Array.isArray(ks) && !ks.includes(emailGroup(n.kind ?? ''))) return false; } catch { /* bad value: send */ } }
   const who = n.actor ? (db.prepare('select name from people where id = ?').get(n.actor) as {name: string} | undefined)?.name ?? 'Someone' : 'Cadence';
-  await sendEmail(db, to.email, `${who} ${n.text}`, `${who} ${n.text}\n\nOpen Cadence to see it. Turn these emails off on the Team page.`);
+  const it = n.itemId ? db.prepare('select i.title, i.number, p.key from items i join projects p on p.id = i.project_id where i.id = ?').get(n.itemId) as {title: string; number: number; key: string} | undefined : undefined;
+  const ref = it ? `${it.key}-${it.number}` : '';
+  const link = it && mail.base ? `${mail.base.replace(/\/$/, '')}/#/open/${n.itemId}` : '';
+  const subject = `${who} ${n.text}`;
+  const body = [`${who} ${n.text}`, it ? `\n${ref} ${it.title}` : '', link ? `Open it: ${link}` : '\nOpen Cadence to see it.', '\nChoose which emails you get, or turn them off, under My account on the Team page.'].filter(Boolean).join('\n');
+  if (mail.smtp) { const sent = await mail.smtp(to.email, subject, body); if (sent) return true; }
+  return sendEmail(db, to.email, subject, body);
 }
 
 /** Sends a plain email from the workspace's connected Gmail. Returns false when no sender is connected. */

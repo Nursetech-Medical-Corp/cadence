@@ -111,7 +111,7 @@ export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoo
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes', 'triggerHook', 'setWebhooks',
-  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard',
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard', 'requestBoardChange',
   'savePlugin', 'submitPlugin', 'deletePlugin', 'installPlugin', 'uninstallPlugin', 'setPlugin']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {

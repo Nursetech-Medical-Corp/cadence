@@ -1,5 +1,6 @@
 // All reads and writes go through here: the HTTP API, MCP server and tests share it,
 // so anything a person can do in the UI an agent can do too.
+import * as alerts from './alerts.ts';
 import {syncHours} from '../src/hours.ts';
 import {exportAll} from './backup.ts';
 import {getWorkspace} from './auth.ts';
@@ -21,6 +22,7 @@ import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateDa
 import {DATE_TRIGGERS, apply as applyRule, matches as ruleMatches, validateRules, type RuleContext, type RuleHost} from './automations.ts';
 import {cleanHooks, cleanRuleSecrets, listDeliveries, queueHooks, saveWorkspaceHooks, workspaceHooks} from './webhooks.ts';
 import {normalizeHook} from '../src/hooks.ts';
+import {DEFAULT_DRAWING_RULES} from '../src/flowRules.ts';
 import {PluginCatalog, checkManifest, install as installPluginRow, listInstalls, migratePluginInstalls, pluginEffects, setInstall, uninstall as uninstallPluginRow, type Manifest} from './plugins.ts';
 import {PRIORITIES} from '../src/types.ts';
 import type {Activity, BurnPoint, InheritKey, ProjectSettings, Rule, Template, Trigger, ChangeEvent, Comment, FieldDef, Item, ItemPatch, Notification, Person, Project, Recur, Sprint, Status, TimeEntry, View, ViewConfig, ViewKind} from '../src/types.ts';
@@ -1687,7 +1689,14 @@ export class Tasks {
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
   listBoards(q: {projectId?: string; itemId?: string; sop?: string} = {}) { return boards.listBoards(this, q); }
-  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible); }
+  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]; aiDraw?: boolean} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible, {aiDraw: o.aiDraw}); }
+  /** A task (person or AI) to change a board, with a sticky note on the board where the change is wanted. */
+  requestBoardChange(ref: string, text: string, actor: string | null = null, opts: {node?: string | null; worker?: 'human' | 'ai' | 'either'; assignees?: string[]; projectId?: string | null} = {}) { return boards.requestBoardChange(this, ref, text, actor, opts); }
+  /** The drawing rules for SOP flows: this workspace's own, or the built-in ones. */
+  /** Which notifications a person also gets by email (Team page, My account). */
+  emailAlerts(person: string) { return alerts.getEmailAlerts(this.db, person); }
+  setEmailAlerts(person: string, patch: {on?: boolean; kinds?: unknown}) { return alerts.setEmailAlerts(this.db, person, patch); }
+  boardConventions() { const own = getWorkspace(this.db).drawingRules.trim(); return {rules: own || DEFAULT_DRAWING_RULES, custom: !!own}; }
   board(ref: string) { return boards.getBoard(this, ref); }
   createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
   updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }
