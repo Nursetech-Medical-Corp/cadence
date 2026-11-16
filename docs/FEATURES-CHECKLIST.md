@@ -11,6 +11,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - New things land where you can see them and never on top of each other.
 - Drag and drop always shows where the drop will land before you let go.
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
+- Alerts: until this device is signed up for alerts, a bar at the top asks to turn them on (browser permission, like Slack), offers Install app where the browser can, Not now hides it for a week (kept after reload), and when the browser blocks alerts it says how to allow them. Bug found: alerts were only reachable from Inbox, Settings, so nobody was asked. (e2e timers)
 
 ## Focus mode and timer
 - Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.

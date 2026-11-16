@@ -1282,6 +1282,9 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .notify-row.indent { padding-left: 26px; gap: 6px; }
 .notify-row .grow { min-width: 180px; }
 .notify-hint { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); }
+.notify-prompt { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 16px 0; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); font-size: 13px; }
+.notify-prompt .grow { flex: 1; min-width: 220px; }
+.notify-prompt.blocked { border-color: var(--line); background: var(--card); }
 .notify-kinds { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; font-size: 13.5px; }
 .notify-kinds label { display: flex; gap: 6px; align-items: center; }
 .popover.share-pop { width: 380px; max-height: 70vh; overflow: auto; right: 0; left: auto; } .popover.share-pop .set-card { border: 0; padding: 0; margin: 0; box-shadow: none; }
