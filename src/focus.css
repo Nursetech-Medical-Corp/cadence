@@ -63,3 +63,6 @@
 .fv-backdrop.full .fv-main { max-width: 980px; margin: 0 auto; width: 100%; padding-top: 40px; }
 .fv-backdrop.full .fv-clock { font-size: 3.4em; }
 .pip-full { display: inline-flex; align-items: center; gap: 4px; width: auto !important; padding: 0 8px !important; font-size: 12px; white-space: nowrap; }
+.fb-btn.fb-labeled { width: auto; padding: 0 8px; gap: 5px; display: inline-flex; align-items: center; font-size: 12px; white-space: nowrap; }
+.fb-btn.pulse { color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); animation: fb-pulse 1.6s ease-in-out infinite; }
+@keyframes fb-pulse { 50% { box-shadow: 0 0 0 5px var(--accent-soft); } }

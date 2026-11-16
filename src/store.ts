@@ -393,13 +393,23 @@ export function between(a: number | undefined, b: number | undefined) {
  *  same task never show different seconds. Ticks four times a second while anything listens. */
 let sharedNow = Date.now();
 const nowListeners = new Set<() => void>();
-let nowTimer: ReturnType<typeof setInterval> | null = null;
+let nowTimer: ReturnType<typeof setTimeout> | null = null;
+/** Ticks land just after each whole second of the running timer (its start's millisecond phase), so every tab and
+ *  window flips to the next second at the same moment instead of up to a second apart. */
+let phase = 0;
+function tickNow() {
+  sharedNow = Date.now();
+  nowListeners.forEach(l => l());
+  const wait = 1000 - ((sharedNow - phase) % 1000 + 1000) % 1000 + 15;
+  nowTimer = setTimeout(tickNow, wait);
+}
 function subscribeNow(fn: () => void) {
   nowListeners.add(fn);
-  if (!nowTimer) nowTimer = setInterval(() => { sharedNow = Date.now(); nowListeners.forEach(l => l()); }, 250);
-  return () => { nowListeners.delete(fn); if (!nowListeners.size && nowTimer) { clearInterval(nowTimer); nowTimer = null; } };
+  if (!nowTimer) tickNow();
+  return () => { nowListeners.delete(fn); if (!nowListeners.size && nowTimer) { clearTimeout(nowTimer); nowTimer = null; } };
 }
-export function useSharedNow(active: boolean) {
+export function useSharedNow(active: boolean, start?: string) {
+  if (start) { const p = Date.parse(start); if (!Number.isNaN(p)) phase = p; }
   return useSyncExternalStore(active ? subscribeNow : noSubscribe, () => active ? sharedNow : 0);
 }
 const noSubscribe = () => () => {};

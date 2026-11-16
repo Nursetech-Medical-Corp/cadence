@@ -1,6 +1,7 @@
 // Day planner: the overwhelm page. Top 3, a brain dump, today's and overdue tasks, and the day as time boxes.
 // Drag lines and tasks onto the day, drag boxes to move them, drag the bottom edge to resize. Done boxes turn green.
 // Saved per person per day at /api/day/:date (server/dayplan.ts).
+import {BellRing} from 'lucide-react';
 import {spaceColor} from './ProjectNav.tsx';
 import {eventColor} from './Meetings.tsx';
 import {useCallback, useEffect, useRef, useState} from 'react';
@@ -12,7 +13,7 @@ import {Avatars, Check, Popover, PriorityIcon, itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
 type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
-type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean; color?: string | null};
+type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; remindBefore?: number; links?: string[]; eventId?: string | null; note?: string; planned?: {start: string; minutes: number} | null; fitted?: boolean; color?: string | null};
 type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number; added: number; upTo: string | null};
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
 type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null; color?: string | null};
@@ -703,6 +704,11 @@ function lanesOf(blocks: Block[]) {
 const fmtM = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`;
 
 /** Edit one time box: title, time, note, tasks tied to it (done in or to discuss), make it a task, put it on the calendar. */
+/** The first reminder you set asks the browser once for permission to show alerts on this computer. */
+function askNotify() {
+  try { if ('Notification' in window && Notification.permission === 'default') void Notification.requestPermission(); } catch { /* not supported */ }
+}
+
 function BoxEditor({store, b, date, space, open, patch, remove, close, onCalendar}: {store: Store; b: Block; date: string; space: string; open: (id: string) => void; patch: (p: Partial<Block>) => void; remove: () => void; close: () => void; onCalendar: () => void}) {
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
@@ -753,7 +759,11 @@ function BoxEditor({store, b, date, space, open, patch, remove, close, onCalenda
     </div>
     {b.planned && <div className="row small muted">Planned {label(mins(b.planned.start))} for {b.planned.minutes} min
       <button className="btn ghost small" onClick={() => patch({start: b.planned!.start, minutes: b.planned!.minutes, at: new Date(`${date}T${b.planned!.start}:00`).toISOString(), planned: null, fitted: false})}><Undo2 size={12} /> Back to plan</button></div>}
-    <label className="row small"><input type="checkbox" checked={!!b.remind} onChange={e => patch({remind: e.target.checked, at: new Date(`${date}T${b.start}:00`).toISOString()})} /> Remind me when it starts</label>
+    <label className="row small" title="A notification in Cadence, and on this computer or phone when notifications are on (Team page, My account)"><BellRing size={12} /> Remind me
+      <select className="plain-select" value={b.remind ? String(b.remindBefore ?? 0) : 'off'} onChange={e => { const v = e.target.value; patch(v === 'off' ? {remind: false} : {remind: true, remindBefore: Number(v), at: new Date(`${date}T${b.start}:00`).toISOString()}); askNotify(); }}>
+        <option value="off">Off</option>
+        {[0, 5, 10, 15, 30, 60, 120, 1440].map(m => <option key={m} value={m}>{m === 0 ? 'When it starts' : m === 1440 ? '1 day before' : m >= 60 ? `${m / 60} hour${m > 60 ? 's' : ''} before` : `${m} minutes before`}</option>)}
+      </select></label>
     <textarea className="plain-input" rows={2} placeholder="Note or agenda" defaultValue={b.note ?? ''} onBlur={e => e.target.value !== (b.note ?? '') && patch({note: e.target.value})} />
     <div className="dp-field"><span className="muted small">Tasks tied to this box (done in it, or to discuss)</span>
       {(b.links ?? []).map(id => { const x = store.items.get(id); return <div key={id} className="row small">

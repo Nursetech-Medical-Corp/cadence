@@ -11,6 +11,8 @@ import {calendarSettings, listEvents, localDay, localTime, validTz, zoned} from 
 export type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
 /** A time box: start "HH:MM" on the plan's day, minutes long. at is the same moment as an ISO time (set by the app, which knows the time zone). */
 export type Block = Entry & {start: string; minutes: number; at?: string | null; remind?: boolean; notified?: boolean;
+  /** With remind: how many minutes before the start the reminder comes (0 at the start, up to a day). */
+  remindBefore?: number;
   /** Tasks tied to this box: done in it or to discuss in it (a meeting, a call). */
   links?: string[];
   /** The calendar event this box stands for (Cadence or synced Google event). */
@@ -86,9 +88,10 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       if (b.at && Number.isNaN(Date.parse(b.at))) throw new Invalid('at must be an ISO time');
       const old = cur.blocks.find(x => x.id === e.id);
       // Moving a box or changing its reminder arms the reminder again.
-      const notified = !!old?.notified && old.start === b.start && old.at === momentOf(b.start) && !!b.remind;
+      const before = Math.max(0, Math.min(1440, Math.round(Number(b.remindBefore ?? 0)) || 0));
+      const notified = !!old?.notified && old.start === b.start && old.at === momentOf(b.start) && !!b.remind && (old.remindBefore ?? 0) === before;
       const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
-      return {...e, start: b.start, minutes, at: momentOf(b.start), remind: !!b.remind, ...(notified ? {notified: true} : {}),
+      return {...e, start: b.start, minutes, at: momentOf(b.start), remind: !!b.remind, ...(b.remind && before ? {remindBefore: before} : {}), ...(notified ? {notified: true} : {}),
         ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {}),
         ...(b.planned && TIME.test(String(b.planned.start)) && Number(b.planned.minutes) > 0 ? {planned: {start: b.planned.start, minutes: Math.round(Number(b.planned.minutes))}} : {}), ...(b.fitted ? {fitted: true} : {}), ...(b.color && /^([1-9]|1[01])$/.test(String(b.color)) ? {color: String(b.color)} : {})};
     });
@@ -159,7 +162,7 @@ export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {
   return updateDayPlan(tasks, person, date, {blocks});
 }
 
-/** Every minute: time boxes with a reminder whose start has come (within the last 15 minutes) tell their person once. */
+/** Every minute: time boxes with a reminder whose moment has come (its start, less remindBefore minutes; within the last 15 minutes) tell their person once. */
 export function dayPlanReminders(tasks: Tasks, now = new Date()) {
   migrateDayPlans(tasks);
   const day = (d: number) => new Date(now.getTime() + d * 86400_000).toISOString().slice(0, 10);
@@ -169,10 +172,11 @@ export function dayPlanReminders(tasks: Tasks, now = new Date()) {
     let changed = false;
     for (const b of d.blocks ?? []) {
       if (!b.remind || b.notified || !b.at) continue;
-      const t = Date.parse(b.at);
+      const before = b.remindBefore ?? 0, t = Date.parse(b.at) - before * 60_000;
       if (t > now.getTime() || now.getTime() - t > 15 * 60_000) continue;
       b.notified = true; changed = true;
-      tasks.notifyPublic(r.person, null, b.itemId ?? null, 'reminder', `Now (${b.start}, ${b.minutes} min): ${b.text}`);
+      const lead = before >= 60 && before % 60 === 0 ? `${before / 60} h` : `${before} min`;
+      tasks.notifyPublic(r.person, null, b.itemId ?? null, 'reminder', `${before ? `In ${lead}` : 'Now'} (${b.start}, ${b.minutes} min): ${b.text}`);
     }
     if (changed) tasks.db.prepare('update day_plans set data = ? where person = ? and date = ?').run(JSON.stringify(d), r.person, r.date);
   }
