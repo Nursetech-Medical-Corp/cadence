@@ -252,6 +252,41 @@ test('whiteboards over REST (inbound hook) and MCP with permissions', async () =
     assert.ok((await tool('list_board_runs', {board: bd.id})).length >= 1);
     assert.ok((await tool('list_boards', {})).length >= 3);
     await tool('board_run_action', {run: run.id, action: 'cancel'});
+    const conv = await tool('board_conventions', {});
+    assert.equal(conv.custom, false);
+    const ch = await tool('request_board_change', {board: bd.id, text: 'Add a review step', worker: 'ai'});
+    assert.match(ch.title, /^Whiteboard change/);
     await tool('delete_board', {board: bd.id});
   } finally { server.close(); }
+});
+
+test('whiteboards: folders, change requests from the board, AI drawing tasks, drawing rules', () => {
+  const {t, david, p} = setup();
+  const b = t.createBoard({name: 'Hiring', projectId: p.id, folder: '  HR flows ', nodes: [{id: 'a', kind: 'task', x: 0, y: 0, w: 0, h: 0, text: 'Post job'}]}, david.id);
+  assert.equal(b.folder, 'HR flows', 'folder is trimmed');
+  assert.equal(t.updateBoard(b.id, {folder: null}, david.id).folder ?? null, null, 'folder can be cleared');
+
+  const item = t.requestBoardChange(b.id, 'Add an approval diamond after posting', david.id, {node: 'a', worker: 'ai'});
+  assert.match(item.title, /^Whiteboard change: Add an approval/);
+  assert.equal(item.fields.worker, 'ai');
+  assert.equal(item.fields.board, b.id);
+  assert.equal(item.fields.boardNode, 'a');
+  assert.ok(item.tags.includes('whiteboard'));
+  assert.match(item.body, /#\/boards\//);
+  const after = t.board(b.id);
+  const note = after.nodes.find(n => n.kind === 'sticky')!;
+  assert.match(note.text, /^Change requested \(OPS-\d+\)/, 'a sticky note marks the request on the board');
+  assert.throws(() => t.requestBoardChange(b.id, 'x', david.id, {node: 'nope'}), /No card/);
+  assert.throws(() => t.requestBoardChange(b.id, '  ', david.id), /./, 'empty request refused');
+
+  setSopLinks(t, [{code: 'SOP-03.1', url: 'https://docs.google.com/document/d/three', title: 'Shipping'}]);
+  t.createItem({projectId: p.id, title: 'Ship orders', tags: ['SOP-03.1'], due: '2026-11-16', recur: {every: 1, unit: 'week', mode: 'schedule'}}, david.id);
+  const r = t.boardsBySop({actor: david.id, aiDraw: true});
+  assert.equal(r.made.length, 1);
+  assert.equal(r.drawTasks.length, 1, 'one AI drawing task per new SOP board');
+  assert.equal(r.drawTasks[0].fields.worker, 'ai');
+  assert.match(r.drawTasks[0].title, /SOP-03.1/);
+
+  assert.equal(t.boardConventions().custom, false);
+  assert.match(t.boardConventions().rules, /diamond/i, 'built-in rules cover decisions');
 });

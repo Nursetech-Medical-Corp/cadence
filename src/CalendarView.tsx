@@ -10,6 +10,7 @@ import type {ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
 import {EventEditor, TimeGrid} from './Meetings.tsx';
 import {api} from './store.ts';
+import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -67,8 +68,8 @@ export function CalendarView({store, project, items, open, config, setConfig}: V
   const block = async (itemId: string, s: string, e: string) => {
     try {
       const r = await api<{pastDue: boolean; note: string; event: {google?: {ok: boolean; error?: string} | null}}>('/meetings/timeblock', {method: 'POST', body: {itemId, start: s, end: e}});
-      if (r.pastDue && confirm(`${r.note}\n\nMove the due date to that day?`)) store.updateItem(itemId, {due: iso(new Date(e))});
-      if (r.event.google && !r.event.google.ok) alert(`Blocked in Cadence. Google: ${r.event.google.error}`);
+      if (r.pastDue && (await uiConfirm(`${r.note}\n\nMove the due date to that day?`))) store.updateItem(itemId, {due: iso(new Date(e))});
+      if (r.event.google && !r.event.google.ok) void uiAlert(`Blocked in Cadence. Google: ${r.event.google.error}`);
     } catch (err) { store.fail(err); }
   };
   const title = hours === 'day' ? parseDay(cursor).toLocaleDateString(undefined, {weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'}) : mode === 'month' && !hours

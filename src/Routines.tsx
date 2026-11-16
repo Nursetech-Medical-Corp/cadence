@@ -13,6 +13,7 @@ import {addDays, daysBetween, monday, parseDay} from './dates.ts';
 import {useTemplates} from './SettingsExtras.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {peopleFor} from './RoutineControls.tsx';
+import {uiAlert, uiConfirm, uiPrompt} from './dialogs.tsx';
 
 const MODES = ['auto-job', 'hybrid', 'manual'] as const;
 export type Mode = typeof MODES[number] | 'unset';
@@ -108,17 +109,17 @@ export function RoutinesView({store, items, open}: ViewProps) {
   }, []);
   const act = async (ids: string[], action: 'skip' | 'pause' | 'resume' | 'end' | 'delay' | 'wait', extra: {to?: string; on?: string[]} = {}) => {
     if (!ids.length) return;
-    if (action === 'end' && !confirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`)) return;
+    if (action === 'end' && !(await uiConfirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`))) return;
     setBusy(true);
     try {
       const r = await api<{errors?: string[]} | unknown[]>('/routines/act', {method: 'POST', body: {ids, action, ...extra}});
-      if (Array.isArray(r)) alert('Held for approval on the AI work page.');
-      else if (r.errors?.length) alert(r.errors.join('\n'));
+      if (Array.isArray(r)) void uiAlert('Held for approval on the AI work page.');
+      else if (r.errors?.length) void uiAlert(r.errors.join('\n'));
     } catch (e) { store.fail(e); } finally { setBusy(false); }
   };
-  const delay = (i: Item) => { const to = prompt(`Delay only this copy to (YYYY-MM-DD). The next one stays on ${nextAfter(i) ?? 'schedule'}.`, i.due ? addDays(i.due, 3) : store.today); if (to) act([i.id], 'delay', {to}); };
-  const wait = (i: Item) => {
-    const ref = prompt('Start this routine only after which item is done? Type its key, like GEN-12 (comma for several).');
+  const delay = async (i: Item) => { const to = (await uiPrompt(`Delay only this copy to (YYYY-MM-DD). The next one stays on ${nextAfter(i) ?? 'schedule'}.`, i.due ? addDays(i.due, 3) : store.today)); if (to) act([i.id], 'delay', {to}); };
+  const wait = async (i: Item) => {
+    const ref = (await uiPrompt('Start this routine only after which item is done? Type its key, like GEN-12 (comma for several).'));
     if (!ref) return;
     const keys = ref.split(/[,\s]+/).filter(Boolean);
     const ids = keys.map(k => [...store.items.values()].find(x => itemKey(x, store.projects).toUpperCase() === k.toUpperCase())?.id ?? k);
@@ -213,7 +214,7 @@ function AddFromTemplate({store, open}: {store: Store; open: (id: string) => voi
   const [project, setProject] = useState(realProjects(store.projects)[0]?.id ?? '');
   const repeatTemplates = templates.filter(t => t.kind === 'item' && (t.data as {recur?: unknown}).recur);
   const add = async (t: Template) => {
-    const due = prompt(`First due date for "${t.name}" (YYYY-MM-DD)`, store.today);
+    const due = (await uiPrompt(`First due date for "${t.name}" (YYYY-MM-DD)`, store.today));
     if (due === null) return;
     try { const it = await api<Item>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project, due: due || undefined}}); open(it.id); } catch (e) { store.fail(e); }
   };

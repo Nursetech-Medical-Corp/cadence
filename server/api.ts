@@ -32,7 +32,7 @@ import {Forbidden, createToken, deleteToken, guarded, listTokens, migrateTokens,
 import {buildMcp} from './mcp.ts';
 import * as z from 'zod';
 import {handleMcpHttp} from './mcp-http.ts';
-import {accessGrant, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
+import {accessGrant, connectionAs, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
 import {devLogMode, googleSignInCallback, googleSignInReady, googleSignInStart, logSignIn, clientIp, publicUrl, sendSmtp, smtpReady, staffGoogleOnly, type SignInMethod} from './signin.ts';
 import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
@@ -157,7 +157,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   tasks.workspace = info.id;
   startWebhooks(tasks);
   startBoards(tasks);
-  tasks.onNotify(n => { sendNotificationEmail(tasks.db, n).catch(e => console.error('Email notification failed', e.message)); });
+  tasks.onNotify(n => { sendNotificationEmail(tasks.db, n, {smtp: sendSmtp, base: publicUrl()}).catch(e => console.error('Email notification failed', e.message)); });
   // Push to the person's phones and desktops (every device of their linked accounts), unless they turned that kind off or it is quiet time.
   const personEmail = (id: string) => (tasks.db.prepare('select email from people where id = ? and active = 1').get(id) as {email: string | null} | undefined)?.email?.trim().toLowerCase() || null;
   const pushTo = async (emails: string[], msg: push.PushMessage) => {
@@ -230,16 +230,26 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   /** People rows keep a copy of the account's password hash, for re-checking it when signing approvals. */
   const syncHash = (email: string, hash: string | null) => { for (const w of all()) w.tasks.db.prepare('update people set password = ? where lower(email) = ?').run(hash, email); };
   // Sign-in for apps (OAuth, oauth.ts): a grant acts as one person in one workspace, while that person is active with that account.
-  const grantAlive = (g: Grant) => { const w = all().find(x => x.id === g.workspace); return !!w && memberId(w.tasks, g.email) === g.person; };
+  // A grant may also act as an AI agent the approving person owns (Connect Claude as its own agent).
+  const grantAlive = (g: Grant) => {
+    const w = all().find(x => x.id === g.workspace); if (!w) return false;
+    const me = memberId(w.tasks, g.email); if (!me) return false;
+    if (me === g.person) return true;
+    const a = w.tasks.db.prepare("select owner from people where id = ? and kind = 'ai' and coalesce(active, 1) = 1").get(g.person) as {owner: string | null} | undefined;
+    return !!a && a.owner === me;
+  };
+  const wsTasks = (id: string) => { const w = all().find(x => x.id === id); if (!w) throw new Invalid('No such workspace'); return w.tasks; };
   const oauthCtx = (): OAuthContext => ({accounts, alive: grantAlive, workspaceIds: () => all().map(w => w.id), signInOn: getWorkspace(tasks.db).requireLogin,
+    agents: (wid, owner) => agentsOf(wsTasks(wid), owner).map(a => ({id: a.id, name: a.name})),
+    newAgent: (wid, owner, name) => { const a = addAgent(wsTasks(wid), owner, {name: name.slice(0, 60), provider: /chatgpt|openai/i.test(name) ? 'chatgpt' : /claude/i.test(name) ? 'claude' : 'other'}); return {id: a.id, name: a.name}; },
     memberships: emails => all().flatMap(w => {
       const email = emails.find(e => memberId(w.tasks, e));
       if (!email) return [];
       const person = memberId(w.tasks, email)!;
       return [{id: w.id, name: w.name, email, person, personName: (w.tasks.db.prepare('select name from people where id = ?').get(person) as {name: string}).name}];
     })});
-  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, kind, job_roles, password is not null as has_password from people order by name').all()
-    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human',
+  const team = () => tasks.db.prepare('select id, name, email, color, role, admin, active, notify_email, notify_kinds, kind, job_roles, password is not null as has_password from people order by name').all()
+    .map(r => ({id: r.id, name: r.name, email: r.email ?? '', color: r.color, role: r.role, admin: !!r.admin, active: !!r.active, notifyEmail: !!r.notify_email, notifyKinds: (() => { try { return r.notify_kinds ? JSON.parse(String(r.notify_kinds)) : null; } catch { return null; } })(), hasPassword: !!r.has_password, kind: r.kind === 'ai' ? 'ai' : 'human',
       jobRoles: (() => { try { return JSON.parse(String(r.job_roles ?? '[]')); } catch { return []; } })()}));
   // Domain join: a Google-verified address on a listed company domain joins every workspace that lists it (jobroles.ts).
   const joinDomains = (email: string) => {
@@ -420,8 +430,22 @@ If you did not ask for it, ignore this email.`)
         if (b === 'apps' && account && !bearer) {
           if (!c && m === 'GET') {
             const names = new Map(all().map(w => [w.id, w.name]));
+            const who = (x: {workspace: string; person: string}) => { try { const w = all().find(y => y.id === x.workspace); const r = w?.tasks.db.prepare('select name, kind from people where id = ?').get(x.person) as {name: string; kind: string | null} | undefined; return r ? {asName: r.name, asAgent: r.kind === 'ai'} : {}; } catch { return {}; } };
             return send(res, 200, {mcpUrl: publicUrl() ? mcpResource() : null, workspaceUrl: publicUrl() ? mcpResource(info.id) : null,
-              apps: listConnections(accounts.db, emails).map(x => ({...x, workspaceName: names.get(x.workspace) ?? x.workspace}))});
+              apps: listConnections(accounts.db, emails).map(x => ({...x, ...who(x), workspaceName: names.get(x.workspace) ?? x.workspace,
+                agents: (() => { try { const w = all().find(y => y.id === x.workspace)!; const me = emails.map(e => memberId(w.tasks, e)).find(Boolean); return me ? agentsOf(w.tasks, me).map(a => ({id: a.id, name: a.name})) : []; } catch { return []; } })()}))});
+          }
+          // Switch a connected app to one of your AI agents (or a new one), or back to you: {workspace, agent: id | 'new' | 'me', name?}.
+          if (c && parts[3] === 'as' && m === 'POST') {
+            const w = all().find(y => y.id === String(body.workspace)); if (!w) throw new NotFound('No such workspace');
+            const me = emails.map(e => memberId(w.tasks, e)).find(Boolean); if (!me) throw new Denied('You are not in that workspace');
+            let person = me;
+            if (body.agent !== 'me') {
+              const mine = agentsOf(w.tasks, me), found = mine.find(a => a.id === body.agent);
+              person = found ? found.id : addAgent(w.tasks, me, {name: String(body.name ?? 'Claude').slice(0, 60), provider: 'claude'}).id;
+            }
+            const n = connectionAs(accounts.db, emails, decodeURIComponent(c), w.id, person);
+            return send(res, 200, {ok: true, changed: n, person});
           }
           if (c && m === 'DELETE') { disconnect(accounts.db, emails, decodeURIComponent(c), q('workspace')); return send(res, 200, {ok: true}); }
         }
@@ -692,7 +716,7 @@ If you did not ask for it, ignore this email.`)
             if (body.kind === 'ai') makeAgent(tasks, b, actor);
             else tasks.db.prepare("update people set kind = 'human' where id = ?").run(b);
           }
-          if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
+          if (body.notifyEmail !== undefined || body.notifyKinds !== undefined) tasks.setEmailAlerts(b, {on: body.notifyEmail, kinds: body.notifyKinds});
           if (body.password) {
             // Passwords belong to accounts, which can be used in other workspaces. An existing account's password
             // changes only from that account, with its current password (pnpm reset-password is the owner's way out).
@@ -728,6 +752,10 @@ If you did not ask for it, ignore this email.`)
           if (body.custom) patch.custom = body.custom;
           if (body.features) patch.features = body.features;
           if (body.aiRules !== undefined) patch.aiRules = body.aiRules;
+          if (body.drawingRules !== undefined) patch.drawingRules = body.drawingRules;
+          if (body.agentBaseRules !== undefined) patch.agentBaseRules = body.agentBaseRules;
+          if (body.agentGuide !== undefined) patch.agentGuide = body.agentGuide;
+          if (body.signPassword !== undefined) patch.signPassword = body.signPassword;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});
@@ -1116,12 +1144,19 @@ If you did not ask for it, ignore this email.`)
           return send(res, 200, list.filter(x => seesItem(x.itemId)));
         }
         if (!b && m === 'POST') { const it = tasks.findItem(body.itemId); need(it.projectId, 'edit'); return send(res, 201, tasks.requestApproval(it.id, actor, body.approvers ?? [], body.meaning ?? 'approved', body.note ?? '')); }
+        if (b === 'needs' && m === 'GET') return send(res, 200, actor ? tasks.signNeeds(actor) : {mode: 'never', password: false, until: null});
+        // Sign several at once (the Approvals page): {ids, decision, comment?, password?}. Tokens cannot sign.
+        if (b === 'sign-many' && m === 'POST') {
+          if (!actor || bearer) throw new Denied('Sign approvals in the app');
+          const ids = (Array.isArray(body.ids) ? body.ids.map(String) : []).filter((id: string) => { const ap = tasks.listApprovals({}).find(x => x.id === id); return ap && seesItem(ap.itemId); });
+          return send(res, 200, tasks.signApprovals(ids, actor, body.decision, String(body.comment ?? ''), body.password || undefined));
+        }
         if (b && c === 'sign' && m === 'POST') {
           if (!actor) throw new Invalid('Pick who you are (or sign in) to sign');
           const ap = tasks.listApprovals({}).find(x => x.id === b);
           if (!ap) throw new NotFound('Approval not found');
           need(tasks.item(ap.itemId).projectId, 'view');
-          return send(res, 200, tasks.signApproval(b, actor, body.decision, String(body.comment ?? ''), body.password));
+          return send(res, 200, tasks.signApproval(b, actor, body.decision, String(body.comment ?? ''), body.password || undefined));
         }
       }
       if (a === 'items' && b && c === 'approval-state' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.approvalState(it.id)); }
@@ -1202,9 +1237,18 @@ If you did not ask for it, ignore this email.`)
         const one = (ref: string) => { const bd = tasks.board(ref); if (!seesB(bd)) throw new NotFound('No such whiteboard'); return bd; };
         const edit = (ref: string) => { const bd = one(ref); if (!editsB(bd)) throw new Denied('You cannot change this whiteboard'); return bd; };
         const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
-        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
+        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'folder', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
         const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
         if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), sop: q('sop'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        if (b === 'conventions' && m === 'GET') return send(res, 200, tasks.boardConventions());
+        // Ask for a change on a board: a task (person or AI) linked to the board, and a sticky note on it.
+        if (b && c === 'request' && m === 'POST') {
+          const bd = one(b), pid = body.projectId ?? bd.projectId;
+          if (pid) need(pid, 'create');
+          const args = [bd.id, String(body.text ?? ''), actor, {node: body.node ?? null, worker: body.worker, assignees: Array.isArray(body.assignees) ? body.assignees : undefined, projectId: body.projectId}] as const;
+          if (held('requestBoardChange', [...args])) return send(res, 202, propose(tasks, actor!, 'requestBoardChange', [...args]));
+          return send(res, 201, tasks.requestBoardChange(...args));
+        }
         // Bring in a board made with Claude Whiteboards: {elements, name?, projectId?}.
         if (b === 'import' && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
@@ -1215,9 +1259,9 @@ If you did not ask for it, ignore this email.`)
         }
         // One board per SOP for every routine (existing SOP boards are kept).
         if (b === 'by-sop' && m === 'POST') {
-          if (held('boardsBySop', [{actor}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor}]));
-          const r = tasks.boardsBySop({actor, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
-          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out)});
+          if (held('boardsBySop', [{actor, aiDraw: !!body.aiDraw}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor, aiDraw: !!body.aiDraw}]));
+          const r = tasks.boardsBySop({actor, aiDraw: !!body.aiDraw, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
+          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out), drawTasks: r.drawTasks});
         }
         if (!b && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
@@ -1289,7 +1333,7 @@ If you did not ask for it, ignore this email.`)
           if (bearer) throw new Denied('A person decides proposals in the app');
           const p0 = getProposal(tasks, b);
           if (p0.itemId) need(tasks.item(p0.itemId).projectId, 'edit');
-          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined}));
+          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined, doer: body.doer ? String(body.doer) : undefined}));
         }
       }
       // ---- Human and AI work: claims, reviews, work log, files ----
@@ -1309,6 +1353,7 @@ If you did not ask for it, ignore this email.`)
         }
         // decision: approve, changes, redo or discard. The older {approve: true|false} still works.
         if (b === 'review' && m === 'POST') return send(res, 200, tasks.reviewWork(it!.id, actor, body.decision ?? !!body.approve, String(body.comment ?? ''), {keep: !!body.keep}));
+        if (b === 'move' && m === 'POST') return send(res, 200, tasks.moveWork(it!.id, actor, body.to, String(body.comment ?? '')));
         if (b === 'cleanup' && m === 'POST') return send(res, 200, tasks.confirmCleanup(it!.id, actor, String(body.artifact ?? ''), String(body.note ?? '')));
         if (b === 'log' && m === 'POST') return send(res, 201, tasks.logWork(it!.id, actor, body.kind ?? 'note', String(body.text ?? ''), body.url ?? null, {session: body.session, artifact: body.artifact}));
       }

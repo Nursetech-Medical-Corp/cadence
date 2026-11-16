@@ -1,12 +1,13 @@
 // Approvals in the UI: the item panel section (request, sign), the Approvals page (what waits for you),
 // and the Workflow rules card in project Settings.
 import {useEffect, useState} from 'react';
-import {FileSignature, ShieldCheck, Workflow} from 'lucide-react';
+import {createPortal} from 'react-dom';
+import {FileSignature, ShieldCheck, Workflow, X} from 'lucide-react';
 import type {Item, Project, TypeRule} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Avatar, Empty, Popover, itemKey} from './components.tsx';
 
-type Approval = {id: string; itemId: string; requestedBy: string | null; approver: string; meaning: string; note: string; decision: 'pending' | 'approved' | 'changes' | 'rejected'; comment: string; signedAt: string | null; signerName: string | null; fingerprint: string | null; passwordChecked: boolean; created: string};
+type Approval = {id: string; itemId: string; requestedBy: string | null; approver: string; meaning: string; note: string; decision: 'pending' | 'approved' | 'changes' | 'rejected'; comment: string; signedAt: string | null; signerName: string | null; fingerprint: string | null; passwordChecked: boolean; auth?: string; created: string};
 const MEANINGS = [['approved', 'Approve'], ['reviewed', 'Review'], ['verified', 'Verify'], ['authored', 'Sign as author']] as const;
 const DECIDED: Record<string, string> = {approved: 'Signed', changes: 'Changes requested', rejected: 'Rejected', pending: 'Waiting'};
 
@@ -14,19 +15,44 @@ const DECIDED: Record<string, string> = {approved: 'Signed', changes: 'Changes r
 const MEANING_LABEL: Record<string, string> = {approved: 'Approval', reviewed: 'Review', verified: 'Verification', authored: 'Author signature'};
 const MEANING_VERB: Record<string, string> = {approved: 'to approve', reviewed: 'to review', verified: 'to verify', authored: 'to sign as author'};
 
-/** Sign from a list (no panel): asks for a password only when the account has one. */
-async function quickSign(store: Store, a: Approval, decision: 'approved' | 'changes', onDone: () => void) {
-  let comment = '';
-  if (decision === 'changes') { const c = prompt('What needs to change?'); if (!c?.trim()) return; comment = c; }
-  const send = (password?: string) => api(`/approvals/${a.id}/sign`, {method: 'POST', body: {decision, comment, password}});
-  try { await send(); }
-  catch (e) {
-    if (!/password/i.test(String((e as Error).message))) { store.fail(e); return; }
-    const pw = prompt('Signing needs your password'); if (!pw) return;
-    try { await send(pw); } catch (e2) { store.fail(e2); return; }
-  }
-  store.flash(decision === 'approved' ? 'Signed' : 'Changes requested');
-  onDone();
+type Needs = {mode: 'every' | 'session' | 'never'; password: boolean; until: string | null};
+
+/** Sign one or many approvals in one in-app dialog: comment when sending back, password only when the workspace asks for it. */
+function SignDialog({store, list, decision, close, done}: {store: Store; list: Approval[]; decision: 'approved' | 'changes'; close: () => void; done: () => void}) {
+  const [needs, setNeeds] = useState<Needs | null>(null);
+  const [comment, setComment] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => { api<Needs>('/approvals/needs').then(setNeeds).catch(() => setNeeds({mode: 'every', password: true, until: null})); }, []);
+  const go = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await api<{signed: Approval[]; failed: {id: string; error: string}[]}>('/approvals/sign-many', {method: 'POST', body: {ids: list.map(a => a.id), decision, comment, password: password || undefined}});
+      store.flash(`${decision === 'approved' ? 'Signed' : 'Sent back'} ${r.signed.length}${r.failed.length ? `; ${r.failed.length} not: ${r.failed[0].error}` : ''}`);
+      done(); close();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    setBusy(false);
+  };
+  const back = decision === 'changes';
+  const n = list.length;
+  return createPortal(<div className="overlay dlg-back" onMouseDown={e => { if (e.target === e.currentTarget) close(); }} onKeyDown={e => { if (e.key === 'Escape') close(); }}>
+    <div className="dlg" role="dialog" aria-modal="true">
+      <button className="icon dlg-x" title="Close (Esc)" onClick={close}><X size={16} /></button>
+      <b>{back ? 'Request changes' : 'Sign'}{n > 1 ? ` ${n} approvals` : ''}</b>
+      <div className="small muted sign-list">{list.slice(0, 8).map(a => { const it = store.items.get(a.itemId); return <div key={a.id}>{it ? `${itemKey(it, store.projects)} ${it.title}` : a.itemId} <span className="tag">{MEANING_LABEL[a.meaning] ?? a.meaning}</span></div>; })}{n > 8 && <div>and {n - 8} more</div>}</div>
+      <textarea className="plain-input" rows={3} autoFocus placeholder={back ? 'What needs to change (needed)' : 'Comment (optional)'} value={comment} onChange={e => setComment(e.target.value)} />
+      {needs?.password && <input className="plain-input" type="password" placeholder={needs.mode === 'session' ? 'Your password (then no more for 8 hours)' : 'Your password'} value={password} onChange={e => setPassword(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') go(); }} />}
+      {needs && !needs.password && needs.until && <div className="small muted">Signed in for signing until {new Date(needs.until).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})}. No password needed.</div>}
+      {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
+      <div className="small muted">{back ? 'The comment goes to whoever asked.' : 'Signing records you, the meaning, the time and a fingerprint of each item as it is now.'}</div>
+      <div className="dlg-actions">
+        <button className="btn" onClick={close}>Cancel</button>
+        <button className={'btn ' + (back ? '' : 'primary')} disabled={busy || !needs || (back && !comment.trim()) || (!!needs?.password && !password)} onClick={go}>{back ? <>Send back</> : <><ShieldCheck size={13} /> Sign{n > 1 ? ` ${n}` : ''}</>}</button>
+      </div>
+    </div>
+  </div>, document.body);
 }
 
 export function ApprovalsSection({item, store, me}: {item: Item; store: Store; me: string}) {
@@ -67,7 +93,7 @@ export function ApprovalsSection({item, store, me}: {item: Item; store: Store; m
           <div className="grow">
             <div className="small"><b>{person(a.approver)?.name}</b> <span className="muted">{MEANING_VERB[a.meaning] ?? a.meaning}</span> <span className={'tag'}>{DECIDED[a.decision]}</span></div>
             {a.note && <div className="small muted">Request: {a.note}</div>}
-            {a.signedAt && <div className="small muted">{a.signerName}, {new Date(a.signedAt).toLocaleString()}{a.passwordChecked ? ', identity confirmed by password' : ', no password on file'}{a.comment ? `. "${a.comment}"` : ''}</div>}
+            {a.signedAt && <div className="small muted">{a.signerName}, {new Date(a.signedAt).toLocaleString()}{a.auth === 'password' ? ', password entered' : a.auth === 'session' ? ', password entered earlier this session' : ', no password asked'}{a.comment ? `. "${a.comment}"` : ''}</div>}
             {a.decision === 'pending' && a.approver === me && <><HandedIn approval={a} store={store} /><SignBox approval={a} store={store} onDone={load} /></>}
           </div>
         </div>
@@ -92,6 +118,8 @@ function SignBox({approval, store, onDone}: {approval: Approval; store: Store; o
   const [comment, setComment] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [needs, setNeeds] = useState<Needs | null>(null);
+  useEffect(() => { api<Needs>('/approvals/needs').then(setNeeds).catch(() => {}); }, [approval.id]);
   const go = async (decision: string) => {
     setBusy(true);
     try { await api(`/approvals/${approval.id}/sign`, {method: 'POST', body: {decision, comment, password}}); setPassword(''); onDone(); } catch (e) { store.fail(e); }
@@ -101,12 +129,12 @@ function SignBox({approval, store, onDone}: {approval: Approval; store: Store; o
     <div className="sign-box">
       <textarea className="comment-box" style={{minHeight: 44}} placeholder="Comment (needed to request changes or reject)" value={comment} onChange={e => setComment(e.target.value)} />
       <div className="review-actions">
-        <input className="plain-select" type="password" placeholder="Your password to sign" value={password} onChange={e => setPassword(e.target.value)} style={{width: 170}} />
+        {needs?.password && <input className="plain-select" type="password" placeholder="Your password to sign" value={password} onChange={e => setPassword(e.target.value)} style={{width: 170}} />}
         <button className="btn primary small" disabled={busy} onClick={() => go('approved')}><ShieldCheck size={12} /> Sign</button>
         <button className="btn small" disabled={busy || !comment.trim()} onClick={() => go('changes')}>Request changes</button>
         <button className="btn small danger" disabled={busy || !comment.trim()} onClick={() => go('rejected')}>Reject</button>
       </div>
-      <div className="muted small">By signing you confirm the meaning shown above for this version of the item. Leave the password empty only if you have none set.</div>
+      <div className="muted small">By signing you confirm the meaning shown above for this version of the item.{needs?.mode === 'session' && needs.password ? ' Your password is asked once, then not again for 8 hours.' : ''}</div>
     </div>
   );
 }
@@ -115,6 +143,8 @@ function SignBox({approval, store, onDone}: {approval: Approval; store: Store; o
 export function ApprovalsPage({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [mine, setMine] = useState<Approval[]>([]);
   const [all, setAll] = useState<Approval[]>([]);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [signing, setSigning] = useState<{list: Approval[]; decision: 'approved' | 'changes'} | null>(null);
   const reload = () => {
     api<Approval[]>('/approvals?mine=1&pending=true').then(setMine).catch(() => {});
     api<Approval[]>('/approvals').then(setAll).catch(() => {});
@@ -123,8 +153,10 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
   const row = (a: Approval) => {
     const it = store.items.get(a.itemId);
     if (!it) return null;
-    return <div key={a.id} className="row" style={{cursor: 'pointer'}} onClick={() => open(it.id)}>
-      <FileSignature size={14} className="muted" />
+    const mineNow = a.decision === 'pending' && a.approver === me;
+    return <div key={a.id} className={'row appr-row' + (sel.has(a.id) ? ' sel' : '')} style={{cursor: 'pointer'}} onClick={() => open(it.id)}>
+      {mineNow ? <input type="checkbox" checked={sel.has(a.id)} onClick={e => e.stopPropagation()} onChange={() => setSel(p => { const n = new Set(p); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n; })} title="Select to sign several at once" />
+        : <FileSignature size={14} className="muted" />}
       <span className="muted small">{itemKey(it, store.projects)}</span>
       <span className="grow">{it.title}</span>
       <span className="tag" title="What signing means">{MEANING_LABEL[a.meaning] ?? a.meaning}</span>
@@ -132,8 +164,8 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
       <Avatar person={store.people.find(p => p.id === a.approver)} size={18} />
       {a.decision === 'pending' && a.approver === me
         ? <span className="row-actions" onClick={e => e.stopPropagation()}>
-            <button className="btn primary small" title="Sign it now" onClick={() => quickSign(store, a, 'approved', reload)}><ShieldCheck size={12} /> Sign</button>
-            <button className="btn small" title="Send it back with a comment" onClick={() => quickSign(store, a, 'changes', reload)}>Changes</button>
+            <button className="btn primary small" title="Sign it now" onClick={() => setSigning({list: [a], decision: 'approved'})}><ShieldCheck size={12} /> Sign</button>
+            <button className="btn small" title="Send it back with a comment" onClick={() => setSigning({list: [a], decision: 'changes'})}>Changes</button>
           </span>
         : <span className={'small ' + (a.decision === 'approved' ? 'good' : a.decision === 'pending' ? 'muted' : 'overdue')}>{DECIDED[a.decision]}</span>}
     </div>;
@@ -142,7 +174,14 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
     <div className="page">
       <h1><FileSignature size={20} /> Approvals</h1>
       <p className="muted">Signatures record who, what it means, when, and a fingerprint of the item at that moment. Sign right here, or open the item to read it first. Work an AI agent hands in is decided by your signature too.</p>
-      <h3>Waiting for you <span className="count">{mine.length}</span></h3>
+      {store.settings.admin && <SignSetting store={store} />}
+      {signing && <SignDialog store={store} list={signing.list} decision={signing.decision} close={() => setSigning(null)} done={() => { setSel(new Set()); reload(); }} />}
+      <h3>Waiting for you <span className="count">{mine.length}</span>
+        {mine.length > 1 && <span className="appr-bulk">
+          <button className="btn ghost small" onClick={() => setSel(sel.size === mine.length ? new Set() : new Set(mine.map(a => a.id)))}>{sel.size === mine.length ? 'Clear' : 'Select all'}</button>
+          {sel.size > 0 && <><button className="btn primary small" onClick={() => setSigning({list: mine.filter(a => sel.has(a.id)), decision: 'approved'})}><ShieldCheck size={12} /> Sign {sel.size}</button>
+            <button className="btn small" onClick={() => setSigning({list: mine.filter(a => sel.has(a.id)), decision: 'changes'})}>Request changes on {sel.size}</button></>}
+        </span>}</h3>
       {mine.map(row)}
       {!mine.length && <p className="muted small">Nothing waiting for your signature.</p>}
       <h3>You asked others</h3>
@@ -152,6 +191,22 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
       {!all.length && <Empty title="No approvals yet">Open any item and press Request approval.</Empty>}
     </div>
   );
+}
+
+/** Admins: how often signing asks for a password. */
+function SignSetting({store}: {store: Store}) {
+  const [mode, setMode] = useState<string | null>(null);
+  useEffect(() => { api<Needs>('/approvals/needs').then(n => setMode(n.mode)).catch(() => {}); }, []);
+  if (!mode) return null;
+  const save = async (v: string) => { try { await api('/workspace', {method: 'PUT', body: {signPassword: v}}); setMode(v); store.flash('Saved'); } catch (e) { store.fail(e); } };
+  return <div className="set-item appr-setting">
+    <span className="grow small">Signing asks for your password <span className="muted">(admins set this for the workspace; AI agents and tokens can never sign)</span></span>
+    <select className="plain-select" value={mode} onChange={e => save(e.target.value)}>
+      <option value="session">Once, then not for 8 hours</option>
+      <option value="every">Every signature</option>
+      <option value="never">Never (sign with one click)</option>
+    </select>
+  </div>;
 }
 
 /** Settings card: rules per item type. */

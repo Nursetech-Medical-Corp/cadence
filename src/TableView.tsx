@@ -12,6 +12,7 @@ import {useQuickAssist} from './QuickAssist.tsx';
 import {RoutineMark, SopLinks, peopleFor} from './RoutineControls.tsx';
 import {nextOccurrence} from './recur.ts';
 import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
+import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
 export const DEFAULT_HIDDEN = ['start', 'tags', 'parent'];
@@ -272,7 +273,7 @@ function ColumnHeader({col, sorts, setSorts, hide, project, store}: {
         {mine && <button className="pop-row" onClick={() => { setSorts(sorts.filter(s => s.col !== col.id)); setOpen(false); }}>Remove this sort</button>}
         {sorts.length > 0 && <button className="pop-row" onClick={() => { setSort(null); setOpen(false); }}>Clear all sorting</button>}
         {col.id !== 'title' && <button className="pop-row" onClick={() => { hide(); setOpen(false); }}><EyeOff size={14} /> Hide column</button>}
-        {field && <button className="pop-row" style={{color: 'var(--danger)'}} onClick={() => { if (confirm(`Delete field "${field.name}" from this space? Values stay on items but are hidden.`)) store.updateProject(project.id, {fields: project.fields.filter(f => f.id !== field.id)}); setOpen(false); }}><Trash2 size={14} /> Delete field</button>}
+        {field && <button className="pop-row" style={{color: 'var(--danger)'}} onClick={async () => { if ((await uiConfirm(`Delete field "${field.name}" from this space? Values stay on items but are hidden.`))) store.updateProject(project.id, {fields: project.fields.filter(f => f.id !== field.id)}); setOpen(false); }}><Trash2 size={14} /> Delete field</button>}
       </Popover>
     </span>
   );
@@ -356,7 +357,7 @@ function InsertRow({store, types, cols, onAdd, onDone}: {store: Store; types: st
 
 // Extra columns in the built-in spaces. Routines: mode (who runs it), on/off switch, the date after this one, SOP link.
 const MODES = [['auto-job', 'Auto job'], ['hybrid', 'Hybrid'], ['manual', 'Manual']] as const;
-const routineAct = (store: Store, id: string, action: string) => api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [id], action}}).then(r => { if (r.errors?.length) alert(r.errors.join('\n')); }).catch(e => store.fail(e));
+const routineAct = (store: Store, id: string, action: string) => api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [id], action}}).then(r => { if (r.errors?.length) void uiAlert(r.errors.join('\n')); }).catch(e => store.fail(e));
 function routineCols(project: Project, store: Store): Col[] {
   if (project.settings.rollup?.scope !== 'routines') return [];
   const modeOf = (i: Item) => MODES.find(([m]) => i.tags.includes(m))?.[0] ?? '';

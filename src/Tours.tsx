@@ -76,13 +76,12 @@ export const TOURS: Tour[] = [
     {go: '/ai', sel: '.board', title: 'The AI work board', text: 'Tasks marked for AI flow left to right: ready, claims to approve, working, ready for review, approved.'},
     {go: '/ai', sel: '.board', title: 'Review', text: 'Read the report, open links and screenshots, then Approve or Send back with a comment. Everything the agent did is in the item\'s work log.'},
   ]},
-  {id: 'claude', title: 'Connect Claude as an agent', minutes: 3, summary: 'Paste the key into Claude, schedule its runs, approve its work.', steps: () => [
-    {go: '/team', sel: '.agents-card', title: 'Do you need this?', text: 'No, if you only want Claude to help while you chat: your Cadence connector already does that as you. Yes, if Claude should check for work on a schedule and act under its own name, with its changes waiting for you.'},
-    {sel: '.agents-card', title: 'Make the agent', text: 'Type a name like David\'s Claude, pick Claude, press Add agent. Leave Changes it makes on Wait for my approval to start.'},
-    {sel: '.agents-card', title: 'Get the key', text: 'Press Get connection key. You get an address with the key built in. It is shown once; anyone with it acts as this agent.'},
-    {title: 'Add it to Claude', text: 'In Claude: Settings (or Customize), Connectors, +, Add custom connector. Name it Cadence agent, paste the address, leave OAuth empty, Add. Free plans allow one custom connector; on Team and Enterprise an Owner adds it first, then you press Connect.'},
-    {title: 'Schedule the runs', text: 'Make a scheduled task in Claude with the prompt shown under the key, on the cadence you set (Checks for work). Turn on only the Cadence agent connector for that task, so it acts as the agent and not as you.'},
-    {go: '/ai', sel: '.board, .page', title: 'Approve what it does', text: 'Its claims, finished work and held changes land here and in your notifications. Approve, edit or reject. To let it skip approval for a routine job, list that SOP code under Approved AI SOPs.'},
+  {id: 'claude', title: 'Connect Claude as an agent', minutes: 3, summary: 'One address in Claude; it joins as its own AI agent you own, and its work waits for you.', steps: () => [
+    {go: '/team', sel: '.set-card', title: 'Connect Claude', text: 'On this page, Connect Claude shows one address. In Claude: Settings, Connectors, Add custom connector, paste it, Connect.'},
+    {title: 'Pick who it works as', text: 'When you allow it, keep Its own AI agent (pick one you have, or name a new one like Claude). It is a teammate you own, marked AI, never you. Pick You only for help while you are at the keyboard.'},
+    {go: '/team', sel: '.agents-card', title: 'Your agent', text: 'It shows under My AI agents. Set its role and rules, the spaces it works in, and keep Changes it makes on Wait for my approval.'},
+    {title: 'Give it work', text: 'Assign tasks to it like anyone else, or mark tasks AI or Either so it can claim them. For runs on a schedule, make a scheduled task in Claude with the prompt shown under Get connection key.'},
+    {go: '/ai', sel: '.board, .page', title: 'Approve what it does', text: 'Its claims, finished work and held changes land here. Approve, send back or discard; drag a card to move it yourself. Several agents can suggest the same task; you pick who does it.'},
   ]},
   {id: 'chatgpt', title: 'Connect ChatGPT as an agent', minutes: 3, summary: 'Developer mode, a custom app with the key, and a scheduled task.', steps: () => [
     {go: '/team', sel: '.agents-card', title: 'Make the agent', text: 'Under My AI agents: name it (like David\'s ChatGPT), pick ChatGPT, Add agent, then Get connection key. The key is its login; keep it private.'},
@@ -191,7 +190,8 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
   const cardLeft = box ? Math.min(Math.max(12, box.left), innerWidth - 352) : innerWidth / 2 - 170;
   return (
     <div className="tour">
-      {box ? <div className="tour-hole" style={box} /> : <div className="tour-dim" />}
+      {/* Clicking the dark area ends the tour too, so it can never trap the screen. */}
+      {box ? <><div className="tour-catch" title="Click outside the highlight to end the tour" onClick={e => { const b = box!; if (e.clientX < b.left || e.clientX > b.left + b.width || e.clientY < b.top || e.clientY > b.top + b.height) close(); }} /><div className="tour-hole" style={box} /></> : <div className="tour-dim" onClick={close} title="End tour" />}
       <div className="tour-card" style={{top: cardTop, left: cardLeft}}>
         <div className="tour-top"><span className="muted small">{tour.title}, {n + 1} of {steps.length}</span><span className="spacer" /><button className="icon" onClick={close} title="End tour (Esc)"><X size={14} /></button></div>
         <b>{step.title}</b>
@@ -199,8 +199,9 @@ export function TourRunner({tour, store, close}: {tour: Tour; store: Store; clos
         {missing && <p className="small">No space has a {VIEW_LABELS[step.need!] ?? step.need} view yet. <button className="btn small" onClick={addView}>Add one to {missing.name}</button></p>}
         <div className="tour-dots">{steps.map((_, k) => <span key={k} className={k === n ? 'on' : ''} />)}</div>
         <div className="tour-actions">
-          {n > 0 && <button className="btn small" onClick={() => setN(n - 1)}>Back</button>}
+          <button className="btn ghost small" onClick={close}>End tour</button>
           <span className="spacer" />
+          {n > 0 && <button className="btn small" onClick={() => setN(n - 1)}>Back</button>}
           <button className="btn primary small" onClick={next}>{n < steps.length - 1 ? 'Next' : 'Done'}</button>
         </div>
       </div>

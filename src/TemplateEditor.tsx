@@ -8,6 +8,7 @@ import {ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Pl
 import type {Recur, Status, Template} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Empty} from './components.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 export type Step = {
   type?: string; title: string; body?: string; priority?: number; tags?: string[]; estimate?: number | null; recur?: Recur | null;
@@ -155,7 +156,7 @@ export function TemplateEditor({store, id}: {store: Store; id: string}) {
     if (!dirty) return;
     const here = location.hash;
     const warn = (e: BeforeUnloadEvent) => e.preventDefault();
-    const leave = () => { if (location.hash !== here && !confirm('Leave without saving your template changes?')) history.pushState(null, '', here); };
+    const leave = async () => { if (location.hash !== here && !(await uiConfirm('Leave without saving your template changes?'))) history.pushState(null, '', here); };
     addEventListener('beforeunload', warn); addEventListener('hashchange', leave);
     return () => { removeEventListener('beforeunload', warn); removeEventListener('hashchange', leave); };
   }, [dirty]);
@@ -166,7 +167,7 @@ export function TemplateEditor({store, id}: {store: Store; id: string}) {
     try { const x = await api<Template>(`/templates/${id}`, {method: 'PATCH', body: {name, data}}); setT(x); setDirty(false); setMsg('Saved.'); }
     catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
   };
-  const back = () => { if (!dirty || confirm('Leave without saving your changes?')) location.hash = '/templates'; };
+  const back = async () => { if (!dirty || (await uiConfirm('Leave without saving your changes?'))) location.hash = '/templates'; };
   const pd = data as ProjectData;
   return (
     <div className="page" style={{maxWidth: 1200}}>

@@ -1,4 +1,5 @@
 // MCP server over stdio. Shares the SQLite file with the web app; the UI updates live.
+import {DEFAULT_AGENT_GUIDE} from '../src/agentRules.ts';
 import {monday} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, listEvents, timeblockItem, updateEvent} from './events.ts';
@@ -73,7 +74,7 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   };
 
   tool('get_guide', 'Read the guide for AI agents: concepts, field meanings, quick-add syntax, recipes for common jobs. Read this first.', {}, true,
-    () => ({guide: readGuide(), ...(getWorkspace(tasks.db).aiRules ? {workspaceRules: getWorkspace(tasks.db).aiRules} : {})}));
+    () => { const w = getWorkspace(tasks.db); return {guide: readGuide(), agentGuide: w.agentGuide.trim() || DEFAULT_AGENT_GUIDE, ...(w.aiRules ? {workspaceRules: w.aiRules} : {})}; });
   server.registerResource('guide', 'tasks://guide', {mimeType: 'text/markdown', description: 'How to use this task app as an AI agent'}, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: readGuide()}]}));
   tool('get_workspace', 'List projects (with statuses, types, custom fields) and people.', {}, true,
     () => ({projects: tasks.listProjects(), people: people(), today: tasks.today(), actingAs: actor}));
@@ -147,6 +148,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('resolve_comment', 'Mark a comment (often one assigned to someone) resolved, or open it again.', {comment: z.string().describe('Comment id'), resolved: z.boolean().optional()}, false,
     i => tasks.resolveComment(i.comment, actor, i.resolved ?? true));
   tool('my_notifications', 'Your notifications, newest first.', {unread_only: z.boolean().optional()}, true, i => tasks.listNotifications(me(), !!i.unread_only));
+  tool('email_alerts', 'Your email alerts: whether notifications also come by email, and which groups (assigned, comments, approvals, completed, reminders, automations, other; null means all). Pass on or kinds to change them.',
+    {on: z.boolean().optional(), kinds: z.array(z.enum(['assigned', 'comments', 'approvals', 'completed', 'reminders', 'automations', 'other'])).nullable().optional()}, false,
+    i => i.on === undefined && i.kinds === undefined ? tasks.emailAlerts(me()) : tasks.setEmailAlerts(me(), {on: i.on, kinds: i.kinds}));
   tool('mark_notifications_read', 'Mark your notifications read (all, or these ids).', {ids: z.array(z.string()).optional()}, false, i => { tasks.markRead(me(), i.ids); return {ok: true}; });
 
   // ---- Time ----
@@ -294,8 +298,12 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('import_board', 'Bring in a board made with Claude Whiteboards: pass its elements (shape, text, container, table, arrow, link, as an array or an object by id). Sections become frames, blocks keep their color and shape, text keeps its size, tables keep their columns, arrows keep labels and dashes. Pen strokes, pictures, embeds and stickers are skipped and counted.',
     {elements: z.union([z.array(z.record(z.string(), z.any())), z.record(z.string(), z.any())]), name: z.string().optional(), project: z.string().optional()}, false,
     i => { const r = tasks.importBoard({elements: i.elements as any, name: i.name, projectId: i.project ? projectId(i.project) : null}, actor) as any; return r?.proposal ? r : {id: r.board.id, name: r.board.name, imported: r.imported, skipped: r.skipped}; });
-  tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it.', {}, false,
-    () => { const r = tasks.boardsBySop({actor}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop}))}; });
+  tool('boards_by_sop', 'Make one whiteboard per SOP for every routine with an SOP tag (its routines in order, a title, and the SOP document). SOPs that already have a board keep it. ai_draw: also make a task per new board for an AI agent to draw the full flow from the SOP document.', {ai_draw: z.boolean().optional()}, false,
+    i => { const r = tasks.boardsBySop({actor, aiDraw: i.ai_draw}) as any; return r?.proposal ? r : {made: r.made.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), kept: r.kept.map((b: any) => ({id: b.id, name: b.name, sop: b.sop})), drawTasks: (r.drawTasks ?? []).map((t: any) => ({id: t.id, title: t.title}))}; });
+  tool('board_conventions', 'How to draw SOP flows on whiteboards: which card or shape for each kind of step, lanes and colors by who does it, arrows, and what every board needs. Read before drawing or changing a flow.', {}, true, () => tasks.boardConventions());
+  tool('request_board_change', 'Ask for a change on a whiteboard: makes a task in the board\'s space (for a person or an AI agent) linked to the board and, if given, the card, and puts a sticky note on the board.',
+    {board: z.string(), text: z.string(), node: z.string().optional().describe('Card id the change is about'), worker: z.enum(['human', 'ai', 'either']).optional(), assign: z.array(z.string()).optional()}, false,
+    i => tasks.requestBoardChange(i.board, i.text, actor, {node: i.node, worker: i.worker, assignees: i.assign?.map(personId)}));
   tool('board_to_tasks', 'Create real tasks from a whiteboard\'s task cards that have no item yet (in the board\'s space, or project), with arrows as dependencies and repeat as routines. Linked cards are left alone.',
     {board: z.string(), project: z.string().optional(), parent: z.string().optional()}, false,
     i => tasks.boardToTasks(boardRef(i.board), actor, {projectId: i.project ? projectId(i.project) : undefined, parentId: i.parent ? tasks.findItem(i.parent).id : undefined}));
@@ -454,6 +462,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
       if (i.decision === undefined && i.approve === undefined) throw new Error('Pass decision: approve, changes, redo or discard');
       return tasks.reviewWork(tasks.findItem(i.item).id, actor, (i.decision ?? i.approve!) as never, i.comment ?? '', {keep: i.keep});
     });
+  tool('move_ai_work', 'For human reviewers: move AI work to another lane of the AI work board. working: accept a claim or send submitted work back. review: mark work in progress as handed in. done: approve (hands it in first if needed). discarded: discard the work.',
+    {item: z.string(), to: z.enum(['working', 'review', 'done', 'discarded']), comment: z.string().optional()}, false,
+    i => tasks.moveWork(tasks.findItem(i.item).id, actor, i.to, i.comment ?? ''));
   tool('decide_claim', 'For human reviewers: accept or decline an AI claim on a task.', {item: z.string(), accept: z.boolean(), note: z.string().optional()}, false,
     i => tasks.decideClaim(tasks.findItem(i.item).id, actor, i.accept, i.note ?? ''));
   // Plugins: add-ons made of data (themes, built-in modules, pages of safe blocks, view presets, setups). Nothing in them runs.

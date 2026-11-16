@@ -201,14 +201,20 @@ export const isOAuthAccess = (header: string | undefined) => /^Bearer\s+cda_[\w-
 
 // ---- Connected apps ----
 
-export type Connection = {clientId: string; name: string; workspace: string; email: string; connected: string; lastUsed: string | null};
+export type Connection = {person: string; clientId: string; name: string; workspace: string; email: string; connected: string; lastUsed: string | null};
 /** One row per app and workspace these accounts approved and have not disconnected. */
 export function listConnections(db: Db, emails: string[]): Connection[] {
   if (!emails.length) return [];
-  return db.prepare(`select c.id as clientId, c.name, t.workspace, t.email, min(t.created) as connected, max(t.last_used) as lastUsed
+  return db.prepare(`select c.id as clientId, c.name, t.workspace, t.email, t.person, min(t.created) as connected, max(t.last_used) as lastUsed
     from oauth_tokens t join oauth_clients c on c.id = t.client_id
     where t.email in (${emails.map(() => '?').join(',')}) and t.revoked is null and t.refresh_expires > ?
-    group by c.id, t.workspace, t.email order by connected desc`).all(...emails, at()) as Connection[];
+    group by c.id, t.workspace, t.email, t.person order by connected desc`).all(...emails, at()) as Connection[];
+}
+/** Point an app the person connected at another identity (one of their AI agents, or themselves) without reconnecting. */
+export function connectionAs(db: Db, emails: string[], clientId: string, workspace: string, person: string) {
+  if (!emails.length) return 0;
+  return Number(db.prepare(`update oauth_tokens set person = ? where client_id = ? and workspace = ? and email in (${emails.map(() => '?').join(',')}) and revoked is null`)
+    .run(person, clientId, workspace, ...emails).changes);
 }
 export function disconnect(db: Db, emails: string[], clientId: string, workspace?: string) {
   if (!emails.length) return;
@@ -264,6 +270,9 @@ export type OAuthContext = {
   /** Known workspace ids, for ?ws= in resource metadata. */
   workspaceIds: () => string[];
   alive: (g: Grant) => boolean;
+  /** The AI agents this person owns in a workspace, and making a new one (connecting Claude as its own agent, not as the person). */
+  agents: (workspace: string, owner: string) => {id: string; name: string}[];
+  newAgent: (workspace: string, owner: string, name: string) => {id: string; name: string};
   /** Whether people sign in on this server at all (open mode has no accounts to approve with). */
   signInOn: boolean;
 };
@@ -337,7 +346,17 @@ async function authorize(req: IncomingMessage, res: ServerResponse, url: URL, ct
     if (input.get('decision') !== 'allow') return redirect(res, denialRedirect(r), [clearNext]);
     const w = spaces.find(s => s.id === input.get('workspace'));
     if (!w) return redirect(res, here);
-    return redirect(res, approvalRedirect(r, issueCode(db, r, {email: w.email, workspace: w.id, person: w.person})), [clearNext]);
+    // Work as: one of the person's AI agents (the default: its work is separate, marked AI and waits for approval) or the person.
+    let person = w.person;
+    if (input.get('as') !== 'me') {
+      const pick = input.get('agent') ?? 'new', mine = ctx.agents(w.id, w.person);
+      const name = (input.get('agentName') ?? '').trim() || r.client.name;
+      // An agent of theirs with that name is reused, so connecting again does not make a second one.
+      const found = mine.find(a => a.id === pick) ?? (pick === 'new' ? mine.find(a => a.name.toLowerCase() === name.toLowerCase()) : undefined);
+      try { person = found ? found.id : ctx.newAgent(w.id, w.person, name).id; }
+      catch (e) { return page(res, 400, 'Cannot connect', `<p>${esc((e as Error).message)}</p><p><a href="${esc(here)}">Back</a></p>`); }
+    }
+    return redirect(res, approvalRedirect(r, issueCode(db, r, {email: w.email, workspace: w.id, person})), [clearNext]);
   }
   if (!spaces.length) return page(res, 403, 'Cannot connect', `<p>You are signed in as <b>${esc(email)}</b>, but that account is not a member of any workspace here. Ask an admin to invite you.</p>`, [clearNext]);
   const first = spaces.find(s => s.id === r.ws) ?? spaces[0];
@@ -346,9 +365,17 @@ async function authorize(req: IncomingMessage, res: ServerResponse, url: URL, ct
   const picker = spaces.length > 1
     ? `<label class="ws">Workspace<select name="workspace">${spaces.map(s => `<option value="${esc(s.id)}"${s.id === first.id ? ' selected' : ''}>${esc(s.name)} (as ${esc(s.personName)})</option>`).join('')}</select></label>`
     : `<input type="hidden" name="workspace" value="${esc(first.id)}">`;
-  const body = `<p><b>${esc(r.client.name)}</b> wants to use Cadence as you: <b>${esc(first.personName)}</b> (${esc(email)})${spaces.length === 1 ? ` in <b>${esc(first.name)}</b>` : ''}.</p>
-    <ul><li>See the spaces and tasks you can see</li><li>Create, update and comment on work, only as far as your role allows</li><li>It cannot sign approvals or change who has access</li></ul>
+  const mine = spaces.flatMap(s => ctx.agents(s.id, s.person).map(a => ({...a, ws: s.name})));
+  const agentPick = `<select name="agent">${mine.map(a => `<option value="${esc(a.id)}">${esc(a.name)}${spaces.length > 1 ? ` (${esc(a.ws)})` : ''}</option>`).join('')}<option value="new"${mine.length ? '' : ' selected'}>New agent</option></select>
+      <input name="agentName" value="${esc(r.client.name)}" placeholder="Name for a new agent" aria-label="Name for a new agent">`;
+  const body = `<p><b>${esc(r.client.name)}</b> wants to use Cadence${spaces.length === 1 ? ` in <b>${esc(first.name)}</b>` : ''}, approved by <b>${esc(first.personName)}</b> (${esc(email)}).</p>
     <form method="post" action="/oauth/authorize">${hidden}<input type="hidden" name="csrf" value="${csrfFor(session)}">${picker}
+    <fieldset class="as"><legend>It works as</legend>
+      <label class="opt"><input type="radio" name="as" value="agent" checked> <span><b>Its own AI agent</b>, owned by you. Everything it does is marked AI, separate from your work, and waits for your approval. You assign tasks to it like a teammate.</span></label>
+      <div class="agentpick">${agentPick}</div>
+      <label class="opt"><input type="radio" name="as" value="me"> <span><b>You</b>. It acts with your name and your permissions, and its changes apply right away. Only for when you are at the keyboard.</span></label>
+    </fieldset>
+    <ul><li>It sees only what that identity can see</li><li>It cannot sign approvals or change who has access</li></ul>
     <p class="note">After you allow, you go back to <b>${esc(host)}</b>. Only allow apps you just set up yourself. You can disconnect any time under Connected apps on the Team page (My account).</p>
     <div class="row"><button name="decision" value="deny" class="ghost">Cancel</button><button name="decision" value="allow" class="primary">Allow</button></div></form>`;
   return page(res, 200, `Connect ${r.client.name} to Cadence?`, body, [clearNext]);
@@ -369,6 +396,6 @@ body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:c
 .card{background:#fff;border:1px solid #e3e6eb;border-radius:12px;padding:28px;max-width:440px;width:calc(100% - 32px);box-shadow:0 2px 10px rgba(0,0,0,.04)}
 h1{font-size:20px;margin:0 0 14px}ul{padding-left:20px}.note{font-size:13px;color:#5b6472}.row{display:flex;gap:10px;margin-top:16px}
 button{flex:1;font:inherit;font-weight:600;padding:10px;border-radius:8px;cursor:pointer}.primary{background:#7c5cff;color:#fff;border:1px solid #7c5cff}.ghost{background:#fff;border:1px solid #cfd4dc;color:#1f2430}
-.ws{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#5b6472}select{font:inherit;padding:8px;border-radius:8px;border:1px solid #cfd4dc}
+.ws{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#5b6472}fieldset.as{border:1px solid #e3e6eb;border-radius:10px;padding:10px 12px;margin:12px 0;display:flex;flex-direction:column;gap:10px}legend{font-size:13px;color:#5b6472;padding:0 4px}.opt{display:flex;gap:8px;align-items:flex-start;font-size:14px}.opt input{margin-top:4px}.agentpick{display:flex;gap:8px;margin-left:24px}.agentpick input{flex:1;font:inherit;padding:8px;border-radius:8px;border:1px solid #cfd4dc;min-width:0}select{font:inherit;padding:8px;border-radius:8px;border:1px solid #cfd4dc}
 </style></head><body><main class="card"><h1>${esc(title)}</h1>${body}</main></body></html>`);
 }

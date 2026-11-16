@@ -6,6 +6,7 @@ import {Check, ChevronDown, Plus, Settings2, Sun, Trash2} from 'lucide-react';
 import type {Item} from './types.ts';
 import {api, apiIn, getMe, meIn, switchWorkspace, wsId, type Store} from './store.ts';
 import {Empty, Popover, itemKey} from './components.tsx';
+import {uiAlert, uiPrompt} from './dialogs.tsx';
 
 export type Workspace = {id: string; name: string; color: string; icon: string; logo?: string; sort: number};
 const COLORS = ['#7c5cff', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#6366f1', '#64748b'];
@@ -87,9 +88,9 @@ export function WorkspaceSwitcher({store, me}: {store: Store; me: string}) {
           <button className="pop-row" onClick={() => { setName(''); setIcon(''); setColor(COLORS[list.length % COLORS.length]); setMode('new'); }}><Plus size={14} /> New workspace</button>
           {cur && <button className="pop-row" onClick={() => { setName(cur.name); setIcon(cur.icon); setColor(cur.color); setLogo(cur.logo ?? ''); setMode('edit'); }}><Settings2 size={14} /> Rename or recolor {cur.name}</button>}
           {cur && cur.id !== 'main' && <button className="pop-row danger-row" onClick={async () => {
-            const typed = prompt(`Delete the workspace "${cur.name}"? Its spaces, people and files are moved to a deleted folder on this computer and disappear from the app. Type the name to confirm.`);
+            const typed = (await uiPrompt(`Delete the workspace "${cur.name}"? Its spaces, people and files are moved to a deleted folder on this computer and disappear from the app. Type the name to confirm.`));
             if (typed === null) return;
-            try { await api(`/workspaces/${cur.id}?confirm=${encodeURIComponent(typed)}`, {method: 'DELETE'}); switchWorkspace('main'); } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
+            try { await api(`/workspaces/${cur.id}?confirm=${encodeURIComponent(typed)}`, {method: 'DELETE'}); switchWorkspace('main'); } catch (e) { void uiAlert(e instanceof Error ? e.message : String(e)); }
           }}><Trash2 size={14} /> Delete {cur.name}</button>}
         </>}
         {mode === 'new' && <><div className="pop-label">New workspace</div><div className="muted small" style={{padding: '0 8px 4px'}}>Its own spaces, people, templates and backups. You join as its admin and are its only member until you invite people; admins of your other workspaces cannot see into it.</div>{form(create, 'Create and open')}</>}

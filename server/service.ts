@@ -1,5 +1,6 @@
 // All reads and writes go through here: the HTTP API, MCP server and tests share it,
 // so anything a person can do in the UI an agent can do too.
+import * as alerts from './alerts.ts';
 import {syncHours} from '../src/hours.ts';
 import {exportAll} from './backup.ts';
 import {getWorkspace} from './auth.ts';
@@ -21,6 +22,7 @@ import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateDa
 import {DATE_TRIGGERS, apply as applyRule, matches as ruleMatches, validateRules, type RuleContext, type RuleHost} from './automations.ts';
 import {cleanHooks, cleanRuleSecrets, listDeliveries, queueHooks, saveWorkspaceHooks, workspaceHooks} from './webhooks.ts';
 import {normalizeHook} from '../src/hooks.ts';
+import {DEFAULT_DRAWING_RULES} from '../src/flowRules.ts';
 import {PluginCatalog, checkManifest, install as installPluginRow, listInstalls, migratePluginInstalls, pluginEffects, setInstall, uninstall as uninstallPluginRow, type Manifest} from './plugins.ts';
 import {PRIORITIES} from '../src/types.ts';
 import type {Activity, BurnPoint, InheritKey, ProjectSettings, Rule, Template, Trigger, ChangeEvent, Comment, FieldDef, Item, ItemPatch, Notification, Person, Project, Recur, Sprint, Status, TimeEntry, View, ViewConfig, ViewKind} from '../src/types.ts';
@@ -1674,6 +1676,8 @@ export class Tasks {
 
   // ---- Approvals and signatures (see approvals.ts) ----
   requestApproval(itemId: string, by: string | null, approvers: string[], meaning: approvals.Meaning, note = '') { return approvals.requestApproval(this, itemId, by, approvers, meaning, note); }
+  signApprovals(ids: string[], signer: string, decision: 'approved' | 'changes' | 'rejected', comment = '', password?: string) { return approvals.signMany(this, ids, signer, decision, comment, password); }
+  signNeeds(person: string) { return approvals.signNeeds(this, person); }
   signApproval(approvalId: string, signer: string, decision: 'approved' | 'changes' | 'rejected', comment = '', password?: string) { return approvals.sign(this, approvalId, signer, decision, comment, password); }
   listApprovals(q: {itemId?: string; approver?: string; pending?: boolean}) { return approvals.listApprovals(this, q); }
   approvalState(itemId: string) { return approvals.approvalState(this, itemId); }
@@ -1687,7 +1691,14 @@ export class Tasks {
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
   listBoards(q: {projectId?: string; itemId?: string; sop?: string} = {}) { return boards.listBoards(this, q); }
-  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible); }
+  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]; aiDraw?: boolean} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible, {aiDraw: o.aiDraw}); }
+  /** A task (person or AI) to change a board, with a sticky note on the board where the change is wanted. */
+  requestBoardChange(ref: string, text: string, actor: string | null = null, opts: {node?: string | null; worker?: 'human' | 'ai' | 'either'; assignees?: string[]; projectId?: string | null} = {}) { return boards.requestBoardChange(this, ref, text, actor, opts); }
+  /** The drawing rules for SOP flows: this workspace's own, or the built-in ones. */
+  /** Which notifications a person also gets by email (Team page, My account). */
+  emailAlerts(person: string) { return alerts.getEmailAlerts(this.db, person); }
+  setEmailAlerts(person: string, patch: {on?: boolean; kinds?: unknown}) { return alerts.setEmailAlerts(this.db, person, patch); }
+  boardConventions() { const own = getWorkspace(this.db).drawingRules.trim(); return {rules: own || DEFAULT_DRAWING_RULES, custom: !!own}; }
   board(ref: string) { return boards.getBoard(this, ref); }
   createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
   updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }
@@ -1702,6 +1713,8 @@ export class Tasks {
 
   // ---- Human and AI workers (see aiwork.ts) ----
   claimTask(itemId: string, agent: string, note = '', session: string | null = null) { return ai.claim(this, itemId, agent, note, session); }
+  /** Drag AI work to another lane: working, review, done or discarded. */
+  moveWork(itemId: string, reviewer: string | null, to: ai.Lane, comment = '') { return ai.moveWork(this, itemId, reviewer, to, comment); }
   decideClaim(itemId: string, reviewer: string | null, accept: boolean, note = '') { return ai.decide(this, itemId, reviewer, accept, note); }
   submitWork(itemId: string, agent: string, report: string, missed = '', opts: {session?: string | null; artifacts?: ai.ArtifactInput[]} = {}) { return ai.submit(this, itemId, agent, report, missed, opts); }
   /** decision: approve, changes, redo or discard (true and false still mean approve and changes). keep: on discard, leave the agent assigned. */

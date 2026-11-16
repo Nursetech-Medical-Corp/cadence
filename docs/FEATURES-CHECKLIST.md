@@ -25,6 +25,14 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.
 
 ## AI agents
+- AI work: cards with a pending approval sit in Ready for review; people drag cards between working, review, approved and discarded (claims dragged to working are accepted). Bug found: approvals waiting showed under AI working and admins could not move them. (unit)
+- Several agents suggesting the same task: approving one makes it once and closes the others; the approver picks which agent (or a person) does it. (manual)
+- Connect Claude: the consent page asks who it works as, its own AI agent (default) or you; Team page can switch a connected app later. Bug found: Connect Claude always acted as the person. (manual)
+- Rules for AI agents (Team page, admins): base rules wording, workspace rules, onboarding guide; get_guide returns the guide; agent_inbox returns the base and workspace rules. (manual)
+- Signing: password once per 8 hours by default (or every time, or never, set on Approvals); Sign several at once; signatures show how identity was confirmed. Bug found: every signature asked for the password through a browser prompt. (unit)
+- No browser alert, confirm or prompt anywhere: in-app dialogs with Esc, X and Enter. (manual)
+- Tours: Esc, X, End tour or a click outside the highlight ends them; the tour sits above every page layer. Bug found: the AI agents tour darkened the screen with no way out. (manual)
+- Spacing: no two buttons, fields or chips closer than 3px on the main pages. (e2e spacing)
 - An AI is one team row: adding an agent with a name already on the team is refused with a hint; switching a person row to AI agent makes it owned, not admin, and stops its sign-ins.
 - Workspace AI rules (admins) and each agent's own rules are saved on blur and come back in agent_inbox.
 - Boards and lists show Claim, AI working, Review or Sent back on tasks with open AI work; the chip opens AI work.
@@ -35,6 +43,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - An agent's time is recorded from its first step, comment or file to hand-in; with no timer, from acceptance to hand-in.
 
 ## Team page
+- Email alerts: My account, Email me notifications, then Email me about (assigned, comments, approvals, completed, reminders, automations, other). Only picked groups are emailed; the email has the task key, title and an open link; SMTP first, else the Gmail sender. Bug found: emails went only through Gmail and had no link. (unit)
 - Job roles table: the name column is readable and stays put while scrolling sideways; every column resizes by dragging its header edge, double-click resets.
 
 ## Plugins
@@ -90,6 +99,11 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Section titles sit above their frame. (e2e)
 - New boards open with a title; boards drawn from work have a title, a summary line and the SOP document.
 - One board per SOP; SOPs that have a board keep it; the Routines page links each SOP to its board.
+- One board per SOP can also make one AI task per new board to draw the full flow; new SOP boards go in the folder "SOP flows". (unit)
+- Whiteboards page: search, folder chips with counts, tick boards to move or delete together (confirm lists names), rename, move and delete on each card, SOP doc link on each card. (manual)
+- Thumbnails show each board's own shapes, fills, diamonds and arrows, not the same blank box. Bug found: every thumbnail looked the same. (manual)
+- Request a change on a board makes a task linked to it (worker, assignee, card) and a peach sticky note; a missing card or empty text is refused. (unit)
+- Drawing rules: built in by default; admins replace them with their own; agents read them with board_conventions. (unit)
 - Create tasks turns unlinked cards into tasks; arrows become dependencies; running it again makes nothing new.
 - Runs: tasks in order, webhooks fire after the steps before them, retry and skip, run log; triggers by hand, webhook, schedule, finished tag.
 

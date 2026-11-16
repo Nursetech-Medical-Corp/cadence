@@ -3,6 +3,7 @@ import {Download, HardDriveDownload, Upload} from 'lucide-react';
 import type {Item, Project} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {api, type Store, wsId} from './store.ts';
+import {uiConfirm, uiPrompt} from './dialogs.tsx';
 
 type Snap = {name: string; bytes: number; created: string; reason: string; keptAs?: string};
 type Settings = {enabled: boolean; intervalHours: number; keepRecent: number; keepDaily: number; keepWeekly: number; keepMonthly: number; target: 'local' | 'local+cloud'};
@@ -22,7 +23,7 @@ export function DataPage({store}: {store: Store}) {
   };
   // Roll the workspace back to a snapshot (admins). The current state is saved first, so this can be undone.
   const rollback = async (label: string, path: string, body: object) => {
-    if (prompt(`Roll the whole workspace back to ${label}?\n\nEveryone's spaces, items and views go back to that point. The current state is saved first as a before-restore snapshot, so this can be undone.\n\nType RESTORE to continue.`) !== 'RESTORE') return;
+    if ((await uiPrompt(`Roll the whole workspace back to ${label}?\n\nEveryone's spaces, items and views go back to that point. The current state is saved first as a before-restore snapshot, so this can be undone.\n\nType RESTORE to continue.`)) !== 'RESTORE') return;
     try {
       const r = await api<{restored: Record<string, number>}>(path, {method: 'POST', body});
       setMsg(`Rolled back to ${label}: ${r.restored.items ?? 0} items, ${r.restored.projects ?? 0} spaces. The previous state was saved first.`);
@@ -34,7 +35,7 @@ export function DataPage({store}: {store: Store}) {
   const restore = async (f: File) => {
     let dump: unknown;
     try { dump = JSON.parse(await f.text()); } catch { setMsg('That file is not valid JSON.'); return; }
-    if (!confirm(`Replace everything in this workspace with "${f.name}"? A snapshot of the current data is saved first, so you can come back to it.`)) return;
+    if (!(await uiConfirm(`Replace everything in this workspace with "${f.name}"? A snapshot of the current data is saved first, so you can come back to it.`))) return;
     try {
       const r = await api<{restored: Record<string, number>}>('/import', {method: 'POST', body: dump});
       setMsg(`Restored: ${Object.entries(r.restored).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ')}.`);

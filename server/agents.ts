@@ -43,6 +43,11 @@ export function agentSettings(tasks: Tasks, agent: string): AgentSettings {
   const r = tasks.db.prepare('select agent from people where id = ?').get(agent) as {agent?: string | null} | undefined;
   return {...DEFAULT_AGENT, ...(r?.agent ? JSON.parse(r.agent) : {})};
 }
+/** The built-in rules as sent to agents: the workspace's wording when an admin rewrote it, else the default. */
+export function baseRules(tasks: Tasks) {
+  const own = getWorkspace(tasks.db).agentBaseRules.trim();
+  return own ? own.split('\n').map(l => l.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean) : BUILT_IN_AGENT_RULES;
+}
 export function agentsOf(tasks: Tasks, owner: string) {
   return (tasks.db.prepare("select id, name from people where kind = 'ai' and owner = ? and coalesce(active, 1) = 1 order by name").all(owner) as {id: string; name: string}[])
     .map(a => ({...a, settings: agentSettings(tasks, a.id)}));
@@ -111,7 +116,7 @@ export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoo
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes', 'triggerHook', 'setWebhooks',
-  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard',
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard', 'requestBoardChange',
   'savePlugin', 'submitPlugin', 'deletePlugin', 'installPlugin', 'uninstallPlugin', 'setPlugin']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {
@@ -215,9 +220,13 @@ export function suggestFollowUps(tasks: Tasks, agent: string, itemId: string, li
   tasks.logWork(itemId, agent, 'note', `Suggested ${out.length} follow-up task${out.length > 1 ? 's' : ''}: ${list.map(f => f.title).join('; ').slice(0, 1000)}. They wait on AI work, Changes to approve.`);
   return out;
 }
-export type Suggestion = {title?: string; item?: string; projectId?: string; forPerson: string; reason?: string; sop?: string; estimate?: number; due?: string; agent: string};
+export type Suggestion = {title?: string; item?: string; projectId?: string; forPerson: string; reason?: string; sop?: string; estimate?: number; due?: string; agent: string;
+  /** Who does it, picked by the person approving: an agent's id, or 'none' for a person. Unset: the suggesting agent when the owner owns it. */
+  doer?: string};
 export function applySuggestion(tasks: Tasks, s: Suggestion, by: string) {
-  const agentFor = agentOwner(tasks, s.agent) === s.forPerson ? s.agent : agentsOf(tasks, s.forPerson).find(a => a.settings.watchAssignments)?.id ?? null;
+  if (s.doer && s.doer !== 'none' && !isAgent(tasks, s.doer)) throw new Invalid('Pick an AI agent, or none for a person');
+  const agentFor = s.doer === 'none' ? null : s.doer ? s.doer
+    : agentOwner(tasks, s.agent) === s.forPerson ? s.agent : agentsOf(tasks, s.forPerson).find(a => a.settings.watchAssignments)?.id ?? null;
   let item: Item;
   if (s.item) {
     item = tasks.findItem(s.item);
@@ -243,7 +252,13 @@ function runSpecial(tasks: Tasks, op: string, args: unknown[], by: string) {
 }
 
 /** The owner (or an admin) approves: the change is made now, by the approver on the agent's behalf. */
-export function decideProposal(tasks: Tasks, pid: string, decider: string | null, approve: boolean, opts: {note?: string; args?: unknown[]} = {}) {
+/** Pending suggestions from other agents for the same new task (same title in the same space). */
+export function sameSuggestions(tasks: Tasks, p: Proposal) {
+  const key = (x: Proposal) => { const a = (x.args[0] ?? {}) as Suggestion; return a.item ? null : `${a.projectId}|${String(a.title ?? '').trim().toLowerCase()}`; };
+  const k = key(p);
+  return k ? listProposals(tasks, {state: 'pending'}).filter(x => x.id !== p.id && x.op === 'suggestWork' && key(x) === k) : [];
+}
+export function decideProposal(tasks: Tasks, pid: string, decider: string | null, approve: boolean, opts: {note?: string; args?: unknown[]; doer?: string} = {}) {
   const p = getProposal(tasks, pid);
   if (p.state !== 'pending') throw new Invalid(`This proposal was already ${p.state}`);
   if (isAgent(tasks, decider)) throw new Invalid('Only a person approves an agent\'s proposal');
@@ -255,7 +270,9 @@ export function decideProposal(tasks: Tasks, pid: string, decider: string | null
     return {...getProposal(tasks, pid)};
   };
   if (!approve) return done('rejected', null);
-  const args = opts.args ?? p.args;
+  let args = opts.args ?? p.args;
+  // A suggested task: the person approving picks which agent does it (or a person), whoever suggested it.
+  if (p.op === 'suggestWork' && opts.doer) args = [{...(args[0] as Suggestion), doer: opts.doer}];
   const by = decider ?? p.owner ?? p.agent;
   // Run as the person approving, so rules meant for agents (like not marking work done) do not block an approved change.
   const swap = (list: unknown[]) => list.map(a => a === p.agent ? by : a);
@@ -268,6 +285,11 @@ export function decideProposal(tasks: Tasks, pid: string, decider: string | null
       result = fn.apply(tasks, swap(args));
     }
     if (p.itemId) { try { tasks.addComment(p.itemId, by, `Approved a change proposed by ${nameOf(tasks, p.agent)}: ${p.summary}`); } catch { /* item gone */ } }
+    // Other agents that suggested the same new task: closed as duplicates, so it is made once.
+    if (p.op === 'suggestWork' && !(args[0] as Suggestion).item) for (const d of sameSuggestions(tasks, p)) {
+      tasks.db.prepare("update proposals set state = 'rejected', decided_by = ?, decided_at = ?, note = ? where id = ?").run(decider, now(), `Same task as ${nameOf(tasks, p.agent)}'s suggestion, approved`, d.id);
+      tasks.notifyPublic(d.agent, decider, d.itemId, 'ai', `closed as a duplicate: ${d.summary}`);
+    }
     return done('approved', result);
   } catch (e) {
     return done('failed', null, (e as Error).message);
@@ -291,7 +313,7 @@ export function agentInbox(tasks: Tasks, agent: string, since?: string) {
   return {
     now: now(), owner: owner ? {id: owner, name: nameOf(tasks, owner)} : null, settings: s,
     // Follow these every run: the workspace's rules for all agents, then the owner's rules for this agent.
-    rules: {builtIn: BUILT_IN_AGENT_RULES, workspace: getWorkspace(tasks.db).aiRules, agent: s.instructions},
+    rules: {builtIn: baseRules(tasks), workspace: getWorkspace(tasks.db).aiRules, agent: s.instructions},
     openClaims: mine.length, canClaimMore: Math.max(0, s.maxClaims - mine.length),
     newForOwner: assigned.map(brief),
     available: queue.filter(x => !x.review || x.review.state === 'declined' || x.review.state === 'discarded').map(x => brief(x.item)),

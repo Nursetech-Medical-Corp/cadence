@@ -9,6 +9,7 @@ import {AddField} from './TableView.tsx';
 import {AccessCard} from './Team.tsx';
 import {WorkflowCard} from './Approvals.tsx';
 import {AutomationsCard, InheritCard, IntegrationsCard, TagsCard, TemplatesCard, useTemplates} from './SettingsExtras.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 const COLORS = ['#8b8d98', '#2f80ed', '#0ea5e9', '#14b8a6', '#30a46c', '#e2a400', '#f76b15', '#e5484d', '#d6336c', '#a855f7', '#6d5dfc', '#495057'];
 const CATS: {id: StatusCategory; label: string; hint: string}[] = [
@@ -117,7 +118,7 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
                 <input className="inline" style={{width: 110}} placeholder="+ option" onKeyDown={e => { const v = (e.target as HTMLInputElement).value.trim(); if (e.key === 'Enter' && v) { save({fields: project.fields.map(x => x.id === f.id ? {...x, options: [...(x.options ?? []), v]} : x)}); (e.target as HTMLInputElement).value = ''; } }} />
               </span>}
               <span className="spacer" />
-              <button className="icon" title="Delete field" onClick={() => confirm(`Delete field "${f.name}"? Values stay on items but are hidden.`) && save({fields: project.fields.filter(x => x.id !== f.id)})}><Trash2 size={14} /></button>
+              <button className="icon" title="Delete field" onClick={async () => (await uiConfirm(`Delete field "${f.name}"? Values stay on items but are hidden.`)) && save({fields: project.fields.filter(x => x.id !== f.id)})}><Trash2 size={14} /></button>
             </div>
           );
         })}
@@ -136,7 +137,7 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
       <section className="set-card danger-card">
         {project.settings.rollup?.scope ? <div className="muted small">Built in: always here, so it cannot be deleted. You can rename it.</div> : <>
         <div className="set-card-head"><h3>Delete space</h3><span className="muted small">Removes the project, its items, sprints and views. A backup snapshot is kept in Data and backups.</span></div>
-        <button className="btn danger" onClick={() => { if (confirm(`Delete space "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`)) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete space</button></>}
+        <button className="btn danger" onClick={async () => { if ((await uiConfirm(`Delete space "${project.name}" and all its items? This cannot be undone here, but automatic snapshots keep older copies.`))) { store.deleteProject(project.id); onDeleted(); } }}><Trash2 size={14} /> Delete space</button></>}
       </section>
     </div>
   );

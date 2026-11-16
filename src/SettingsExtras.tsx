@@ -5,6 +5,7 @@ import type {Action, Condition, InheritKey, Project, Rule, Template, Trigger} fr
 import {PRIORITIES} from './types.ts';
 import {api, type Store, wsId} from './store.ts';
 import {WebhooksEditor} from './Webhooks.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 const save = (store: Store, p: Project, patch: Partial<Project['settings']>) => store.updateProject(p.id, {settings: {...p.settings, ...patch}});
 
@@ -179,7 +180,7 @@ export function TemplatesCard({store, project, templates, reload}: {store: Store
         <div key={t.id} className="set-item">
           <span className="tag">{t.kind === 'project' ? 'Project' : 'Item'}</span>
           <span className="grow">{t.name}</span>
-          <button className="icon" title="Delete template" onClick={async () => { if (confirm(`Delete template "${t.name}"?`)) { await api(`/templates/${t.id}`, {method: 'DELETE'}); reload(); } }}><Trash2 size={14} /></button>
+          <button className="icon" title="Delete template" onClick={async () => { if ((await uiConfirm(`Delete template "${t.name}"?`))) { await api(`/templates/${t.id}`, {method: 'DELETE'}); reload(); } }}><Trash2 size={14} /></button>
         </div>
       ))}
       {!templates.length && <div className="muted small" style={{padding: '6px 2px'}}>No templates yet.</div>}
@@ -261,7 +262,7 @@ export function TagsCard({store, project}: {store: Store; project: Project}) {
           <span className="tag">#</span>
           <input className="inline" defaultValue={t} key={t} onBlur={e => rename(t, e.target.value)} onKeyDown={e => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
           <span className="count">{n}</span>
-          <button className="icon" title="Remove from all items" onClick={() => { if (confirm(`Remove #${t} from ${n} items?`)) for (const i of items.filter(i => i.tags.includes(t))) store.updateItem(i.id, {tags: i.tags.filter(x => x !== t)}); }}><Trash2 size={14} /></button>
+          <button className="icon" title="Remove from all items" onClick={async () => { if ((await uiConfirm(`Remove #${t} from ${n} items?`))) for (const i of items.filter(i => i.tags.includes(t))) store.updateItem(i.id, {tags: i.tags.filter(x => x !== t)}); }}><Trash2 size={14} /></button>
         </div>
       ))}
       {!tags.length && <div className="muted small" style={{padding: '6px 2px'}}>No tags yet. Add them with #tag in quick add or on any item.</div>}

@@ -122,8 +122,9 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
 
     // 8. Create tasks, then Ctrl+Z takes them away again.
     await dump.fill('write article'); await dump.press('Enter'); await wait(500);
-    page.once('dialog', d => d.accept());
-    await page.getByRole('button', {name: /Create tasks/}).click(); await wait(1500);
+    await page.getByRole('button', {name: /Create tasks/}).click(); await wait(400);
+    // In-app dialog (no browser confirm): press OK.
+    await page.locator('.dlg').getByRole('button', {name: 'OK'}).click(); await wait(1500);
     const made = (await plan()).dump.find(e => e.text.toLowerCase().includes('write article'))?.itemId;
     check('Create tasks makes a task for a new line', !!made);
     await page.locator('body').click({position: {x: 5, y: 5}});
