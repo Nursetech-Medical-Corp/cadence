@@ -1,44 +1,51 @@
-// Focus modes for the task you are working on.
-//   Focus mode: one task fills the screen, everything else goes dark. Title, notes, subitems and the timer.
-//     Done stops the timer and completes the task. Esc or Exit leaves.
-//   Timer bar: while a timer runs, a bar at the top of the app shows the task and the clock on every page.
-//   Pop out: a small always-on-top timer window (Chrome and Edge keep it above every window and app;
-//     other browsers get a normal small window). Start, stop, done and back to focus from there.
-// Each person picks what happens when they start a timer (saved in their prefs, key "focus").
+// Focus for the work you are doing now.
+//   Focus bar: the tasks you are focused on, at the top of every page. Starting a timer adds its task. One timer
+//     runs at a time (per person); each task in the bar has play or stop, Done and remove.
+//   Focus view: one task fills the screen, the rest goes dark: title, details, notes, subitems, the timer
+//     against its estimate, and the other tasks in focus to switch to.
+//   Pop out: a small always-on-top window (Chrome and Edge keep it above every window and app).
+// Each person picks what starting a timer does (prefs "focus"): open the focus view, pop out, show the bar.
+// Any of these can be on together. Set on the bar's gear, in the focus view, or on the Team page (My account).
 import {useEffect, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {CheckCircle2, ExternalLink, Focus as FocusIcon, Play, Settings2, Square, X} from 'lucide-react';
+import {Calendar, CheckCircle2, ExternalLink, Focus as FocusIcon, Play, Settings2, Square, X} from 'lucide-react';
 import {fmtClock, fmtMinutes, useNow, type Store} from './store.ts';
 import {BlockEditor} from './BlockEditor.tsx';
-import {Check, InlineText, Popover, itemKey} from './components.tsx';
+import {Check, InlineText, Popover, PriorityIcon, StatusIcon, itemKey} from './components.tsx';
 import type {Item, Project} from './types.ts';
+import {PRIORITIES} from './types.ts';
+import './focus.css';
 
 export type FocusPrefs = {onStart: 'none' | 'focus'; bar: boolean; popOut: boolean};
 export const focusPrefs = (store: Pick<Store, 'prefs'>): FocusPrefs => ({onStart: 'none', bar: true, popOut: false, ...(store.prefs.focus as Partial<FocusPrefs> | undefined)});
+const focusList = (store: Store): Item[] => {
+  const ids = (store.prefs.focusList as string[] | undefined) ?? [];
+  const run = store.running?.itemId;
+  return [...new Set([...ids, ...(run ? [run] : [])])].map(id => store.items.get(id)).filter((i): i is Item => !!i);
+};
 
 const doneStatus = (p: Project) => p.statuses.find(s => s.category === 'done')?.id;
-/** Stops the timer if it runs on this task, then marks the task done. */
+/** Stops the timer if it runs on this task, marks the task done, and takes it out of focus. */
 async function finish(store: Store, item: Item) {
   if (store.running?.itemId === item.id) await store.stopTimer();
   const p = store.projects.find(x => x.id === item.projectId), done = p && doneStatus(p);
   if (done && !item.completed) store.updateItem(item.id, {status: done});
+  store.focusRemove(item.id);
 }
 
 /** Everything focus related; mount once in the app. */
 export function FocusHost({store, open}: {store: Store; open: (id: string) => void}) {
   const cfg = focusPrefs(store);
   const [pip, setPip] = useState<Window | null>(null);
-  const [last, setLast] = useState<string | null>(null);
 
   const popOut = async () => {
     if (pip && !pip.closed) { pip.focus(); return; }
     const dpip = (window as unknown as {documentPictureInPicture?: {requestWindow: (o: {width: number; height: number}) => Promise<Window>}}).documentPictureInPicture;
     let w: Window | null = null;
-    try { w = dpip ? await dpip.requestWindow({width: 380, height: 150}) : window.open('', 'cadence-timer', 'width=400,height=180,popup=yes'); }
-    catch { w = window.open('', 'cadence-timer', 'width=400,height=180,popup=yes'); }
+    try { w = dpip ? await dpip.requestWindow({width: 380, height: 200}) : window.open('', 'cadence-timer', 'width=400,height=230,popup=yes'); }
+    catch { w = window.open('', 'cadence-timer', 'width=400,height=230,popup=yes'); }
     if (!w) { store.flash('Allow pop-ups for this site to pop out the timer'); return; }
-    w.document.title = 'Cadence timer';
-    // Same styles as the app so the mini timer matches the theme.
+    w.document.title = 'Cadence focus';
     for (const ss of [...document.styleSheets]) {
       try { const st = w.document.createElement('style'); st.textContent = [...ss.cssRules].map(r => r.cssText).join('\n'); w.document.head.appendChild(st); }
       catch { if (ss.href) { const l = w.document.createElement('link'); l.rel = 'stylesheet'; l.href = ss.href; w.document.head.appendChild(l); } }
@@ -49,130 +56,168 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
     setPip(w);
   };
 
-  // Starting a timer anywhere: remember the task, open focus mode or the pop-out if this person wants that.
+  // Starting a timer anywhere puts its task in focus, and opens the focus view or the pop-out if this person wants that.
   useEffect(() => {
     const on = (e: Event) => {
       const id = (e as CustomEvent<{itemId: string}>).detail.itemId;
-      setLast(id);
-      if (cfg.onStart === 'focus') store.setFocusId(id);
+      store.focusAdd(id, cfg.onStart === 'focus');
       if (cfg.popOut) void popOut();
     };
     window.addEventListener('cadence:timer-start', on);
     return () => window.removeEventListener('cadence:timer-start', on);
   });
   useEffect(() => () => { pip?.close(); }, [pip]);
-  useEffect(() => { if (store.running) setLast(store.running.itemId); }, [store.running?.itemId]);
 
+  const list = focusList(store);
   const focusItem = store.focusId ? store.items.get(store.focusId) : undefined;
   return <>
-    {/* On document.body so they sit above the sidebar and the task panel, whatever page is open. */}
-    {cfg.bar && store.running && createPortal(<TimerBar store={store} open={open} popOut={popOut} />, document.body)}
-    {focusItem && createPortal(<FocusOverlay store={store} item={focusItem} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
-    {pip && !pip.closed && createPortal(<MiniTimer store={store} itemId={store.running?.itemId ?? last} focus={id => { window.focus(); store.setFocusId(id); }} />, pip.document.body)}
+    {/* On document.body so they sit above the sidebar and the task panel. */}
+    {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} />, document.body)}
+    {focusItem && createPortal(<FocusView store={store} item={focusItem} list={list} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
+    {pip && !pip.closed && createPortal(<MiniFocus store={store} list={list} focus={id => { window.focus(); store.setFocusId(id); }} />, pip.document.body)}
   </>;
 }
 
-function Clock({start}: {start: string}) {
+function Clock({start, className = 'fx-clock'}: {start: string; className?: string}) {
   const now = useNow(true);
-  return <span className="fx-clock">{fmtClock(now - Date.parse(start))}</span>;
+  return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
 
-/** Choices for what starting a timer does. */
-export function FocusSettings({store}: {store: Store}) {
-  const [openPop, setOpen] = useState(false);
+/** What starting a timer does, for this person. */
+function FocusChoices({store}: {store: Store}) {
   const cfg = focusPrefs(store);
   const set = (p: Partial<FocusPrefs>) => store.setPref('focus', {...cfg, ...p});
+  return <>
+    <label className="pop-row"><input type="checkbox" checked={cfg.onStart === 'focus'} onChange={e => set({onStart: e.target.checked ? 'focus' : 'none'})} /> Open the full-screen focus view</label>
+    <label className="pop-row"><input type="checkbox" checked={cfg.popOut} onChange={e => set({popOut: e.target.checked})} /> Pop out the timer (stays on top of every window)</label>
+    <label className="pop-row"><input type="checkbox" checked={cfg.bar} onChange={e => set({bar: e.target.checked})} /> Show the focus bar on every page</label>
+  </>;
+}
+export function FocusSettings({store}: {store: Store}) {
+  const [openPop, setOpen] = useState(false);
   return <span className="picker">
-    <button className="icon" title="Focus settings" onClick={() => setOpen(o => !o)}><Settings2 size={15} /></button>
+    <button className="fb-btn" title="When I start a timer..." onClick={() => setOpen(o => !o)}><Settings2 size={14} /></button>
     <Popover open={openPop} onClose={() => setOpen(false)} className="wide">
       <div className="pop-label">When I start a timer</div>
-      <label className="pop-row"><input type="checkbox" checked={cfg.onStart === 'focus'} onChange={e => set({onStart: e.target.checked ? 'focus' : 'none'})} /> Open focus mode</label>
-      <label className="pop-row"><input type="checkbox" checked={cfg.popOut} onChange={e => set({popOut: e.target.checked})} /> Pop out the timer (stays on top of every window)</label>
-      <label className="pop-row"><input type="checkbox" checked={cfg.bar} onChange={e => set({bar: e.target.checked})} /> Show the timer bar on every page</label>
+      <FocusChoices store={store} />
+      <div className="muted small" style={{padding: '4px 8px'}}>Any of these can be on together. Saved for you, on every task.</div>
     </Popover>
   </span>;
 }
+/** Team page, My account. */
+export function FocusSettingsCard({store}: {store: Store}) {
+  return <section className="set-card">
+    <div className="set-card-head"><h3><FocusIcon size={15} /> Focus and timer</h3><span className="muted small">What happens when you start a timer on any task. Any of these can be on together. The task always joins your focus bar.</span></div>
+    <FocusChoices store={store} />
+  </section>;
+}
 
-function TimerBar({store, open, popOut}: {store: Store; open: (id: string) => void; popOut: () => void}) {
-  const run = store.running!, item = store.items.get(run.itemId);
-  return <div className="timer-bar" role="status">
-    <span className="fx-dot" />
-    <Clock start={run.start} />
-    <button className="link grow ellipsis" title="Open the task" onClick={() => open(run.itemId)}>{item ? `${itemKey(item, store.projects)} ${item.title}` : 'Task'}</button>
-    <button className="btn small" title="Stop the timer" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /> Stop</button>
-    {item && <button className="btn small" title="Stop the timer and complete the task" onClick={() => finish(store, item)}><CheckCircle2 size={13} /> Done</button>}
-    {item && <button className="btn small" title="Focus mode: just this task" onClick={() => store.setFocusId(item.id)}><FocusIcon size={13} /> Focus</button>}
-    <button className="btn small" title="Pop out a small timer that stays on top of other windows" onClick={popOut}><ExternalLink size={13} /> Pop out</button>
+function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void}) {
+  const run = store.running;
+  return <div className="focus-bar" role="status">
+    <span className="fb-label"><FocusIcon size={13} /> Focus</span>
+    <div className="fb-items">
+      {list.map(i => {
+        const on = run?.itemId === i.id;
+        return <div key={i.id} className={'fb-item' + (on ? ' on' : '')}>
+          {on ? <button className="fb-btn" title="Stop the timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
+            : <button className="fb-btn" title="Start the timer on this task" onClick={() => store.startTimer(i.id)}><Play size={10} fill="currentColor" /></button>}
+          {on && <Clock start={run!.start} />}
+          <button className="fb-title" title={`${i.title}. Click for the focus view`} onClick={() => store.setFocusId(i.id)}>{i.title}</button>
+          <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
+          <button className="fb-btn" title="Open the task" onClick={() => open(i.id)}><ExternalLink size={12} /></button>
+          <button className="fb-btn" title="Take out of focus" onClick={() => store.focusRemove(i.id)}><X size={12} /></button>
+        </div>;
+      })}
+    </div>
+    <button className="fb-btn" title="Pop out a small timer that stays on top of other windows" onClick={popOut}><ExternalLink size={13} /></button>
     <FocusSettings store={store} />
   </div>;
 }
 
-function TimerButtons({store, item}: {store: Store; item: Item}) {
-  const mine = store.running?.itemId === item.id;
-  return <>
-    {mine
-      ? <button className="btn" onClick={() => store.stopTimer()}><Square size={12} fill="currentColor" /> Stop</button>
-      : <button className="btn primary" onClick={() => store.startTimer(item.id)}><Play size={12} fill="currentColor" /> Start</button>}
-    <button className="btn" title="Stops the timer and completes the task" onClick={() => finish(store, item)} disabled={!!item.completed}><CheckCircle2 size={14} /> {item.completed ? 'Done' : 'Done'}</button>
-  </>;
-}
-
-function FocusOverlay({store, item, close, popOut}: {store: Store; item: Item; close: () => void; popOut: () => void}) {
+function FocusView({store, item, list, close, popOut}: {store: Store; item: Item; list: Item[]; close: () => void; popOut: () => void}) {
   const project = store.projects.find(p => p.id === item.projectId);
+  const now = useNow(store.running?.itemId === item.id);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input,textarea,[contenteditable=true],.popover')) close(); };
-    document.addEventListener('keydown', k);
-    return () => document.removeEventListener('keydown', k);
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target as HTMLElement).closest('input,textarea,[contenteditable=true],.popover')) { e.stopPropagation(); close(); } };
+    document.addEventListener('keydown', k, true);
+    return () => document.removeEventListener('keydown', k, true);
   }, [close]);
-  // Done closes focus mode after a moment, so you see it land.
-  useEffect(() => { if (item.completed) { const t = setTimeout(close, 900); return () => clearTimeout(t); } }, [item.completed]);
   if (!project) return null;
   const run = store.running?.itemId === item.id ? store.running : null;
   const children = [...store.items.values()].filter(i => i.parentId === item.id).sort((a, b) => a.sort - b.sort);
-  const total = store.timeTotals.get(item.id) ?? 0;
-  return <div className="focus-mode" role="dialog" aria-label="Focus mode">
-    <div className="focus-card">
-      <div className="focus-top">
-        <span className="muted">{itemKey(item, store.projects)} · {project.name}</span>
+  const logged = (store.timeTotals.get(item.id) ?? 0) + (run ? (now - Date.parse(run.start)) / 60000 : 0);
+  const est = (item.estimate ?? 0) * 60;
+  const pct = est ? Math.min(100, Math.round(logged / est * 100)) : 0;
+  const status = project.statuses.find(s => s.id === item.status);
+  const others = list.filter(i => i.id !== item.id);
+  return <div className="fv-backdrop" role="dialog" aria-label="Focus" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>
+    <div className="fv">
+      <header className="fv-head">
+        <span className="fv-crumb"><span className="fv-space">{project.name}</span> {itemKey(item, store.projects)}</span>
         <span className="spacer" />
-        <button className="btn small" onClick={popOut} title="Pop out a timer that stays on top of other windows"><ExternalLink size={13} /> Pop out</button>
+        <button className="btn small" onClick={popOut} title="A small timer that stays on top of other windows"><ExternalLink size={13} /> Pop out</button>
         <FocusSettings store={store} />
-        <button className="icon" title="Leave focus mode (Esc)" onClick={close}><X size={18} /></button>
+        <button className="fb-btn" title="Leave the focus view (Esc)" onClick={close}><X size={18} /></button>
+      </header>
+      <div className="fv-body">
+        <main className="fv-main">
+          <div className="fv-title"><Check item={item} project={project} onToggle={s => store.updateItem(item.id, {status: s})} /><InlineText value={item.title} onSave={title => store.updateItem(item.id, {title})} className="h2" /></div>
+          <div className="fv-meta">
+            {status && <span className="fv-chip"><StatusIcon status={status} size={13} /> {status.name}</span>}
+            {item.priority > 0 && <span className="fv-chip"><PriorityIcon value={item.priority} size={13} /> {PRIORITIES[item.priority]}</span>}
+            {item.due && <span className={'fv-chip' + (item.due < store.today && !item.completed ? ' late' : '')}><Calendar size={13} /> Due {item.due}</span>}
+            {item.estimate ? <span className="fv-chip">Estimate {fmtMinutes(est)}</span> : null}
+          </div>
+          <section className="fv-card">
+            <h4>Notes</h4>
+            <BlockEditor key={item.id} value={item.body} placeholder="Notes, links, what done looks like" onSave={body => body !== item.body && store.updateItem(item.id, {body})} />
+          </section>
+          {children.length > 0 && <section className="fv-card">
+            <h4>Subitems <span className="count">{children.filter(c => c.completed).length}/{children.length}</span></h4>
+            {children.map(c => <div key={c.id} className="fv-sub"><Check item={c} project={project} onToggle={s => store.updateItem(c.id, {status: s})} /><span className={c.completed ? 'muted strike' : ''}>{c.title}</span></div>)}
+          </section>}
+        </main>
+        <aside className="fv-side">
+          <section className={'fv-timer' + (run ? ' on' : '')}>
+            {run ? <Clock start={run.start} className="fv-clock" /> : <span className="fv-clock idle">{fmtClock(0)}</span>}
+            <div className="fv-progress" title={est ? `${pct}% of the estimate` : 'No estimate'}><span style={{width: `${est ? pct : 0}%`}} /></div>
+            <div className="muted small">{fmtMinutes(logged)} logged{est ? ` of ${fmtMinutes(est)}` : ''}</div>
+            {run ? <button className="btn fv-wide" onClick={() => store.stopTimer()}><Square size={12} fill="currentColor" /> Stop timer</button>
+              : <button className="btn primary fv-wide" onClick={() => store.startTimer(item.id)}><Play size={12} fill="currentColor" /> Start timer</button>}
+            <button className="btn fv-wide" disabled={!!item.completed} onClick={() => finish(store, item).then(close)}><CheckCircle2 size={14} /> {item.completed ? 'Done' : 'Done (stops the timer)'}</button>
+          </section>
+          {others.length > 0 && <section className="fv-card">
+            <h4>Also in focus</h4>
+            {others.map(o => <button key={o.id} className="fv-other" onClick={() => store.setFocusId(o.id)}>{store.running?.itemId === o.id && <span className="fx-dot" />}<span className="ellipsis">{o.title}</span></button>)}
+          </section>}
+        </aside>
       </div>
-      <div className="focus-title"><Check item={item} project={project} onToggle={status => store.updateItem(item.id, {status})} /><InlineText value={item.title} onSave={title => store.updateItem(item.id, {title})} className="h2" /></div>
-      <div className="focus-timer">
-        {run ? <Clock start={run.start} /> : <span className="fx-clock idle">{fmtClock(0)}</span>}
-        <TimerButtons store={store} item={item} />
-        <span className="muted small">Logged on this task: {fmtMinutes(total)}</span>
-      </div>
-      <div className="focus-notes"><BlockEditor key={item.id} value={item.body} placeholder="Notes for this task" onSave={body => body !== item.body && store.updateItem(item.id, {body})} /></div>
-      {children.length > 0 && <div className="focus-subs">
-        <h4>Subitems <span className="count">{children.filter(c => c.completed).length}/{children.length}</span></h4>
-        {children.map(c => <div key={c.id} className="focus-sub"><Check item={c} project={project} onToggle={status => store.updateItem(c.id, {status})} /><span className={c.completed ? 'muted strike' : ''}>{c.title}</span></div>)}
-      </div>}
     </div>
   </div>;
 }
 
-/** Inside the pop-out window. */
-function MiniTimer({store, itemId, focus}: {store: Store; itemId: string | null; focus: (id: string) => void}) {
-  const item = itemId ? store.items.get(itemId) : undefined;
-  const run = item && store.running?.itemId === item.id ? store.running : null;
-  if (!item) return <div className="pip-timer"><span className="muted">No timer running. Start one in Cadence.</span></div>;
+/** Inside the pop-out window: the tasks in focus, with the running one on top. */
+function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id: string) => void}) {
+  const run = store.running;
+  if (!list.length) return <div className="pip-timer"><span className="muted">Nothing in focus. Start a timer in Cadence.</span></div>;
+  const sorted = [...list].sort((a, b) => (b.id === run?.itemId ? 1 : 0) - (a.id === run?.itemId ? 1 : 0));
   return <div className="pip-timer">
-    <div className="pip-title" title={item.title}>{item.title}</div>
-    <div className="pip-row">
-      {run ? <Clock start={run.start} /> : <span className="fx-clock idle">{fmtClock(0)}</span>}
-      <span className="spacer" />
-      {run ? <button className="btn small" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /> Stop</button>
-        : <button className="btn small primary" onClick={() => store.startTimer(item.id)}><Play size={11} fill="currentColor" /> Start</button>}
-      <button className="btn small" onClick={() => finish(store, item)} disabled={!!item.completed}><CheckCircle2 size={12} /> Done</button>
-      <button className="btn small" title="Open focus mode in Cadence" onClick={() => focus(item.id)}><FocusIcon size={12} /></button>
-    </div>
+    {sorted.map(i => {
+      const on = run?.itemId === i.id;
+      return <div key={i.id} className={'pip-row' + (on ? ' on' : '')}>
+        {on ? <button className="fb-btn" title="Stop" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /></button>
+          : <button className="fb-btn" title="Start" onClick={() => store.startTimer(i.id)}><Play size={11} fill="currentColor" /></button>}
+        {on ? <Clock start={run!.start} /> : null}
+        <span className="pip-title" title={i.title}>{i.title}</span>
+        <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
+        <button className="fb-btn" title="Focus view in Cadence" onClick={() => focus(i.id)}><FocusIcon size={12} /></button>
+      </div>;
+    })}
   </div>;
 }
 
-/** Button for the task panel and menus. */
+/** Button for the task panel. */
 export function FocusButton({store, item}: {store: Store; item: Item}) {
-  return <button className="icon" title="Focus mode: just this task, timer and notes" onClick={() => store.setFocusId(item.id)}><FocusIcon size={15} /></button>;
+  return <button className="icon" title="Focus on this task: full screen with notes and timer, and it joins your focus bar" onClick={() => store.focusAdd(item.id, true)}><FocusIcon size={15} /></button>;
 }

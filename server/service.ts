@@ -1543,7 +1543,8 @@ export class Tasks {
     const installed = listInstalls(this.db, person);
     return {
       catalog: this.cat().list(owner, q, reviewer).map(e => ({id: e.id, name: e.manifest.name, description: e.manifest.description, publisher: e.manifest.publisher ?? (e.builtin ? 'Cadence' : e.owner),
-        icon: e.manifest.icon, tags: e.manifest.tags ?? [], version: e.manifest.version, status: e.status, builtin: e.builtin, mine: e.owner === owner, note: e.note,
+        icon: e.manifest.icon, tags: e.manifest.tags ?? [], version: e.manifest.version, status: e.status, builtin: e.builtin, mine: e.owner === owner, note: e.note, created: e.created, updated: e.updated,
+        shot: e.manifest.screenshots?.[0] ?? null,
         installed: installed.filter(i => i.id === e.id).map(i => i.scope)})),
       installed, reviewer,
     };
@@ -1703,7 +1704,13 @@ export class Tasks {
   decideClaim(itemId: string, reviewer: string | null, accept: boolean, note = '') { return ai.decide(this, itemId, reviewer, accept, note); }
   submitWork(itemId: string, agent: string, report: string, missed = '', opts: {session?: string | null; artifacts?: ai.ArtifactInput[]} = {}) { return ai.submit(this, itemId, agent, report, missed, opts); }
   /** decision: approve, changes, redo or discard (true and false still mean approve and changes). keep: on discard, leave the agent assigned. */
-  reviewWork(itemId: string, reviewer: string | null, decision: boolean | ai.Decision, comment = '', opts: {keep?: boolean} = {}) { return ai.reviewWork(this, itemId, reviewer, decision, comment, opts); }
+  reviewWork(itemId: string, reviewer: string | null, decision: boolean | ai.Decision, comment = '', opts: {keep?: boolean; fromApproval?: boolean} = {}) {
+    const agent = (this.item(itemId).fields.review as {agent?: string} | undefined)?.agent;
+    const out = ai.reviewWork(this, itemId, reviewer, decision, comment, {keep: opts.keep});
+    const d: ai.Decision = decision === true ? 'approve' : decision === false ? 'changes' : decision;
+    if (!opts.fromApproval) approvals.settleFromAiReview(this, itemId, reviewer, agent, d, comment);
+    return out;
+  }
   logWork(itemId: string, actor: string | null, kind: ai.LogEntry['kind'], text: string, url: string | null = null, opts: {session?: string | null; artifact?: ai.ArtifactInput} = {}) {
     const entry = ai.log(this, itemId, actor, kind, text, url, opts);
     if (kind !== 'review') { const item = this.item(itemId); this.event('ai.step_logged', {projectId: item.projectId, item, actor, details: {entry}}); }

@@ -72,6 +72,13 @@ export function requestApproval(tasks: Tasks, itemId: string, by: string | null,
   tasks.logWork(itemId, by, 'review', `Approval requested from ${approvers.map(a => tasks.listPeople().find(p => p.id === a)?.name).join(', ')} (${meaning})${note ? ': ' + note : ''}`);
   tasks.emit({kind: 'comment', itemId});
   tasks.event('approval.requested', {projectId: item.projectId, item, actor: by, details: {approvals: made}});
+  // One flow for AI work: an agent asking for approval on its task also hands the work in, so AI work shows it under
+  // Ready for review. Signing it here (or deciding it on AI work) settles both.
+  if (by && kindOf(tasks, by) === 'ai') {
+    const r = tasks.item(itemId).fields.review as {state?: string; agent?: string} | undefined;
+    const working = r ? ['accepted', 'changes', 'redo'].includes(r.state ?? '') && r.agent === by : tasks.item(itemId).assignees.includes(by);
+    if (working) tasks.submitWork(itemId, by, note.trim() || `Submitted for ${meaning === 'approved' ? 'approval' : meaning === 'reviewed' ? 'review' : meaning === 'verified' ? 'verification' : 'an author signature'}.`);
+  }
   return made;
 }
 
@@ -97,6 +104,16 @@ export function sign(tasks: Tasks, approvalId: string, signer: string, decision:
   tasks.emit({kind: 'comment', itemId: a.itemId});
   const signed = listApprovals(tasks, {itemId: a.itemId}).find(x => x.id === approvalId)!;
   tasks.event('approval.signed', {projectId: item.projectId, item, actor: signer, details: {approval: signed, decision}});
+  // Work an agent handed in: the signature is also the review on AI work. Approved approves it; changes or rejected
+  // send it back with the comment (never discards it: that undoes the agent's changes, so it stays a choice on AI work).
+  const rv = tasks.item(a.itemId).fields.review as {state?: string; agent?: string} | undefined;
+  if (rv?.agent && rv.agent === a.requestedBy && ['submitted', 'accepted', 'changes', 'redo'].includes(rv.state ?? '')) {
+    try {
+      // Asked for approval before this link existed (or by hand): hand the work in first, then decide it.
+      if (rv.state !== 'submitted') tasks.submitWork(a.itemId, rv.agent, a.note.trim() || 'Submitted for approval.');
+      tasks.reviewWork(a.itemId, signer, decision === 'approved' ? 'approve' : 'changes', comment || 'See the approval comment.', {fromApproval: true}); }
+    catch (e) { tasks.logWork(a.itemId, signer, 'note', `Signed, but the AI work review was not changed: ${(e as Error).message}`); }
+  }
   return signed;
 }
 
@@ -115,4 +132,19 @@ export function approvalState(tasks: Tasks, itemId: string) {
     complete: current.every(a => a.decision === 'approved'),
     changedSinceSigning: current.some(a => a.decision === 'approved' && a.fingerprint !== fp),
   };
+}
+
+/** Deciding AI work on the AI work page also settles that reviewer's open approval requests from the same agent on the
+ *  task, so the Approvals page and AI work never disagree. Recorded as decided in AI work (no password re-entry). */
+export function settleFromAiReview(tasks: Tasks, itemId: string, reviewer: string | null, agent: string | null | undefined, decision: 'approve' | 'changes' | 'redo' | 'discard', comment: string) {
+  if (!reviewer || !agent) return;
+  if (!tasks.db.prepare("select 1 from sqlite_master where type = 'table' and name = 'approvals'").get()) return;
+  const open = listApprovals(tasks, {itemId, approver: reviewer, pending: true}).filter(a => a.requestedBy === agent);
+  if (!open.length) return;
+  const name = (tasks.db.prepare('select name from people where id = ?').get(reviewer) as {name: string} | undefined)?.name ?? 'Reviewer';
+  const d: Exclude<Decision, 'pending'> = decision === 'approve' ? 'approved' : decision === 'discard' ? 'rejected' : 'changes';
+  const now = new Date().toISOString(), fp = fingerprint(tasks.item(itemId));
+  for (const a of open) tasks.db.prepare('update approvals set decision = ?, comment = ?, signed_at = ?, signer_name = ?, fingerprint = ?, password_checked = 0 where id = ?')
+    .run(d, `Decided in AI work (${decision})${comment ? ': ' + comment : ''}`.slice(0, 5000), now, name, fp, a.id);
+  tasks.emit({kind: 'comment', itemId});
 }

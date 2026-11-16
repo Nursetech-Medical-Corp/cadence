@@ -10,6 +10,9 @@ type Approval = {id: string; itemId: string; requestedBy: string | null; approve
 const MEANINGS = [['approved', 'Approve'], ['reviewed', 'Review'], ['verified', 'Verify'], ['authored', 'Sign as author']] as const;
 const DECIDED: Record<string, string> = {approved: 'Signed', changes: 'Changes requested', rejected: 'Rejected', pending: 'Waiting'};
 
+/** The kind of signature asked for, as a noun, so it never reads like a decision already made. */
+const MEANING_LABEL: Record<string, string> = {approved: 'Approval', reviewed: 'Review', verified: 'Verification', authored: 'Author signature'};
+
 export function ApprovalsSection({item, store, me}: {item: Item; store: Store; me: string}) {
   const [list, setList] = useState<Approval[]>([]);
   const [state, setState] = useState<{pending: number; complete: boolean; changedSinceSigning: boolean} | null>(null);
@@ -95,7 +98,8 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
       <FileSignature size={14} className="muted" />
       <span className="muted small">{itemKey(it, store.projects)}</span>
       <span className="grow">{it.title}</span>
-      <span className="tag">{a.meaning}</span>
+      <span className="tag" title="What signing means">{MEANING_LABEL[a.meaning] ?? a.meaning}</span>
+      {a.requestedBy && <span className="muted small" title="Who asked">from {store.people.find(p => p.id === a.requestedBy)?.name ?? 'someone'}{store.people.find(p => p.id === a.requestedBy)?.kind === 'ai' ? ' (AI)' : ''}</span>}
       <Avatar person={store.people.find(p => p.id === a.approver)} size={18} />
       <span className={'small ' + (a.decision === 'approved' ? 'good' : a.decision === 'pending' ? 'muted' : 'overdue')}>{DECIDED[a.decision]}</span>
     </div>;

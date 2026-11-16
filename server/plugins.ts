@@ -32,6 +32,10 @@ export type Setting = {key: string; label: string; type: 'text' | 'number' | 'bo
 export type SetupSpace = {name: string; key?: string; statuses?: {id: string; name: string; category: 'todo' | 'doing' | 'done'}[]; types?: string[]; views?: {name: string; kind: string; config?: ViewConfig}[]};
 export type Manifest = {
   id: string; name: string; version: string; description: string; publisher?: string; icon?: string; screenshots?: string[]; tags?: string[]; readme?: string;
+  /** What it does, one line each (shown as a list). */
+  highlights?: string[];
+  /** Releases, newest first. */
+  changelog?: {version: string; date: string; notes: string}[];
   contributes: {
     theme?: {light?: Record<string, string>; dark?: Record<string, string>};
     features?: Feature[];
@@ -41,7 +45,7 @@ export type Manifest = {
     settings?: Setting[];
   };
 };
-export type CatalogEntry = {id: string; manifest: Manifest; owner: string; status: 'draft' | 'pending' | 'listed' | 'rejected'; note: string; updated: string; builtin: boolean; installs: number};
+export type CatalogEntry = {id: string; manifest: Manifest; owner: string; status: 'draft' | 'pending' | 'listed' | 'rejected'; note: string; created: string; updated: string; builtin: boolean; installs: number};
 export type Install = {id: string; scope: 'workspace' | 'me'; version: string; manifest: Manifest; enabled: boolean; settings: Record<string, unknown>; at: string};
 
 // ---- Checks ----
@@ -73,8 +77,36 @@ function checkFilter(g: unknown, depth = 0) {
   }
 }
 
+// Readability: a theme cannot make text hard to read. Checked against the app's own colors for anything it leaves out.
+const BASE_THEME = {
+  light: {bg: '#ffffff', bg2: '#f7f7f8', card: '#ffffff', side: '#f7f7f8', text: '#1b1b1f', text2: '#4a4a55', muted: '#8b8b96', accent: '#6d5dfc'},
+  dark: {bg: '#16161a', bg2: '#1c1c21', card: '#1f1f25', side: '#131316', text: '#ececf1', text2: '#b4b4bf', muted: '#7c7c88', accent: '#6d5dfc'},
+};
+function luminance(c: string): number | null {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
+  if (!m) return null; // rgb() and hsl() values are not measured
+  const h = m[1].length === 3 ? [...m[1]].map(x => x + x).join('') : m[1];
+  const [r, g, b] = [0, 2, 4].map(i => { const v = parseInt(h.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+export function contrast(a: string, b: string): number | null {
+  const x = luminance(a), y = luminance(b);
+  if (x === null || y === null) return null;
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+function checkReadable(mode: 'light' | 'dark', vars: Record<string, string>) {
+  const v = {...BASE_THEME[mode], ...vars} as Record<string, string>;
+  // WCAG AA: body text 4.5:1; secondary text 3:1; white button text on the accent 3:1.
+  const pairs: [string, string, number, string][] = [['text', 'bg', 4.5, 'text on the background'], ['text', 'card', 4.5, 'text on cards'], ['text', 'side', 4.5, 'text in the sidebar'],
+    ['text2', 'bg', 3, 'secondary text on the background'], ['muted', 'bg', 2.2, 'faint text on the background'], ['#ffffff', 'accent', 3, 'button text on the accent']];
+  for (const [f, g, min, what] of pairs) {
+    const r = contrast(f.startsWith('#') ? f : v[f], v[g]);
+    if (r !== null && r < min) throw new Invalid(`theme.${mode}: ${what} is too hard to read (contrast ${r.toFixed(1)}:1, needs ${min}:1). Change ${f.startsWith('#') ? g : `${f} or ${g}`}.`);
+  }
+}
+
 /** Throws with a plain message when anything is out of bounds; returns a clean copy (unknown keys dropped). */
-export function checkManifest(m: unknown): Manifest {
+export function checkManifest(m: unknown, opts: {builtin?: boolean} = {}): Manifest {
   const x = m as Manifest;
   plain(x, 'A plugin');
   if (!x) throw new Invalid('A plugin must be an object');
@@ -83,7 +115,15 @@ export function checkManifest(m: unknown): Manifest {
   str(x.name, 60, 'name', true); str(x.description, 300, 'description', true); str(x.publisher, 60, 'publisher'); str(x.readme, 20000, 'readme');
   if (typeof x.version !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(x.version)) throw new Invalid('version must look like 1.0.0');
   if (x.icon !== undefined && !(typeof x.icon === 'string' && (IMAGE.test(x.icon) && x.icon.length < 200_000 || [...x.icon].length <= 2 && x.icon.length <= 8))) throw new Invalid('icon must be an emoji or a PNG, JPEG, WebP or GIF image (as a data URL) under 150 KB');
-  for (const s of list(x.screenshots, 4, 'screenshots')) if (typeof s !== 'string' || !IMAGE.test(s) || s.length > 900_000) throw new Invalid('Each screenshot must be a PNG, JPEG, WebP or GIF image (as a data URL) under 650 KB');
+  // Built-in plugins point at screenshots shipped with the app; everyone else sends the image itself.
+  for (const s of list(x.screenshots, 6, 'screenshots')) if (typeof s !== 'string' || !(opts.builtin ? /^\/plugin-shots\/[a-z0-9-]+\.(jpg|png|webp)$/.test(s) : IMAGE.test(s) && s.length < 900_000)) throw new Invalid('Each screenshot must be a PNG, JPEG, WebP or GIF image (as a data URL) under 650 KB');
+  for (const h of list(x.highlights, 15, 'highlights')) str(h, 240, 'A highlight', true);
+  for (const c of list(x.changelog, 30, 'changelog') as {version?: unknown; date?: unknown; notes?: unknown}[]) {
+    plain(c, 'A changelog entry');
+    if (typeof c.version !== 'string' || !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(c.version)) throw new Invalid('Each changelog entry needs a version like 1.0.0');
+    if (typeof c.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)) throw new Invalid('Each changelog entry needs a date like 2026-11-16');
+    str(c.notes, 600, 'Changelog notes', true);
+  }
   for (const t of list(x.tags, 8, 'tags')) str(t, 30, 'A tag', true);
   plain(x.contributes, 'contributes');
   const c = x.contributes ?? {};
@@ -101,6 +141,7 @@ export function checkManifest(m: unknown): Manifest {
         if (typeof v !== 'string' || !(k === 'radius' ? LENGTH.test(v) : COLOR.test(v.trim()))) throw new Invalid(`theme.${mode}.${k}: ${k === 'radius' ? 'use a size like 8px' : 'use a color like #1f2937 or rgb(31 41 55)'}`);
         clean[k] = v.trim();
       }
+      checkReadable(mode, clean);
       out.theme[mode] = clean;
     }
   }
@@ -171,7 +212,8 @@ export function checkManifest(m: unknown): Manifest {
     out.settings = c.settings.map(s => ({key: s.key, label: s.label, type: s.type, options: s.options, default: s.default}));
   }
   if (!Object.keys(out).length) throw new Invalid('A plugin must contribute something: theme, features, pages, views, setup or settings');
-  return {id: x.id, name: x.name.trim(), version: x.version, description: x.description.trim(), publisher: x.publisher, icon: x.icon, screenshots: x.screenshots, tags: x.tags, readme: x.readme, contributes: out};
+  return {id: x.id, name: x.name.trim(), version: x.version, description: x.description.trim(), publisher: x.publisher, icon: x.icon, screenshots: x.screenshots, tags: x.tags, readme: x.readme,
+    highlights: x.highlights, changelog: x.changelog?.map(c => ({version: c.version, date: c.date, notes: c.notes})), contributes: out};
 }
 
 /** Plain-language list of what a plugin changes, shown before anyone installs it. */
@@ -190,37 +232,83 @@ export function pluginEffects(m: Manifest): string[] {
 // ---- Built-in plugins from Cadence ----
 const PUB = 'Cadence';
 export const BUILTIN: Manifest[] = [
-  {id: 'cadence.day-planner', name: 'Day planner', version: '1.0.0', publisher: PUB, icon: '🗓️', tags: ['planning', 'focus'],
-    description: 'Top 3, brain dump and time boxes for today, with focus, three column and timeline layouts.',
-    readme: 'Adds the Day planner page to the sidebar. Plan today in time boxes, drag tasks in, and fit the day to the time you have.',
+  {id: 'cadence.day-planner', name: 'Day planner', version: '1.3.0', publisher: PUB, icon: '🗓️', tags: ['planning', 'focus', 'calendar'],
+    description: 'Plan today in time boxes: your top 3, a brain dump, and the hours of the day, next to your calendar.',
+    screenshots: ['/plugin-shots/day-planner.jpg'],
+    highlights: [
+      'Top 3 for the day and a brain dump: Enter adds a line, pasting many lines adds them all.',
+      'Match brain dump lines to existing tasks, or turn them into new tasks in the space you pick.',
+      'The day as time boxes: drag a line or a task onto an hour, drag down or up on empty time to make a box.',
+      'Drag a box to move it, its edges to change start or length. Each box has a play button that times it.',
+      'Plan my day from now fills the day from your top 3, then due and overdue work, by estimate.',
+      'Fit to my time moves boxes to when you actually worked, from your timers.',
+      'Calendar events show on the day (Google too, once connected); Add to calendar makes a box an event with guests and Meet.',
+      'Box colors match Google Calendar colors. Reminders reach your phone and desktop.',
+      'Three layouts with the same features: Focus, Three columns, Timeline across. A week strip shows planned time per day.',
+      'Your plan is yours only. Agents use get_day_plan, update_day_plan, schedule_day and fit_day_to_time.',
+    ],
+    changelog: [
+      {version: '1.3.0', date: '2026-11-16', notes: 'Became a plugin, installed by default. Box colors; drag up or down to make a box.'},
+      {version: '1.2.0', date: '2026-11-14', notes: 'Three layouts with the same features; week strip, day timesheet, time zones, Fit to my time.'},
+      {version: '1.0.0', date: '2026-11-14', notes: 'Top 3, brain dump, today and overdue, and the day as time boxes.'},
+    ],
+    readme: 'Opens from the sidebar (Day planner). Removing the plugin hides the page; plans are kept and come back if it is installed again.',
     contributes: {features: ['dayPlanner']}},
-  {id: 'cadence.whiteboards', name: 'Whiteboards', version: '1.0.0', publisher: PUB, icon: '🧭', tags: ['diagrams', 'workflows'],
-    description: 'Map, design and run workflows on a canvas: flowcharts, sticky notes, tables, one board per SOP.',
-    readme: 'Adds the Whiteboards page to the sidebar. Boards in a space follow that space\'s permissions.',
+  {id: 'cadence.whiteboards', name: 'Whiteboards', version: '1.2.0', publisher: PUB, icon: '🧭', tags: ['diagrams', 'workflows', 'SOP'],
+    description: 'Map, design and run workflows on a canvas: flowcharts, sticky notes, tables, and one board per SOP.',
+    screenshots: ['/plugin-shots/whiteboards.jpg'],
+    highlights: [
+      'Flow tools: start and stop, task, decision, trigger, webhook, end. Note tools: title, text, sticky, info, table, shape, frame, link.',
+      'Drag from a card\'s dot toward another card: the arrow snaps to it. Decision arrows are labeled Yes, then No.',
+      'Arrows route in right angles or straight, dashed or colored, with labels.',
+      'Create tasks turns cards into real tasks; arrows become dependencies. Running it again makes nothing new.',
+      'Run a board: tasks in order, webhooks after the steps before them, retry and skip, with a run log. Start by hand, webhook, schedule or a finished tag.',
+      'One board per SOP; the Routines page links each SOP to its board.',
+      'Import a Claude Whiteboards board by pasting its elements.',
+      'Boards in a space follow that space\'s permissions. Agents use list_boards, create_board, update_board, run_board and more.',
+    ],
+    changelog: [
+      {version: '1.2.0', date: '2026-11-16', notes: 'Became a plugin, installed by default.'},
+      {version: '1.1.0', date: '2026-11-14', notes: 'Claude Whiteboards parity and import; tables, titles, snapping arrows.'},
+      {version: '1.0.0', date: '2026-11-14', notes: 'Map, design and run workflows on a canvas.'},
+    ],
+    readme: 'Opens from the sidebar (Whiteboards). Removing the plugin hides the page; boards are kept.',
     contributes: {features: ['whiteboards']}},
-  {id: 'cadence.midnight', name: 'Midnight theme', version: '1.0.0', publisher: PUB, icon: '🌙', tags: ['theme'],
-    description: 'A deep blue dark theme with a teal accent. Light mode stays as is.',
-    contributes: {theme: {dark: {bg: '#0f172a', bg2: '#131c33', side: '#0b1222', hover: '#1b2540', active: '#223056', line: '#24304d', line2: '#18213a', card: '#151f38', text: '#e2e8f0', text2: '#b6c2d6', muted: '#7d8aa5', accent: '#14b8a6'}}}},
-  {id: 'cadence.paper', name: 'Paper theme', version: '1.0.0', publisher: PUB, icon: '📄', tags: ['theme'],
-    description: 'Warm off-white backgrounds and softer lines for long reading sessions.',
+  {id: 'cadence.midnight', name: 'Midnight theme', version: '1.0.0', publisher: PUB, icon: '🌙', tags: ['theme', 'dark'],
+    description: 'A deep blue dark theme with a teal accent. Light mode stays as it is.',
+    screenshots: ['/plugin-shots/midnight.jpg'],
+    highlights: ['Deep navy backgrounds and panels in dark mode.', 'Teal accent for buttons, links and the timer.', 'Text colors checked for contrast against every background.', 'Light mode is not changed.'],
+    changelog: [{version: '1.0.0', date: '2026-11-16', notes: 'First release.'}],
+    contributes: {theme: {dark: {bg: '#0f172a', bg2: '#131c33', side: '#0b1222', hover: '#1b2540', active: '#223056', line: '#24304d', line2: '#18213a', card: '#151f38', text: '#e2e8f0', text2: '#b6c2d6', muted: '#7d8aa5', accent: '#0d9488'}}}},
+  {id: 'cadence.paper', name: 'Paper theme', version: '1.0.0', publisher: PUB, icon: '📄', tags: ['theme', 'light'],
+    description: 'Warm off-white backgrounds and softer lines for long reading sessions. Dark mode stays as it is.',
+    screenshots: ['/plugin-shots/paper.jpg'],
+    highlights: ['Warm paper backgrounds and softer lines in light mode.', 'Rust accent for buttons and links.', 'Text colors checked for contrast.', 'Dark mode is not changed.'],
+    changelog: [{version: '1.0.0', date: '2026-11-16', notes: 'First release.'}],
     contributes: {theme: {light: {bg: '#fbfaf7', bg2: '#f4f1ea', side: '#f4f1ea', hover: '#ece8de', active: '#e4dfd2', line: '#e3ded2', line2: '#eeeae1', card: '#fffefb', accent: '#b4532a'}}}},
   {id: 'cadence.focus-board', name: 'My focus page', version: '1.0.0', publisher: PUB, icon: '🎯', tags: ['page', 'focus'],
-    description: 'A page with your urgent and high priority work, what is due soon and how much is open.',
+    description: 'A page with your urgent and high priority work, what is due in the next 7 days, and how much is open.',
+    screenshots: ['/plugin-shots/focus-page.jpg'],
+    highlights: ['Adds "My focus" to the sidebar.', 'Counts the open work assigned to you.', 'Lists your urgent and high priority tasks, then what is due in the next 7 days.', 'Click any task to open it. Shows only tasks you can already see.'],
+    changelog: [{version: '1.0.0', date: '2026-11-16', notes: 'First release.'}],
     contributes: {pages: [{id: 'focus', title: 'My focus', blocks: [
       {type: 'text', text: 'Work the top list first. Everything here is assigned to you and still open.'},
       {type: 'count', label: 'Open and assigned to me', mine: true, openOnly: true},
       {type: 'items', title: 'Urgent and high', mine: true, openOnly: true, limit: 30, filter: {join: 'or', rules: [{field: 'priority', op: 'is', value: '1'}, {field: 'priority', op: 'is', value: '2'}]}},
       {type: 'items', title: 'Due in the next 7 days', mine: true, openOnly: true, limit: 30, filter: {join: 'and', rules: [{field: 'due', op: 'before', value: '+8'}]}},
     ]}]}},
-  {id: 'cadence.sprint-views', name: 'Sprint view set', version: '1.0.0', publisher: PUB, icon: '🏃', tags: ['views'],
-    description: 'Board by status, open work and a this-week list. Add them to any space in one click.',
+  {id: 'cadence.sprint-views', name: 'Sprint view set', version: '1.0.0', publisher: PUB, icon: '🏃', tags: ['views', 'sprints'],
+    description: 'A board by status, an open work list and a due this week list. Add them to any space in one click.',
+    screenshots: ['/plugin-shots/sprint-views.jpg'],
+    highlights: ['Board grouped by status.', 'Open work: a list with done work hidden.', 'Due this week: open work due in the next 7 days.', 'Added with your permissions; if you cannot add shared views in a space, they are added as your own.'],
+    changelog: [{version: '1.0.0', date: '2026-11-16', notes: 'First release.'}],
     contributes: {views: [
       {name: 'Board', kind: 'board', config: {groupBy: 'status'}},
       {name: 'Open work', kind: 'list', config: {hideDone: true}},
       {name: 'Due this week', kind: 'list', config: {hideDone: true, filter: {join: 'and', rules: [{field: 'due', op: 'before', value: '+7'}]}}},
     ]}},
 ];
-for (const b of BUILTIN) checkManifest(b);
+for (const b of BUILTIN) checkManifest(b, {builtin: true});
 export const builtinFeatures = BUILTIN.filter(b => b.contributes.features?.length).map(b => b.id);
 
 // ---- Catalog (server-wide) ----
@@ -230,15 +318,15 @@ export class PluginCatalog {
       create table if not exists plugin_versions (id text not null, version text not null, manifest text not null, created text not null, primary key (id, version));`);
   }
   private row(r: Record<string, unknown>): CatalogEntry {
-    return {id: r.id as string, manifest: JSON.parse(r.manifest as string), owner: r.owner as string, status: r.status as CatalogEntry['status'], note: r.note as string, updated: r.updated as string, builtin: false, installs: 0};
+    return {id: r.id as string, manifest: JSON.parse(r.manifest as string), owner: r.owner as string, status: r.status as CatalogEntry['status'], note: r.note as string, created: (r.created as string) ?? (r.updated as string), updated: r.updated as string, builtin: false, installs: 0};
   }
   /** What one account can see: built-ins, listed plugins, and its own in any state. reviewer sees pending ones too. */
   list(owner: string | null, q = '', reviewer = false): CatalogEntry[] {
-    const rows = (this.db.prepare('select * from plugins order by updated desc').all() as Record<string, unknown>[]).map(r => this.row(r))
+    const rows = (this.db.prepare('select p.*, (select min(created) from plugin_versions v where v.id = p.id) created from plugins p order by p.updated desc').all() as Record<string, unknown>[]).map(r => this.row(r))
       .filter(e => e.status === 'listed' || e.owner === owner || (reviewer && e.status === 'pending'));
-    const all = [...BUILTIN.map(m => ({id: m.id, manifest: m, owner: PUB, status: 'listed' as const, note: '', updated: '', builtin: true, installs: 0})), ...rows];
+    const all = [...BUILTIN.map(m => ({id: m.id, manifest: m, owner: PUB, status: 'listed' as const, note: '', created: m.changelog?.at(-1)?.date ?? '', updated: m.changelog?.[0]?.date ?? '', builtin: true, installs: 0})), ...rows];
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    return all.filter(e => words.every(w => [e.manifest.name, e.manifest.description, e.manifest.publisher ?? '', ...(e.manifest.tags ?? [])].join(' ').toLowerCase().includes(w)));
+    return all.filter(e => words.every(w => [e.manifest.name, e.manifest.description, e.manifest.publisher ?? '', ...(e.manifest.tags ?? []), ...(e.manifest.highlights ?? [])].join(' ').toLowerCase().includes(w)));
   }
   get(id: string, owner: string | null, reviewer = false): CatalogEntry {
     const e = this.list(owner, '', reviewer).find(x => x.id === id);

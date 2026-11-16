@@ -5,35 +5,40 @@ import {createHash, randomBytes} from 'node:crypto';
 import type {Db} from './db.ts';
 import {Invalid, NotFound} from './errors.ts';
 import {hashPassword} from './auth.ts';
+import {DEFAULT_AGENT} from './agents.ts';
 
 const DAYS = 7;
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
-export type Invite = {id: string; email: string; name: string | null; role: string; jobRoles: string[]; by: string | null; created: string; expires: string; accepted: string | null};
+/** agent: the invitee is an AI agent. It joins as one team row marked AI agent, owned by whoever invited it. */
+export type Invite = {id: string; email: string; name: string | null; role: string; jobRoles: string[]; agent: boolean; by: string | null; created: string; expires: string; accepted: string | null};
 
 export function migrateInvites(db: Db) {
   db.exec(`create table if not exists invites (id text primary key, email text not null, name text, role text not null, token text not null unique,
     by text, created text not null, expires text not null, accepted text)`);
   const cols = db.prepare('pragma table_info(invites)').all().map(r => r.name);
   if (!cols.includes('job_roles')) db.exec("alter table invites add column job_roles text not null default '[]'");
+  if (!cols.includes('agent')) db.exec('alter table invites add column agent integer not null default 0');
 }
 const parseList = (v: unknown) => { try { const a = JSON.parse(String(v ?? '[]')); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } };
-const row = (r: Record<string, unknown>): Invite => ({id: r.id as string, email: r.email as string, name: (r.name as string) ?? null, role: r.role as string, jobRoles: parseList(r.job_roles),
+const row = (r: Record<string, unknown>): Invite => ({id: r.id as string, email: r.email as string, name: (r.name as string) ?? null, role: r.role as string, jobRoles: parseList(r.job_roles), agent: !!r.agent,
   by: (r.by as string) ?? null, created: r.created as string, expires: r.expires as string, accepted: (r.accepted as string) ?? null});
 
-export function createInvite(db: Db, input: {email?: unknown; name?: unknown; role?: unknown; jobRoles?: unknown}, by: string | null, roles: string[], jobRoleIds: string[] = []) {
+export function createInvite(db: Db, input: {email?: unknown; name?: unknown; role?: unknown; jobRoles?: unknown; agent?: unknown}, by: string | null, roles: string[], jobRoleIds: string[] = []) {
   const email = String(input.email ?? '').trim().toLowerCase();
   if (!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(email) || email.length > 200) throw new Invalid('Enter a valid email address');
   const role = String(input.role ?? 'editor');
+  const agent = !!input.agent;
+  if (agent && role === 'admin') throw new Invalid('AI agents are never admins. Pick another level.');
   if (!roles.includes(role)) throw new Invalid(`Role must be one of: ${roles.join(', ')}`);
   const jobRoles = [...new Set((Array.isArray(input.jobRoles) ? input.jobRoles : []).map(String))];
   for (const j of jobRoles) if (!jobRoleIds.includes(j)) throw new Invalid(`Unknown job role "${j}"`);
   const existing = db.prepare('select password, active from people where lower(email) = ?').get(email) as {password: string | null; active: number} | undefined;
   if (existing?.password && existing.active) throw new Invalid('That person already has an account in this workspace. They can sign in.');
   const secret = randomBytes(32).toString('base64url');
-  const inv = {id: randomBytes(6).toString('hex'), email, name: String(input.name ?? '').trim().slice(0, 100) || null, role, jobRoles, by,
+  const inv = {id: randomBytes(6).toString('hex'), email, name: String(input.name ?? '').trim().slice(0, 100) || null, role, jobRoles, agent, by,
     created: new Date().toISOString(), expires: new Date(Date.now() + DAYS * 86400_000).toISOString()};
   db.prepare('delete from invites where email = ? and accepted is null').run(email); // one live invite per email
-  db.prepare('insert into invites (id, email, name, role, job_roles, token, by, created, expires) values (?,?,?,?,?,?,?,?,?)').run(inv.id, inv.email, inv.name, inv.role, JSON.stringify(jobRoles), sha(secret), inv.by, inv.created, inv.expires);
+  db.prepare('insert into invites (id, email, name, role, job_roles, token, by, created, expires, agent) values (?,?,?,?,?,?,?,?,?,?)').run(inv.id, inv.email, inv.name, inv.role, JSON.stringify(jobRoles), sha(secret), inv.by, inv.created, inv.expires, agent ? 1 : 0);
   return {invite: {...inv, accepted: null} as Invite, secret};
 }
 export const listInvites = (db: Db) => db.prepare('select * from invites where accepted is null order by created desc').all().map(row);
@@ -59,6 +64,11 @@ export function acceptInvite(db: Db, secret: string, input: {name?: unknown; pas
   const existing = db.prepare('select id from people where lower(email) = ?').get(inv.email) as {id: string} | undefined;
   const id = existing?.id ?? createPerson(name, inv.email);
   db.prepare('update people set name = ?, password = ?, role = ?, job_roles = ?, active = 1 where id = ?').run(name, hash, inv.role, JSON.stringify(inv.jobRoles), id);
+  // An agent invite: the same row becomes the AI agent (owned by the inviter, never admin), so there is never a second Joey.
+  if (inv.agent) {
+    const cur = db.prepare('select owner, agent from people where id = ?').get(id) as {owner?: string | null; agent?: string | null};
+    db.prepare("update people set kind = 'ai', admin = 0, owner = ?, agent = ? where id = ?").run(cur.owner ?? inv.by, cur.agent ?? JSON.stringify(DEFAULT_AGENT), id);
+  }
   db.prepare('update invites set accepted = ? where id = ?').run(new Date().toISOString(), inv.id);
   return id;
 }

@@ -53,7 +53,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           <optgroup key={t} label={t}>{allItems.filter(p => p.type === t && p.id !== i.id && (!p.completed || p.id === i.parentId)).map(p => <option key={p.id} value={p.id}>{p.title.slice(0, 60)}</option>)}</optgroup>
         ))}
       </select>)},
-    {id: 'status', name: 'Status', width: 140, sortVal: i => project.statuses.findIndex(s => s.id === i.status), cell: i => <StatusSelect project={project} value={i.status} onChange={status => up(i)({status})} />},
+    {id: 'status', name: 'Status', width: 140, sortVal: i => project.statuses.findIndex(s => s.id === i.status), cell: i => <StatusSelect project={project} item={i} value={i.status} onChange={status => up(i)({status})} />},
     {id: 'type', name: 'Type', width: 100, sortVal: i => project.types.indexOf(i.type), cell: i => <span className="type-cell"><TypeSelect project={project} value={i.type} onChange={type => up(i)({type})} /><RoutineMark item={i} corner /></span>},
     {id: 'assignees', name: 'Assignee', width: 120, sortVal: i => i.assignees.length, raw: i => i.assignees, cell: i => <PeoplePicker value={i.assignees} people={peopleFor(i, store.people)} onReorder={store.reorderPeople} onChange={assignees => up(i)({assignees})} />},
     {id: 'priority', name: 'Priority', width: 110, sortVal: i => i.priority || 9, cell: i => <PrioritySelect value={i.priority} onChange={priority => up(i)({priority})} showLabel />},
