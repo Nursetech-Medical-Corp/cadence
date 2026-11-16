@@ -445,6 +445,21 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     });
   tool('decide_claim', 'For human reviewers: accept or decline an AI claim on a task.', {item: z.string(), accept: z.boolean(), note: z.string().optional()}, false,
     i => tasks.decideClaim(tasks.findItem(i.item).id, actor, i.accept, i.note ?? ''));
+  // Plugins: add-ons made of data (themes, built-in modules, pages of safe blocks, view presets, setups). Nothing in them runs.
+  tool('list_plugins', 'Plugin store: plugins you can install (built-in, approved for everyone, and your own drafts), searchable with q, plus what is installed for the workspace and for you.', {q: z.string().optional()}, true,
+    i => tasks.plugins(actor, i.q ?? ''));
+  tool('get_plugin', 'One plugin: its manifest, what it changes (effects), review status and where it is installed.', {id: z.string()}, true, i => tasks.pluginInfo(i.id, actor));
+  tool('check_plugin', 'Validate a plugin manifest without saving. Returns the cleaned manifest and its effects, or the first problem. See docs/PLUGINS.md for the format.', {manifest: z.record(z.string(), z.unknown())}, true,
+    i => tasks.checkPlugin(i.manifest));
+  tool('save_plugin', 'Create or update a plugin you own (saved as a draft that only you see). Raise version for a new release.', {manifest: z.record(z.string(), z.unknown())}, false,
+    i => tasks.savePlugin(i.manifest, actor));
+  tool('submit_plugin', 'Send your plugin to the server owner for review so everyone on this server can install it.', {id: z.string()}, false, i => tasks.submitPlugin(i.id, actor));
+  tool('install_plugin', 'Install a plugin for me, or for the whole workspace (admins, approved plugins only).', {id: z.string(), scope: z.enum(['me', 'workspace']).optional()}, false,
+    i => tasks.installPlugin(i.id, i.scope ?? 'me', actor));
+  tool('uninstall_plugin', 'Remove an installed plugin, for me or for the workspace (admins).', {id: z.string(), scope: z.enum(['me', 'workspace']).optional()}, false,
+    i => tasks.uninstallPlugin(i.id, i.scope ?? 'me', actor));
+  tool('set_plugin', 'Turn an installed plugin off or on without removing it, or change its settings.', {id: z.string(), scope: z.enum(['me', 'workspace']).optional(), enabled: z.boolean().optional(), settings: z.record(z.string(), z.unknown()).optional()}, false,
+    i => tasks.setPlugin(i.id, i.scope ?? 'me', actor, {enabled: i.enabled, settings: i.settings}));
   tool('template_gallery', 'Built-in template packs (vendor onboarding, compliance routines, new hire, AI agency work) and what they contain.', {}, true, () => tasks.gallery());
   tool('install_pack', 'Install a gallery pack by name, or a pack JSON exported from another workspace, as templates (and its automations into a project if given).', {gallery: z.string().optional(), pack: z.any().optional(), project: z.string().optional()}, false,
     i => tasks.installPack(i.pack ?? {gallery: i.gallery ?? ''}, i.project ? projectId(i.project) : undefined));

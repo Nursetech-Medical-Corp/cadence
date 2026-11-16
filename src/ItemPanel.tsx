@@ -3,6 +3,7 @@ import {TimeBox} from './TimeTracker.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {FieldCell} from './TableView.tsx';
 import {COMPUTED} from './Fields.tsx';
+import {FocusButton} from './Focus.tsx';
 import {GripVertical, Link2, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight, Pin, PinOff} from 'lucide-react';
 import type {Comment, Item} from './types.ts';
 import {api, type Store} from './store.ts';
@@ -156,6 +157,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         </span>
         <RoutineBadge item={item} />
         <span className="spacer" />
+        <FocusButton store={store} item={item} />
         <SaveTemplateButton store={store} item={item} />
         <ParkButtons store={store} item={item} />
         <button className="icon" title="Delete" onClick={() => { if (confirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`)) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>

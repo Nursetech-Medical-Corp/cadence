@@ -70,7 +70,8 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Meetings and calendar | Calendar view, Meetings, two-way Google sync | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item`, `calendar_events` |
 | Templates | Templates page, gallery packs | `list_templates`, `get_template`, `create_template`, `update_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack`, `delete_template` |
 | AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim`, `suggest_work`, `my_proposals` |
-| Time | Timers, Timesheet | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| Time | Timers, Timesheet, timer bar, focus mode, pop-out timer | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| Plugins (docs/PLUGINS.md) | Plugins page: store, search, install for me or everyone, on/off, settings, make, submit, review | `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 | Inbox, comments | Inbox | `my_notifications`, `mark_notifications_read`, `add_comment`, `resolve_comment` |
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
@@ -121,6 +122,20 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `create_subspace` with `kind`: `tasks` (a normal nested space), `pipeline` (stages To contact, Contacted, Meeting, Committed, Passed; Amount; Board, Table with a total, Calendar) or `contacts` (New, Reached, Following up, Closed). Both list kinds get Company, Email, Phone, Last contact, Next step and Times contacted columns.
 - The parent space gets a relation column named after the list, so a task there ("Send deck") can point at the records it is about. A routine (like a weekly pipeline check) lives in the parent space as a normal task.
 - Move a space with `update_project` `parent` (null for top level); turn list mode on or off with `records`.
+
+## Focus mode and the timer bar
+
+- Focus mode (Focus button on a task, or on the timer bar) fills the screen with one task: title, notes, subitems and the timer. Done stops a running timer and completes the task. Esc leaves.
+- While a timer runs, a bar at the top of every page shows the task, the clock, Stop, Done, Focus and Pop out.
+- Pop out opens a small timer window that stays on top of every window (Chrome and Edge; other browsers get a normal small window).
+- Each person picks what starting a timer does (gear on the bar or in focus mode): open focus mode, pop out the timer, show the bar. Saved in prefs `focus` `{onStart: none|focus, popOut, bar}`.
+- Agents start and stop timers with `start_timer` and `stop_timer`; the bar and focus mode follow in every open tab.
+
+## Plugins
+
+- Add-ons made of data only (docs/PLUGINS.md): themes, built-in modules (Day planner and Whiteboards are plugins), pages of safe blocks, view presets, setups and settings. The server checks every value; nothing runs.
+- Install for yourself (`scope: me`) or the workspace (`scope: workspace`, admins, approved plugins only). `set_plugin` turns one off without removing it. Drafts are seen only by their maker; the server owner approves plugins for everyone.
+- Agents can build a plugin: `check_plugin` until it passes, `save_plugin`, `install_plugin` for themselves to test, then `submit_plugin`.
 
 ## Day planner
 
@@ -197,6 +212,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `GET /api/hooks?scope=<spaceId|workspace>`; `PUT /api/hooks` `{scope, webhooks: [{id?, name, url, secret?, events, active}], dueSoonDays?}`; `POST /api/hooks/test` `{scope, id}`; `GET /api/hooks/deliveries?scope=&hook=`
 - `POST /api/hooks/in/<tool name>` with the tool's arguments as JSON runs that tool as the token's person (Bearer header only); `POST /api/hooks/in/trigger` `{project, key, item?, ...}` runs rules waiting for the key. See docs/WEBHOOKS.md
 - `GET /api/plan/estimates|replan|forecast`, `POST /api/plan/estimates|apply`
+- `GET /api/plugins?q=`, `GET /api/plugins/:id`, `POST /api/plugins/check|/api/plugins` `{manifest}`, `POST /api/plugins/:id/submit|review`, `POST|DELETE|PATCH /api/plugins/:id/install` `{scope, enabled?, settings?}`
 - `GET /api/changes?since=ISO`, `PUT /api/external/:source/:id` `{projectId, title, ...}`
 - `GET /api/routines`; `POST /api/routines/act` `{ids, action, to?, on?}` (action: skip, delay, wait, pause, resume, end)
 - `GET /api/parked`; `POST /api/park/:id` `{action: archive|restore|snooze, kind?, reason?, until?}`

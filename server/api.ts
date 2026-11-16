@@ -14,6 +14,7 @@ import {startWebhooks} from './webhooks.ts';
 import {backupDir, exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, restoreSnapshotFile, retention, saveSettings, snapFromName, snapshot} from './backup.ts';
 import {cleanPersonJobRoles, joinByDomain} from './jobroles.ts';
 import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
+import {PluginCatalog, listInstalls, migratePluginInstalls} from './plugins.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
@@ -117,6 +118,15 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateSops(tasks);
   migrateBoards(tasks);
   migrateDayPlans(tasks);
+  migratePluginInstalls(tasks.db);
+  // Plugins: one catalog for every workspace on this server; the server owner reviews what is shared with everyone.
+  tasks.catalog = new PluginCatalog(accounts.db);
+  tasks.isReviewer = pid => {
+    if (!getWorkspace(tasks.db).requireLogin) return true;
+    const email = pid ? (tasks.db.prepare('select email from people where id = ?').get(pid) as {email: string | null} | undefined)?.email : null;
+    const owner = accounts.owner();
+    return !!email && !!owner && accounts.group(owner).includes(email);
+  };
   // Day planner reminders: checked every minute.
   setInterval(() => { try { dayPlanReminders(tasks); } catch (e) { console.error('Day planner reminders failed', e); } }, 60_000).unref();
   migrateOAuth(accounts.db);
@@ -283,7 +293,7 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const ct = String(req.headers['content-type'] ?? '');
         if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout') && a !== 'hooks') return send(res, 415, {error: 'Send JSON with content-type application/json'});
       }
-      const body = m === 'GET' || m === 'DELETE' ? {} : a === 'hooks' && b?.startsWith('wb_') ? await readJson(req, 200_000).catch(() => ({})) : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' || (a === 'hooks' && b === 'in') ? 15_000_000 : 2_000_000);
+      const body = m === 'GET' || m === 'DELETE' ? {} : a === 'hooks' && b?.startsWith('wb_') ? await readJson(req, 200_000).catch(() => ({})) : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' || (a === 'hooks' && b === 'in') ? 15_000_000 : a === 'plugins' ? 4_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
@@ -642,7 +652,7 @@ If you did not ask for it, ignore this email.`)
           people: tasks.listPeople(), projects, items, today: tasks.today(),
           time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => seen.has(iid))),
           sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
-          prefs: actor && !bearer ? tasks.prefs(actor) : {}, settings: {custom: ws.custom, features: ws.features, admin: !ws.requireLogin || isAdmin(actor)},
+          prefs: actor && !bearer ? tasks.prefs(actor) : {}, plugins: listInstalls(tasks.db, actor), settings: {custom: ws.custom, features: ws.features, admin: !ws.requireLogin || isAdmin(actor)},
         });
       }
 
@@ -748,6 +758,21 @@ If you did not ask for it, ignore this email.`)
         const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: publicOrigin(req), canSee});
         res.end(feed);
         return;
+      }
+      if (a === 'plugins') {
+        const scope = (body.scope ?? q('scope') ?? 'me') as 'workspace' | 'me';
+        // Workspace installs change what everyone sees, so they are for admins; anyone installs for themselves.
+        const needScope = () => { if (scope === 'workspace') needAdmin(); };
+        if (!b && m === 'GET') return send(res, 200, tasks.plugins(actor, q('q') ?? ''));
+        if (b === 'check' && m === 'POST') return send(res, 200, tasks.checkPlugin(body.manifest));
+        if (!b && m === 'POST') return send(res, 200, tasks.savePlugin(body.manifest, actor));
+        if (b && !c && m === 'GET') return send(res, 200, tasks.pluginInfo(b, actor));
+        if (b && !c && m === 'DELETE') return send(res, 200, tasks.deletePlugin(b, actor));
+        if (b && c === 'submit' && m === 'POST') return send(res, 200, tasks.submitPlugin(b, actor));
+        if (b && c === 'review' && m === 'POST') return send(res, 200, tasks.reviewPlugin(b, !!body.approve, String(body.note ?? ''), actor));
+        if (b && c === 'install' && m === 'POST') { needScope(); return send(res, 200, tasks.installPlugin(b, scope, actor)); }
+        if (b && c === 'install' && m === 'DELETE') { needScope(); return send(res, 200, tasks.uninstallPlugin(b, scope, actor)); }
+        if (b && c === 'install' && m === 'PATCH') { needScope(); return send(res, 200, tasks.setPlugin(b, scope, actor, {enabled: body.enabled, settings: body.settings})); }
       }
       if (a === 'packs') {
         if (b === 'gallery' && m === 'GET') return send(res, 200, tasks.gallery());

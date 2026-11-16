@@ -21,6 +21,7 @@ import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateDa
 import {DATE_TRIGGERS, apply as applyRule, matches as ruleMatches, validateRules, type RuleContext, type RuleHost} from './automations.ts';
 import {cleanHooks, cleanRuleSecrets, listDeliveries, queueHooks, saveWorkspaceHooks, workspaceHooks} from './webhooks.ts';
 import {normalizeHook} from '../src/hooks.ts';
+import {PluginCatalog, checkManifest, install as installPluginRow, listInstalls, migratePluginInstalls, pluginEffects, setInstall, uninstall as uninstallPluginRow, type Manifest} from './plugins.ts';
 import {PRIORITIES} from '../src/types.ts';
 import type {Activity, BurnPoint, InheritKey, ProjectSettings, Rule, Template, Trigger, ChangeEvent, Comment, FieldDef, Item, ItemPatch, Notification, Person, Project, Recur, Sprint, Status, TimeEntry, View, ViewConfig, ViewKind} from '../src/types.ts';
 
@@ -1516,6 +1517,58 @@ export class Tasks {
 
   /** Everything in this workspace as one JSON file (the same as Data and backups, Export). Passwords are left out. */
   exportWorkspace() { return exportAll(this.db, {skipPrivate: true}); }
+  // ---- Plugins (server/plugins.ts): a server-wide catalog and installs in this workspace ----
+  /** The catalog; the API points this at the server-wide accounts database. Alone (stdio MCP) it uses this workspace. */
+  catalog?: PluginCatalog;
+  /** Server owners review plugins submitted for everyone (set by the API). */
+  isReviewer: (person: string | null) => boolean = () => false;
+  private cat() { return this.catalog ??= new PluginCatalog(this.db); }
+  private pluginOwner(person: string | null) {
+    const p = person ? this.db.prepare('select email from people where id = ?').get(person) as {email: string | null} | undefined : undefined;
+    return p?.email || (person ? `person:${person}` : 'local');
+  }
+  /** The catalog this person can see (search with q) and what is installed for the workspace and for them. */
+  plugins(person: string | null, q = '') {
+    migratePluginInstalls(this.db);
+    const owner = this.pluginOwner(person), reviewer = this.isReviewer(person);
+    const installed = listInstalls(this.db, person);
+    return {
+      catalog: this.cat().list(owner, q, reviewer).map(e => ({id: e.id, name: e.manifest.name, description: e.manifest.description, publisher: e.manifest.publisher ?? (e.builtin ? 'Cadence' : e.owner),
+        icon: e.manifest.icon, tags: e.manifest.tags ?? [], version: e.manifest.version, status: e.status, builtin: e.builtin, mine: e.owner === owner, note: e.note,
+        installed: installed.filter(i => i.id === e.id).map(i => i.scope)})),
+      installed, reviewer,
+    };
+  }
+  /** One plugin with everything it changes, shown before install. */
+  pluginInfo(id: string, person: string | null) {
+    const owner = this.pluginOwner(person), e = this.cat().get(id, owner, this.isReviewer(person));
+    return {...e, mine: e.owner === owner, reviewer: this.isReviewer(person), effects: pluginEffects(e.manifest), installed: listInstalls(this.db, person).filter(i => i.id === id)};
+  }
+  /** Check a manifest without saving it. */
+  checkPlugin(manifest: unknown) { const m = checkManifest(manifest); return {ok: true, manifest: m, effects: pluginEffects(m)}; }
+  /** Save a plugin you make (draft, only you see it until it is approved). */
+  savePlugin(manifest: unknown, person: string | null) { return this.cat().save(manifest, this.pluginOwner(person)); }
+  submitPlugin(id: string, person: string | null) { return this.cat().submit(id, this.pluginOwner(person)); }
+  deletePlugin(id: string, person: string | null) { this.cat().remove(id, this.pluginOwner(person), this.isReviewer(person)); return {ok: true}; }
+  reviewPlugin(id: string, approve: boolean, note: string, person: string | null) {
+    if (!this.isReviewer(person)) throw new Invalid('Only the server owner reviews plugins for everyone');
+    this.cat().review(id, approve, note); return this.pluginInfo(id, person);
+  }
+  /** Install for the whole workspace (admins) or just for me. Your own drafts install only for you, to test them. */
+  installPlugin(id: string, scope: 'workspace' | 'me', person: string | null) {
+    migratePluginInstalls(this.db);
+    if (scope !== 'workspace' && scope !== 'me') throw new Invalid('scope is workspace or me');
+    const owner = this.pluginOwner(person), e = this.cat().get(id, owner, this.isReviewer(person));
+    if (e.status !== 'listed' && scope === 'workspace') throw new Invalid('Only approved plugins install for the whole workspace. Install it for yourself to test it.');
+    installPluginRow(this.db, e.manifest as Manifest, scope, person);
+    return listInstalls(this.db, person);
+  }
+  uninstallPlugin(id: string, scope: 'workspace' | 'me', person: string | null) { migratePluginInstalls(this.db); uninstallPluginRow(this.db, id, scope, person); return listInstalls(this.db, person); }
+  /** Turn an installed plugin off or on (it stays installed) or change its settings. */
+  setPlugin(id: string, scope: 'workspace' | 'me', person: string | null, patch: {enabled?: boolean; settings?: Record<string, unknown>}) {
+    migratePluginInstalls(this.db); setInstall(this.db, id, scope, person, patch); return listInstalls(this.db, person);
+  }
+
   /** Job roles (company roles and the spaces each one opens), permission levels, and who holds which job roles. Read only; changes are made on the Team page. */
   jobRoles() {
     const w = getWorkspace(this.db), projects = this.listProjects();
