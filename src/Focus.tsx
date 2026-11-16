@@ -6,10 +6,11 @@
 //   Pop out: a small always-on-top window (Chrome and Edge keep it above every window and app).
 // Each person picks what starting a timer does (prefs "focus"): open the focus view, pop out, show the bar.
 // Any of these can be on together. Set on the bar's gear, in the focus view, or on the Team page (My account).
-import {TaskClock} from './TimeTracker.tsx';
+import {TaskClock, TimeProgress} from './TimeTracker.tsx';
 import {useEffect, useState} from 'react';
+import {wsId} from './store.ts';
 import {createPortal} from 'react-dom';
-import {Calendar, CheckCircle2, Focus as FocusIcon, Maximize, Minimize, PanelRightOpen, PictureInPicture2, Play, Settings2, Square, X} from 'lucide-react';
+import {Calendar, CheckCircle2, Focus as FocusIcon, Maximize, Minimize, PictureInPicture2, Play, Settings2, Square, X} from 'lucide-react';
 import {fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {BlockEditor} from './BlockEditor.tsx';
 import {Check, InlineText, Popover, PriorityIcon, StatusIcon, itemKey} from './components.tsx';
@@ -37,36 +38,20 @@ async function finish(store: Store, item: Item) {
 /** Everything focus related; mount once in the app. */
 export function FocusHost({store, open}: {store: Store; open: (id: string) => void}) {
   const cfg = focusPrefs(store);
-  const [pip, setPip] = useState<Window | null>(null);
-
-  const popOut = async () => {
-    if (pip && !pip.closed) { pip.focus(); return; }
-    const dpip = (window as unknown as {documentPictureInPicture?: {requestWindow: (o: {width: number; height: number}) => Promise<Window>}}).documentPictureInPicture;
-    let w: Window | null = null;
-    try { w = dpip ? await dpip.requestWindow({width: 380, height: 200}) : window.open('', 'cadence-timer', 'width=400,height=230,popup=yes'); }
-    catch { w = window.open('', 'cadence-timer', 'width=400,height=230,popup=yes'); }
+  // The pop-out is its own small window (#/popout), not tied to this page: reloading or going back here leaves it open.
+  const popOut = () => {
+    const w = window.open('', POPOUT_NAME, 'width=400,height=320,popup=yes');
     if (!w) { store.flash('Allow pop-ups for this site to pop out the timer'); return; }
-    w.document.title = 'Cadence focus';
-    for (const ss of [...document.styleSheets]) {
-      try { const st = w.document.createElement('style'); st.textContent = [...ss.cssRules].map(r => r.cssText).join('\n'); w.document.head.appendChild(st); }
-      catch { if (ss.href) { const l = w.document.createElement('link'); l.rel = 'stylesheet'; l.href = ss.href; w.document.head.appendChild(l); } }
-    }
-    w.document.documentElement.dataset.theme = document.documentElement.dataset.theme;
-    w.document.body.className = 'pip-body';
-    // Closing the pop-out yourself forgets it; a reload of this page closes it too (the browser ties it to the page),
-    // and the focus bar then offers to reopen it.
-    w.addEventListener('pagehide', () => { setPip(null); if (!unloading) sessionStorage.removeItem('pip-open'); });
-    sessionStorage.setItem('pip-open', '1');
-    setPip(w);
+    try { if (w.location.href === 'about:blank' || !w.location.hash.startsWith('#/popout')) w.location.href = `${location.pathname}${location.search}#/popout`; } catch { /* another site: leave it */ }
+    w.focus();
   };
-  // After a reload the bar offers Reopen pop-out (a pulsing button): browsers only open it from a click.
-  const [reopen, setReopen] = useState(() => sessionStorage.getItem('pip-open') === '1');
+  // The pop-out asks for the full page focus view here.
   useEffect(() => {
-    const bye = () => { unloading = true; };
-    window.addEventListener('pagehide', bye);
-    return () => window.removeEventListener('pagehide', bye);
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel(`cadence-focus-${wsId()}`);
+    ch.onmessage = m => { const id = (m.data as {focus?: string}).focus; if (id && !document.hidden) { fullPage(true); store.setFocusId(id); window.focus(); } };
+    return () => ch.close();
   }, []);
-  useEffect(() => { if (pip) setReopen(false); }, [pip]);
 
   // Starting a timer anywhere puts its task in focus, and opens the focus view or the pop-out if this person wants that.
   useEffect(() => {
@@ -78,15 +63,13 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
     window.addEventListener('cadence:timer-start', on);
     return () => window.removeEventListener('cadence:timer-start', on);
   });
-  useEffect(() => () => { pip?.close(); }, [pip]);
 
   const list = focusList(store);
   const focusItem = store.focusId ? store.items.get(store.focusId) : undefined;
   return <>
     {/* On document.body so they sit above the sidebar and the task panel. */}
-    {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} reopen={reopen} />, document.body)}
+    {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} />, document.body)}
     {focusItem && createPortal(<FocusView store={store} item={focusItem} list={list} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
-    {pip && !pip.closed && createPortal(<MiniFocus store={store} list={list} focus={id => { window.focus(); store.setFocusId(id); }} />, pip.document.body)}
   </>;
 }
 
@@ -95,8 +78,7 @@ function Clock({start, className = 'fx-clock'}: {start: string; className?: stri
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
 
-/** Set while this page unloads, so the pop-out closing with it is not taken as you closing it. */
-let unloading = false;
+const POPOUT_NAME = 'cadence-popout';
 
 /** Whether the focus view fills the screen (kept per browser). */
 const isFullPage = () => localStorage.getItem('fv-full') === '1';
@@ -131,7 +113,7 @@ export function FocusSettingsCard({store}: {store: Store}) {
   </section>;
 }
 
-function FocusBar({store, list, open, popOut, reopen}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void; reopen?: boolean}) {
+function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void}) {
   const run = store.running;
   return <div className="focus-bar" role="status">
     <span className="fb-label"><FocusIcon size={13} /> Focus</span>
@@ -142,16 +124,15 @@ function FocusBar({store, list, open, popOut, reopen}: {store: Store; list: Item
           {on ? <button className="fb-btn" title="Stop the timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
             : <button className="fb-btn" title="Start the timer on this task" onClick={() => store.startTimer(i.id)}><Play size={10} fill="currentColor" /></button>}
           {on && <TaskClock store={store} itemId={i.id} className="fx-clock" />}
-          <button className="fb-title" title={`${i.title}. Click for the focus view`} onClick={() => store.setFocusId(i.id)}>{i.title}</button>
+          <button className="fb-title" title={`${i.title}. Click to open the task`} onClick={() => open(i.id)}>{i.title}</button>
           <button className="fb-btn" title="Full page focus on this task" onClick={() => { fullPage(true); store.setFocusId(i.id); }}><Maximize size={12} /></button>
           <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
-          <button className="fb-btn" title="Open the task panel" onClick={() => open(i.id)}><PanelRightOpen size={12} /></button>
           <button className="fb-btn" title="Take out of focus" onClick={() => store.focusRemove(i.id)}><X size={12} /></button>
         </div>;
       })}
     </div>
     <button className="fb-btn fb-labeled" title="Full page focus on the running task (or the first one)" onClick={() => { fullPage(true); store.setFocusId(store.running && list.some(i => i.id === store.running!.itemId) ? store.running.itemId : list[0].id); }}><Maximize size={13} /> Full page</button>
-    <button className={'fb-btn fb-labeled' + (reopen ? ' pulse' : '')} title={reopen ? 'The page reloaded, which closed the pop-out. Click anywhere (or here) to bring it back' : 'Pop out a small timer that stays on top of other windows'} onClick={popOut}><PictureInPicture2 size={13} /> {reopen ? 'Reopen pop-out' : 'Pop out'}</button>
+    <button className="fb-btn fb-labeled" title="Pop out a small timer window; it stays open when this page reloads" onClick={popOut}><PictureInPicture2 size={13} /> Pop out</button>
     <FocusSettings store={store} />
   </div>;
 }
@@ -204,8 +185,7 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
         <aside className="fv-side">
           <section className={'fv-timer' + (run ? ' on' : '')}>
             <TaskClock store={store} itemId={item.id} total="below" className={'fv-clock' + (run ? '' : ' idle')} />
-            <div className="fv-progress" title={est ? `${pct}% of the estimate` : 'No estimate'}><span style={{width: `${est ? pct : 0}%`}} /></div>
-            <div className="muted small">{est ? `${pct}% of the ${fmtMinutes(est)} estimate` : run ? 'Big number: this run' : 'Total logged on the task'}</div>
+            <TimeProgress store={store} itemId={item.id} />
             {run ? <button className="btn fv-wide" onClick={() => store.stopTimer()}><Square size={12} fill="currentColor" /> Stop timer</button>
               : <button className="btn primary fv-wide" onClick={() => store.startTimer(item.id)}><Play size={12} fill="currentColor" /> Start timer</button>}
             <button className="btn fv-wide" disabled={!!item.completed} onClick={() => finish(store, item).then(close)}><CheckCircle2 size={14} /> {item.completed ? 'Done' : 'Done (stops the timer)'}</button>
@@ -221,22 +201,75 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
 }
 
 /** Inside the pop-out window: the tasks in focus, with the running one on top. */
-function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id: string) => void}) {
+export function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id: string) => void}) {
   const run = store.running;
   if (!list.length) return <div className="pip-timer"><span className="muted">Nothing in focus. Start a timer in Cadence.</span></div>;
   const sorted = [...list].sort((a, b) => (b.id === run?.itemId ? 1 : 0) - (a.id === run?.itemId ? 1 : 0));
   return <div className="pip-timer">
     {sorted.map(i => {
       const on = run?.itemId === i.id;
-      return <div key={i.id} className={'pip-row' + (on ? ' on' : '')}>
-        {on ? <button className="fb-btn" title="Stop" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /></button>
-          : <button className="fb-btn" title="Start" onClick={() => store.startTimer(i.id)}><Play size={11} fill="currentColor" /></button>}
-        {on ? <TaskClock store={store} itemId={i.id} className="fx-clock" /> : null}
-        <span className="pip-title" title={i.title}>{i.title}</span>
-        <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
-        <button className="fb-btn pip-full" title="Full page focus in Cadence" onClick={() => { fullPage(true); focus(i.id); }}><Maximize size={12} /> Full page</button>
+      return <div key={i.id} className={'pip-card' + (on ? ' on' : '')}>
+        <div className="pip-row">
+          {on ? <button className="fb-btn" title="Stop" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /></button>
+            : <button className="fb-btn" title="Start" onClick={() => store.startTimer(i.id)}><Play size={11} fill="currentColor" /></button>}
+          <span className="pip-title" title={i.title}>{i.title}</span>
+          <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
+          <button className="fb-btn" title="Full page focus in Cadence" onClick={() => { fullPage(true); focus(i.id); }}><Maximize size={12} /></button>
+        </div>
+        {on && <TaskClock store={store} itemId={i.id} className="pip-clock" />}
+        <TimeProgress store={store} itemId={i.id} compact={!on} />
       </div>;
     })}
+  </div>;
+}
+
+/** The pop-out window's page (#/popout): the tasks in focus with their clocks and progress. Its own window, so the main
+ *  page can reload. Keep on top moves it into an always-on-top window (Chrome and Edge) owned by this pop-out. */
+export function PopoutPage({store}: {store: Store}) {
+  const list = focusList(store);
+  const [pip, setPip] = useState<Window | null>(null);
+  useEffect(() => { document.title = 'Cadence timer'; document.body.classList.add('pip-body'); }, []);
+  // Full page asks the Cadence tab to show the focus view; this pop-out stays open. With no Cadence tab left, it opens one.
+  const toMain = (id: string) => {
+    const main = window.opener as Window | null;
+    if (!main || main.closed) { window.open(`${location.pathname}${location.search}#/open/${id}`, '_blank'); return; }
+    try { new BroadcastChannel(`cadence-focus-${wsId()}`).postMessage({focus: id}); } catch { /* old browser */ }
+    try { main.focus(); } catch { /* not allowed */ }
+  };
+  const dpip = (window as unknown as {documentPictureInPicture?: {requestWindow: (o: {width: number; height: number}) => Promise<Window>}}).documentPictureInPicture;
+  const onTop = async () => {
+    if (!dpip) return;
+    const w = await dpip.requestWindow({width: 380, height: 220});
+    w.document.title = 'Cadence timer';
+    for (const ss of [...document.styleSheets]) {
+      try { const st = w.document.createElement('style'); st.textContent = [...ss.cssRules].map(r => r.cssText).join('\n'); w.document.head.appendChild(st); }
+      catch { if (ss.href) { const l = w.document.createElement('link'); l.rel = 'stylesheet'; l.href = ss.href; w.document.head.appendChild(l); } }
+    }
+    w.document.documentElement.dataset.theme = document.documentElement.dataset.theme;
+    w.document.body.className = 'pip-body';
+    w.addEventListener('pagehide', () => setPip(null));
+    setPip(w);
+  };
+  return <div className="popout-page">
+    <header className="popout-head"><b>Focus</b><span className="spacer" />
+      {dpip && !pip && <button className="btn small" title="Keep the timer above every window (closes if this pop-out window reloads)" onClick={onTop}><PictureInPicture2 size={12} /> Keep on top</button>}
+    </header>
+    {pip && !pip.closed ? <p className="muted small" style={{padding: '0 10px'}}>Shown on top of your windows. Close that small window to bring it back here.</p> : <><MiniFocus store={store} list={list} focus={toMain} /><PopoutNotes store={store} list={list} /></>}
+    {pip && !pip.closed && createPortal(<><MiniFocus store={store} list={list} focus={toMain} /><PopoutNotes store={store} list={list} /></>, pip.document.body)}
+  </div>;
+}
+
+/** Under the timers in the pop-out: the running (or first) task's notes and subitems, editable, filling the space. */
+function PopoutNotes({store, list}: {store: Store; list: Item[]}) {
+  const item = list.find(i => i.id === store.running?.itemId) ?? list[0];
+  if (!item) return null;
+  const project = store.projects.find(p => p.id === item.projectId);
+  const children = [...store.items.values()].filter(i => i.parentId === item.id).sort((a, b) => a.sort - b.sort);
+  return <div className="popout-notes">
+    <div className="small muted">Notes: {item.title}</div>
+    <BlockEditor key={item.id} value={item.body} placeholder="Notes, links, what done looks like" onSave={body => body !== item.body && store.updateItem(item.id, {body})} />
+    {children.length > 0 && project && <div className="popout-subs"><div className="small muted">Subitems {children.filter(c => c.completed).length}/{children.length}</div>
+      {children.map(c => <div key={c.id} className="row small"><Check item={c} project={project} onToggle={st => store.updateItem(c.id, {status: st})} /> <span className={c.completed ? 'muted' : ''}>{c.title}</span></div>)}</div>}
   </div>;
 }
 
