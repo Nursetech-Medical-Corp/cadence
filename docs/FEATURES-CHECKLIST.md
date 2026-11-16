@@ -60,6 +60,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Make my own copy opens the editor with the plugin under a new id.
 
 ## Day planner
+- Box reminders: Off, when it starts, 5, 10, 15, 30 minutes, 1 or 2 hours, or 1 day before; fires once; changing the lead or moving the box arms it again; on-screen alert and desktop alert while the app is open. (unit dayplan; alert manual)
 - Side panels resize by dragging their edge in Focus and Three columns; the bottom area resizes in Timeline across; double-click resets; sizes are kept. (manual)
 - Hovering a brain dump or assigned line shows its full name. (manual)
 - Match on: a line with no close task still offers Create task. Bug found: no way to make one line a task when nothing matched. (manual)
@@ -68,6 +69,8 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The header shows the Google Calendar connection or a Connect button that comes back to the day planner. (manual)
 - Every clock for the same task shows the same second (focus bar, pop-out, focus view, task panel, top bar): one shared app clock. Bug found: the pop-out and the focus view were a second apart. (e2e timers)
 - Starting or stopping a timer in one tab updates every other tab: same browser at once, other devices through the event stream (kept open with a ping every 25 s, reloaded after a reconnect), and a tab checks again when it comes back into view. Bug found: a stopped timer still showed running in the calendar tab. (e2e timers)
+- Clocks: the big number is this run, the total on the task beside or below. (e2e timers)
+- Focus bar: labeled Full page (four corners icon) and Pop out (picture-in-picture icon); Open task has its own panel icon. After a reload closes the pop-out, the bar shows a pulsing Reopen pop-out. (e2e timers)
 - Full page focus: Full page in the focus view header, the expand button on each focus bar task, and Full page in the pop-out; Window goes back. (e2e timers)
 - Preferences: every key the app saves is accepted by the server. Bug found: focus list, focus settings, new-item defaults, rollup targets and event colors were refused and never saved. (unit prefs-keys)
 - Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)

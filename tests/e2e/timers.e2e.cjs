@@ -48,17 +48,26 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('the full page focus opens from the focus bar', await a.locator('.fv-backdrop.full').isVisible());
     let same = true, seen = '';
     for (let k = 0; k < 6; k++) {
-      const t = await a.evaluate(() => ['.focus-bar .fx-clock', '.timer-chip .clock', '.fv-clock'].map(s => document.querySelector(s)?.textContent ?? 'missing'));
+      const t = await a.evaluate(() => ['.focus-bar .tc-run', '.timer-chip .tc-run', '.fv-clock .tc-run'].map(s => document.querySelector(s)?.textContent ?? 'missing'));
       seen = t.join(' / ');
       if (new Set(t).size !== 1 || t.includes('missing')) { same = false; break; }
       await a.waitForTimeout(370);
     }
     check('the focus bar, top bar and focus view show the same time', same, seen);
-    check('the clocks show the total on the task (30 min logged before)', /^0:3\d:\d\d$/.test(seen.split(' / ')[0]), seen);
-    const bClock = await b.locator('.timer-chip .clock').textContent(), aClock = await a.locator('.timer-chip .clock').textContent();
+    check('the big number is this run', /^0:00:\d\d$/.test(seen.split(' / ')[0]), seen);
+    const tot = await a.locator('.fv-clock .tc-total').textContent();
+    check('the total on the task (30 min before plus this run) shows under it', /Total on the task 0:30:\d\d/.test(tot), tot);
+    const [aClock, bClock] = await Promise.all([a.locator('.timer-chip .tc-run').textContent(), b.locator('.timer-chip .tc-run').textContent()]);
     check('the other tab shows the same time', bClock === aClock, `${aClock} vs ${bClock}`);
     await a.locator('.fv-head').getByRole('button', {name: /Window/}).click(); await a.waitForTimeout(300);
     check('Window turns full page off', await a.locator('.fv-backdrop').isVisible() && !(await a.locator('.fv-backdrop.full').count()));
+
+    await a.keyboard.press('Escape'); await a.waitForTimeout(300);
+    check('the focus bar has a labeled Full page and a labeled Pop out, with different icons', await a.locator('.focus-bar').getByRole('button', {name: 'Full page', exact: true}).isVisible() && await a.locator('.focus-bar').getByRole('button', {name: 'Pop out', exact: true}).isVisible());
+    await a.evaluate(() => sessionStorage.setItem('pip-open', '1')); await a.reload(); await a.waitForTimeout(1500);
+    check('after a reload that closed the pop-out, the bar offers to reopen it', await a.locator('.focus-bar').getByRole('button', {name: 'Reopen pop-out'}).isVisible());
+    await a.evaluate(() => sessionStorage.removeItem('pip-open'));
+    await a.locator('.focus-bar .fb-item').first().getByTitle('Full page focus on this task').click(); await a.waitForTimeout(500);
 
     // 3. Stop in the focus view; the other tab stops too.
     await a.locator('.fv').getByRole('button', {name: /Stop timer/}).click(); await a.waitForTimeout(1500);

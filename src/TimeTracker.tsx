@@ -22,18 +22,24 @@ const when = (iso: string) => new Date(iso).toLocaleString(undefined, {weekday: 
 
 /** Time since start, counting up every second. Only this re-renders while a timer runs. */
 export function Elapsed({start, className}: {start: string; className?: string}) {
-  const now = useSharedNow(true);
+  const now = useSharedNow(true, start);
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
 
-/** One clock for a task, the same everywhere (focus bar, pop-out, focus view, lists): all time logged on it, counting up while
- *  its timer runs. Every place reads the one running timer, so starting or stopping it anywhere updates them all. */
-export function TaskClock({store, itemId, className}: {store: Store; itemId: string; className?: string}) {
+/** The one clock for a task, used everywhere (focus bar, pop-out, focus view, top bar, task panel, lists). Every place
+ *  reads the same running timer (store.running) and the same app clock (useSharedNow), so they always agree and a start
+ *  or stop anywhere changes them all. The big number is this run; the total on the task (this run included) sits beside
+ *  or below it (total: 'below', 'beside' or 'hidden'). With no timer running it shows the total. */
+export function TaskClock({store, itemId, className, total = 'beside'}: {store: Store; itemId: string; className?: string; total?: 'below' | 'beside' | 'hidden'}) {
   const run = store.running?.itemId === itemId ? store.running : null;
-  const now = useSharedNow(!!run);
+  const now = useSharedNow(!!run, run?.start);
   const before = store.timeTotals.get(itemId) ?? 0;
   const session = run ? Math.max(0, now - Date.parse(run.start)) : 0;
-  return <span className={className} title={run ? `This run ${fmtClock(session)}; total on the task` : 'Total on the task'}>{fmtClock(before * 60000 + session)}</span>;
+  const sum = fmtClock(before * 60000 + session);
+  if (!run) return <span className={className} title="Total on the task">{sum}</span>;
+  return <span className={'task-clock ' + total + (className ? ' ' + className : '')} title={`This run ${fmtClock(session)}. Total on the task ${sum}`}>
+    <span className="tc-run">{fmtClock(session)}</span>{total !== 'hidden' && <span className="tc-total">{total === 'below' ? `Total on the task ${sum}` : `total ${sum}`}</span>}
+  </span>;
 }
 
 /** Table and list cell: play or stop, then the total (or the running clock). Click the total for the full box. */
@@ -50,7 +56,7 @@ export function TimeCell({item, store, compact}: {item: Item; store: Store; comp
         {mine ? <Square size={8} fill="currentColor" /> : <Play size={9} fill="currentColor" />}
       </button>
       <button data-pop-trigger className={'time-total' + (mine ? ' on' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        {mine ? <TaskClock store={store} itemId={item.id} /> : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
+        {mine ? <TaskClock store={store} itemId={item.id} total="hidden" /> : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} className="time-pop"><TimeBox item={item} store={store} /></Popover>
     </span>
