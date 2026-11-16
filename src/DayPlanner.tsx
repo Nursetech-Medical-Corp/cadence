@@ -1,6 +1,8 @@
 // Day planner: the overwhelm page. Top 3, a brain dump, today's and overdue tasks, and the day as time boxes.
 // Drag lines and tasks onto the day, drag boxes to move them, drag the bottom edge to resize. Done boxes turn green.
 // Saved per person per day at /api/day/:date (server/dayplan.ts).
+import {spaceColor} from './ProjectNav.tsx';
+import {eventColor} from './Meetings.tsx';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Timer, Undo2, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
@@ -69,6 +71,18 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [evEdit, setEvEdit] = useState<{event?: FullEvent; draft?: Partial<FullEvent>; boxId?: string} | null>(null);
   const [fitInfo, setFitInfo] = useState<FitSummary | null>(null);
   const [showPlanned, setShowPlanned] = useState(() => localStorage.getItem('day-planned') !== 'off');
+  const [leftW, leftDrag, leftReset] = usePanelSize('dp-w-left', 360, 220, 760, 1);
+  const [rightW, rightDrag, rightReset] = usePanelSize('dp-w-right', 300, 200, 700, -1);
+  const [bottomH, bottomDrag, bottomReset] = usePanelSize('dp-h-bottom', 320, 140, 900, -1, true);
+  const [bySpace, setBySpace] = useState(() => localStorage.getItem('day-byspace') === '1');
+  // Google Calendar: which of your Google accounts share calendars here, and whether Google is set up at all.
+  const [gcal, setGcal] = useState<{links: {email: string}[]; ready: boolean} | null>(null);
+  useEffect(() => {
+    Promise.all([api<{email: string; scopes: string}[]>('/google/links').catch(() => []), api<{googleReady?: boolean}>('/auth/me').catch(() => ({googleReady: false}))])
+      .then(([l, m]) => setGcal({links: l.filter(x => x.scopes.includes('calendar')), ready: !!m.googleReady}));
+    const linked = new URLSearchParams(location.hash.split('?')[1] ?? '').get('linked');
+    if (linked) { store.flash(`Google Calendar connected: ${linked}`); window.history.replaceState(null, '', '#/day'); }
+  }, []);
   // Undo for the planner: earlier plans, and tasks a step created (removed again on undo).
   const history = useRef<{plan: Plan; created: string[]}[]>([]);
   const setDesign = (id: string) => { setDesignState(id); localStorage.setItem('day-design', id); };
@@ -188,6 +202,17 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     if (!it.assignees.includes(me)) patch.assignees = [...it.assignees, me];
     if (!it.due) patch.due = date;
     if (Object.keys(patch).length) store.updateItem(it.id, patch);
+  };
+  /** One line becomes a task in the chosen space, assigned to you, and the line is tied to it. */
+  const createOne = async (e: Entry) => {
+    const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
+    if (!pid) { void uiAlert('Make a space first.'); return; }
+    const it = await store.quickAdd(pid, e.text);
+    if (!it) return;
+    if (!it.assignees.length) store.updateItem(it.id, {assignees: [me]});
+    if (!it.due) store.updateItem(it.id, {due: date});
+    update(p => linkText(p, e.text, it.id, it.title), [it.id]);
+    store.flash(`Made ${itemKey(it, store.projects)} in ${store.projects.find(p => p.id === pid)?.name}`);
   };
   const createTasks = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
@@ -320,7 +345,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const entryRow = (e: Entry, list: 'top' | 'dump') => {
     const it = item(e), done = isDone(e), sug = list === 'dump' ? suggest(e) : [];
     const mark = over?.list === list && over.id === e.id ? (over.after ? ' drop-after' : ' drop-before') : '';
-    return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '') + mark} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
+    const sc = bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
+    return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '') + (sc ? ' spaced' : '') + mark} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
       onDragOver={ev => listOver(ev, list, e.id)} onDrop={ev => dropOnList(ev, list)}>
       <GripVertical size={12} className="dp-grip" />
       <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(list, e)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
@@ -330,9 +356,11 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {boxed(e) && <Clock size={11} className="muted" aria-label="On the day" />}
       <button className="icon dp-x" title="Edit" onClick={() => setEditText(e.id)}><Pencil size={11} /></button>
       <button className="icon dp-x" title="Remove from the list (the task stays)" onClick={() => update(p => ({...p, [list]: p[list].filter(x => x.id !== e.id)}))}><X size={12} /></button>
-      {sug.length > 0 && <div className="dp-sugs">{sug.map(x => <button key={x.item.id} className="dp-sug" title={`Tie this line to ${x.item.title} (${Math.round(Math.min(1, x.score) * 100)}% match). It joins your day.`} onClick={() => useMatch(e, x.item)}>
+      {list === 'dump' && matchOn && !e.itemId && !isDone(e) && !dismissed.has(e.id) && <div className="dp-sugs">{sug.map(x => <button key={x.item.id} className="dp-sug" title={`Tie this line to ${x.item.title} (${Math.round(Math.min(1, x.score) * 100)}% match). It joins your day.`} onClick={() => useMatch(e, x.item)}>
         <GitMerge size={10} /> <span className="dp-key">{itemKey(x.item, store.projects)}</span> {x.item.title}</button>)}
-        <button className="dp-sug none" title="None of these: keep it as a new line" onClick={() => setDismissed(d => new Set(d).add(e.id))}>New</button></div>}
+        {!sug.length && <span className="muted small">No matching task.</span>}
+        <button className="dp-sug make" title={`Make this line a task in ${store.projects.find(p => p.id === space)?.name ?? 'the chosen space'}, assigned to you, due this day`} onClick={() => createOne(e)}><ListPlus size={10} /> Create task</button>
+        {sug.length > 0 && <button className="dp-sug none" title="None of these: keep it as a plain line" onClick={() => setDismissed(d => new Set(d).add(e.id))}>Keep as a line</button>}</div>}
     </div>;
   };
   // ---- Pieces each design arranges differently ----
@@ -342,6 +370,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const srcOf = (b: Block) => plan.top.some(t => (b.itemId && t.itemId === b.itemId) || t.text.toLowerCase() === b.text.toLowerCase()) ? 'top' : b.itemId ? 'task' : 'dump';
   const head = <header className="dp-head">
     <h1><CalendarClock size={20} /> Day planner</h1>
+    {gcal && (gcal.links.length
+      ? <a className="dp-gcal on" href="#/team" title={`Google Calendar connected: ${gcal.links.map(l => l.email).join(', ')}. Manage it on the Team page`}><CalendarClock size={12} /> {gcal.links.length === 1 ? gcal.links[0].email : `${gcal.links.length} Google calendars`}</a>
+      : gcal.ready ? <a className="btn small" href={`/api/auth/google/start?mode=link&want=calendar&as=${encodeURIComponent(me)}&back=/day`} title="Show your Google Calendar events on the day, and add boxes to it">Connect Google Calendar</a>
+      : <a className="btn small ghost" href="#/team" title="An admin adds the Google OAuth client on the Team page first, then everyone can connect">Set up Google Calendar</a>)}
     <div className="dp-date">
       <button className="btn ghost small" onClick={() => setDate(addDays(date, -1))} title="Day before"><ChevronLeft size={14} /></button>
       <b>{new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'})}</b>
@@ -356,6 +388,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       <select className="plain-select small" value={density} onChange={e => { setDensity(e.target.value as Density); localStorage.setItem('day-density', e.target.value); }} title="Row height">
         <option value="compact">Compact</option><option value="normal">Normal</option><option value="roomy">Roomy</option></select>
       <label className="small muted" title="Color boxes by where they came from: top 3, tasks, brain dump"><input type="checkbox" checked={bySource} onChange={e => { setBySource(e.target.checked); localStorage.setItem('day-bysource', e.target.checked ? '1' : ''); }} /> Color by source</label>
+      <label className="small muted" title="Color tasks by their space's color (set a space's color from its menu in the sidebar). A box's own color wins"><input type="checkbox" checked={bySpace} onChange={e => { setBySpace(e.target.checked); localStorage.setItem('day-byspace', e.target.checked ? '1' : ''); }} /> Color by space</label>
     </span>
     <span className="picker">
       <button className="btn small" disabled={busy} onClick={() => setFitMenu(o => !o)} title="Move and size your boxes to the time you logged with timers, to see what you really did"><Timer size={13} /> Fit to my time <ChevronDown size={12} /></button>
@@ -393,13 +426,13 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       <button className="btn small" disabled={busy} onClick={createTasks} title="Make a task, assigned to you, for each line not tied to a task yet. Quick-add works in a line: @name due:fri ~1h"><ListPlus size={12} /> Create tasks</button>
       <label className="small muted">in <select className="plain-select small" value={realProjects(store.projects).some(p => p.id === space) ? space : realProjects(store.projects)[0]?.id} onChange={e => { setSpace(e.target.value); localStorage.setItem('day-space', e.target.value); }} title="The space new tasks go in">
         {realProjects(store.projects).filter(p => !p.settings.records).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-      {matchOn && !plan.dump.some(e => suggest(e).length) && <span className="muted small">No close tasks found.</span>}
+      {matchOn && !plan.dump.some(e => suggest(e).length) && <span className="muted small">No close tasks found. Use Create task on a line.</span>}
     </div>}
   </section>;
   const mineSec = <section className="dp-sec dp-minesec">
     <h4>Assigned: today and overdue <span className="count">{mine.length}</span></h4>
     {!mine.length && <p className="muted small">Nothing due. Nice.</p>}
-    {mine.map(i => { const p = store.projects.find(x => x.id === i.projectId)!; return <div key={i.id} className={'dp-entry' + (boxedIds.has(i.id) ? ' boxed' : '')} {...dragProps({from: 'task', id: i.id, itemId: i.id, text: i.title})}>
+    {mine.map(i => { const p = store.projects.find(x => x.id === i.projectId)!; const sc = bySpace ? spaceColor(store.projects, i.projectId) : undefined; return <div key={i.id} className={'dp-entry' + (boxedIds.has(i.id) ? ' boxed' : '') + (sc ? ' spaced' : '')} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} title={i.title} {...dragProps({from: 'task', id: i.id, itemId: i.id, text: i.title})}>
       <GripVertical size={12} className="dp-grip" />
       <Check item={i} project={p} onToggle={status => store.updateItem(i.id, {status})} />
       <button className="dp-text link" onClick={() => open(i.id)}><span className="dp-key">{itemKey(i, store.projects)}</span> {i.title}</button>
@@ -504,7 +537,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {dropGhost && <div className="dp-ghost drop" style={horiz ? {left: (dropGhost.m - startM) * px, width: dropGhost.len * px, top: 26, bottom: 4} : {top: (dropGhost.m - startM) * px, height: dropGhost.len * px}}>{label(dropGhost.m)} to {label(dropGhost.m + dropGhost.len)}</div>}
       {!horiz && planStart > startM && <div className="dp-plan" style={{top: 0, height: (planStart - startM) * px}} title="Before your planning hours" />}
       {!horiz && planEnd < endM && <div className="dp-plan" style={{top: (planEnd - startM) * px, height: (endM - planEnd) * px}} title="After your planning hours" />}
-      {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; const col = ev.color ? GCAL_COLORS[ev.color]?.[1] : undefined;
+      {dayEvents.map(ev => { const lane = lanes.get('ev:' + ev.id) ?? {i: 0, n: 1}; const col = eventColor(store.prefs, ev);
         return <div key={ev.id + ev.start} className="dp-event" style={{...place(ev.s, ev.len, lane), ...(col ? {borderLeftColor: col, background: `color-mix(in srgb, ${col} 18%, var(--card))`} : {})}} title={`${ev.source === 'google' ? 'Google Calendar' : 'Calendar'}: ${ev.title}. Click to open it`}
           onClick={async e => { if ((e.target as HTMLElement).closest('button, a')) return; try { setEvEdit({event: await api<FullEvent>(`/meetings/${ev.occurrenceOf ?? ev.id}`)}); } catch (err) { store.fail(err); } }}>
         <div className="dp-brow"><CalendarClock size={11} /><span className="dp-btitle">{ev.title || '(no title)'}</span>{ev.itemId && store.items.get(ev.itemId) && <button className="dp-linkchip" onClick={() => open(ev.itemId!)} title="The task this event is for">{itemKey(store.items.get(ev.itemId)!, store.projects)}</button>}<span className="dp-btime">{label(ev.s)} to {label(ev.s + ev.len)}</span>
@@ -521,7 +554,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       {plan.blocks.filter(b => mins(b.start) + b.minutes > startM).map(b => {
         const s = Math.max(startM, mins(b.start)), it = item(b), done = isDone(b), lane = lanes.get(b.id) ?? {i: 0, n: 1};
         const running = !!it && store.running?.itemId === it.id;
-        const bc = b.color ? GCAL_COLORS[b.color]?.[1] : undefined;
+        const bc = b.color ? GCAL_COLORS[b.color]?.[1] : bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
         return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '') + (bc ? ' colored' : '')} draggable
           onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }}
           onDragEnd={() => { dragging.current = null; setDropGhost(null); }}
@@ -592,11 +625,13 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     mine: fold('mine', `Assigned (${mine.length})`, mineSec),
     logged: fold('logged', 'Timesheet for the day', loggedSec),
   };
+  const splitL = <div className="dp-split" title="Drag to resize; double-click to reset" onMouseDown={leftDrag} onDoubleClick={leftReset} />;
+  const splitR = <div className="dp-split" title="Drag to resize; double-click to reset" onMouseDown={rightDrag} onDoubleClick={rightReset} />;
   let body;
   switch (D.id) {
-    case 'columns': body = <div className="dp-main"><div className="dp-left">{nowCard}{lists.top}{lists.dump}</div>{dayGrid}<div className="dp-left right">{lists.mine}{lists.logged}</div></div>; break;
-    case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-row3"><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
-    default: body = <div className="dp-main"><div className="dp-left">{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{dayGrid}</div>;
+    case 'columns': body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}</div>{splitL}{dayGrid}{splitR}<div className="dp-left right" style={{width: rightW}}>{lists.mine}{lists.logged}</div></div>; break;
+    case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-split row" title="Drag to resize; double-click to reset" onMouseDown={bottomDrag} onDoubleClick={bottomReset} /><div className="dp-row3" style={{height: bottomH, flex: 'none'}}><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
+    default: body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{splitL}{dayGrid}</div>;
   }
   const evModal = evEdit && <EventEditor store={store} event={evEdit.event} draft={evEdit.draft} items={[...store.items.values()]} open={open}
     onSaved={r => { if (evEdit.boxId) patchBlock(evEdit.boxId, {eventId: r.id}); }} onClose={() => { setEvEdit(null); load(); }} />;
@@ -604,6 +639,22 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
 }
 
 type Density = 'compact' | 'normal' | 'roomy';
+
+/** A panel size you set by dragging its edge, kept per browser. sign: +1 grows when dragged right or down, -1 when left or up. */
+function usePanelSize(key: string, initial: number, min: number, max: number, sign: 1 | -1, vertical = false) {
+  const [size, setSize] = useState(() => { const v = Number(localStorage.getItem(key)); return v >= min && v <= max ? v : initial; });
+  const start = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const from = vertical ? e.clientY : e.clientX, base = size;
+    let last = base;
+    const move = (m: MouseEvent) => { last = Math.max(min, Math.min(max, base + sign * ((vertical ? m.clientY : m.clientX) - from))); setSize(last); };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('dp-resizing'); localStorage.setItem(key, String(Math.round(last))); };
+    document.body.classList.add('dp-resizing');
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  };
+  const reset = () => { setSize(initial); localStorage.removeItem(key); };
+  return [size, start, reset] as const;
+}
 const DENSITY: Record<Density, number> = {compact: 0.75, normal: 1, roomy: 1.4};
 /** Ten ways to lay out and style the planner. Same data; pick one in the header. */
 export const DESIGNS: {id: string; name: string; hint: string; px?: number}[] = [
@@ -660,6 +711,19 @@ function BoxEditor({store, b, date, space, open, patch, remove, close, onCalenda
     (itemKey(i, store.projects).toLowerCase() === q.trim().toLowerCase() || i.title.toLowerCase().includes(q.trim().toLowerCase()))).sort((a, c) => Number(!!a.completed) - Number(!!c.completed)).slice(0, 8);
   const s = mins(b.start);
   const [title, setTitle] = useState(it?.title ?? b.text);
+  // Not a task yet: the closest existing tasks by the box's title, or a search, to make this box that task.
+  const [asQ, setAsQ] = useState('');
+  const asFound = it ? [] : [...store.items.values()].filter(i => !i.recur?.spawned && !i.completed)
+    .map(i => ({i, score: asQ.trim().length >= 2 ? (itemKey(i, store.projects).toLowerCase() === asQ.trim().toLowerCase() ? 2 : i.title.toLowerCase().includes(asQ.trim().toLowerCase()) ? 1 : 0) : matchScore(title, i.title, itemKey(i, store.projects))}))
+    .filter(x => x.score >= (asQ.trim().length >= 2 ? 1 : 0.45)).sort((x, y) => y.score - x.score).slice(0, 5).map(x => x.i);
+  const useTask = (x: Item) => {
+    patch({itemId: x.id, text: x.title, links: (b.links ?? []).filter(y => y !== x.id)});
+    setTitle(x.title); setAsQ('');
+    const p: Partial<Item> = {};
+    if (!x.assignees.includes(store.me)) p.assignees = [...x.assignees, store.me];
+    if (!x.due) p.due = date;
+    if (Object.keys(p).length) store.updateItem(x.id, p);
+  };
   const makeTask = async () => {
     const pid = realProjects(store.projects).find(p => p.id === space)?.id ?? realProjects(store.projects)[0]?.id;
     if (!pid || !title.trim()) return;
@@ -675,7 +739,13 @@ function BoxEditor({store, b, date, space, open, patch, remove, close, onCalenda
       <button className={'ev-color' + (!b.color ? ' on' : '')} title="Default" onClick={() => patch({color: null})} style={{background: 'var(--accent)'}} />
       {Object.entries(GCAL_COLORS).map(([id, [name, hex]]) => <button key={id} className={'ev-color' + (b.color === id ? ' on' : '')} title={name} onClick={() => patch({color: id})} style={{background: hex}} />)}
     </div>
-    {it && <button className="btn ghost small" onClick={() => open(it.id)} title="Open the full task"><span className="dp-key">{itemKey(it, store.projects)}</span> Open task</button>}
+    {it && <div className="row"><button className="btn ghost small" onClick={() => open(it.id)} title="Open the full task"><span className="dp-key">{itemKey(it, store.projects)}</span> Open task</button>
+      <button className="btn ghost small" title="Keep the box, no longer as this task (the task stays)" onClick={() => patch({itemId: undefined, text: it.title})}><X size={12} /> Not this task</button></div>}
+    {!it && <div className="dp-field"><span className="muted small">Is this box an existing task? Pick it to make the box that task</span>
+      <input className="plain-input" placeholder="Search tasks: key or title" value={asQ} onChange={e => setAsQ(e.target.value)} />
+      {asFound.map(x => <button key={x.id} className="pop-row small" onClick={() => useTask(x)}><GitMerge size={11} /> {itemKey(x, store.projects)} {x.title}</button>)}
+      {!asFound.length && <span className="muted small">{asQ.trim().length >= 2 ? 'No task found.' : 'No close task. Search, or Make it a task below.'}</span>}
+    </div>}
     <div className="row">
       <input type="time" className="plain-input" value={b.start} step={300} onChange={e => e.target.value && patch({start: e.target.value, at: new Date(`${date}T${e.target.value}:00`).toISOString()})} />
       <select className="plain-select" value={b.minutes} onChange={e => patch({minutes: Number(e.target.value)})}>{[15, 30, 45, 60, 90, 120, 180, 240].concat(b.minutes).filter((v, i, a) => a.indexOf(v) === i).sort((x, y) => x - y).map(v => <option key={v} value={v}>{v < 60 ? `${v} min` : `${v / 60} h`}</option>)}</select>

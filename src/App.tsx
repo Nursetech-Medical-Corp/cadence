@@ -1,3 +1,4 @@
+import {TaskClock} from './TimeTracker.tsx';
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {NewItemSpotlight, NewItemsButton, AddToSpace} from './NewItems.tsx';
 import {FocusHost} from './Focus.tsx';
@@ -435,12 +436,11 @@ function ViewNavButton({on, name, icon, onOpen, onRename}: {on: boolean; name: s
 /** Live clock for the running timer, always visible. */
 function RunningTimer({store, open}: {store: Store; open: (id: string) => void}) {
   const run = store.running;
-  const now = useNow(!!run);
   if (!run) return null;
   const item = store.items.get(run.itemId);
   return (
     <div className="timer-chip">
-      <span className="clock">{fmtClock(now - Date.parse(run.start))}</span>
+      <TaskClock store={store} itemId={run.itemId} className="clock" />
       <span className="what" onClick={() => open(run.itemId)} title="Open item">{item?.title ?? 'Item'}</span>
       <button className="icon" title="Stop timer" onClick={() => store.stopTimer()}><Square size={13} fill="currentColor" /></button>
     </div>
