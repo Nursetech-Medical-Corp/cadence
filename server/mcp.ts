@@ -3,19 +3,21 @@ import {monday} from '../src/dates.ts';
 import {events, gmailSearch, listLinks} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, listEvents, timeblockItem, updateEvent} from './events.ts';
 import {allBusy, flushGoogle} from './gcal.ts';
-import {agentInbox, applySuggestion, approvedSop, listProposals, needsReview, propose} from './agents.ts';
+import {agentInbox, applySuggestion, approvedSop, listProposals, needsReview, propose, suggestFollowUps} from './agents.ts';
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js';
 import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
 import {openDb} from './db.ts';
 import {listSopLinks, setSopLinks} from './sops.ts';
 import {getWorkspace, personalAccess} from './auth.ts';
+import {FEATURES, THEME_VARS} from './plugins.ts';
 import {Tasks} from './service.ts';
 import {readFileSync} from 'node:fs';
 import {HOOK_EVENTS} from '../src/hooks.ts';
 import {ARTIFACT_KINDS, DECISIONS} from './aiwork.ts';
 import {fileURLToPath} from 'node:url';
 
+const readPluginGuide = () => { try { return readFileSync(fileURLToPath(new URL('../docs/PLUGINS.md', import.meta.url)), 'utf8'); } catch { return 'Guide file docs/PLUGINS.md not found.'; } };
 const readGuide = () => { try { return readFileSync(fileURLToPath(new URL('../docs/AI-GUIDE.md', import.meta.url)), 'utf8'); } catch { return 'Guide file docs/AI-GUIDE.md not found.'; } };
 
 export type McpTool = {description: string; shape: z.ZodRawShape; readOnly: boolean; fn: (input: any) => unknown};
@@ -430,8 +432,17 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('attach_file', 'Attach a screenshot or document (base64) to a task; returns a URL you can reference in your report as ![name](url). Files you attach count as artifacts of your work: a redo or a discard hides them.', {item: z.string(), name: z.string(), mime: z.string(), base64: z.string()}, false,
     i => tasks.attachFile(tasks.findItem(i.item).id, actor, i.name, i.mime, i.base64));
   tool('submit_work', 'Hand in your work for human review: a Markdown report with what was done, links and screenshots; list anything you could not do in missed, and everything you made in artifacts (with an undo hint each).',
-    {item: z.string(), report: z.string(), missed: z.string().optional(), session, artifacts: z.array(artifact).optional()}, false,
-    i => { if (!actor) throw new Error('Connect as an AI person to submit work'); return tasks.submitWork(tasks.findItem(i.item).id, actor, i.report, i.missed ?? '', {session: i.session, artifacts: i.artifacts}); });
+    {item: z.string(), report: z.string(), missed: z.string().optional(), session, artifacts: z.array(artifact).optional(),
+     follow_ups: z.array(z.object({title: z.string(), project: z.string().optional(), for_person: z.string().optional(), reason: z.string().optional(), estimate: z.number().optional().describe('Hours'), due: z.string().optional()})).optional()
+       .describe('New tasks you suggest from this work (next steps, problems found in a review). Each waits for your owner on AI work, Changes to approve.')}, false,
+    i => {
+      if (!actor) throw new Error('Connect as an AI person to submit work');
+      const id = tasks.findItem(i.item).id;
+      const out = tasks.submitWork(id, actor, i.report, i.missed ?? '', {session: i.session, artifacts: i.artifacts});
+      if (!i.follow_ups?.length) return out;
+      const followUps = suggestFollowUps(tasks, actor, id, i.follow_ups.map(f => ({title: f.title, project: f.project ? projectId(f.project) : undefined, forPerson: f.for_person ? personId(f.for_person) : undefined, reason: f.reason, estimate: f.estimate, due: f.due})));
+      return {...out, followUps};
+    });
   tool('get_feedback', 'What the reviewer decided on a task and what to do next: decision (changes: continue; redo: start over; discard: stop), the comment, the session to resume, context (your last report, missed items, steps, artifacts) to carry into a new chat, and cleanup (artifacts to undo, then confirm each with confirm_cleanup). Also the full work log and comments.', {item: z.string()}, true,
     i => tasks.workFeedback(tasks.findItem(i.item).id));
   tool('confirm_cleanup', 'After a redo or a discard: confirm you removed or reverted one artifact from the cleanup list in get_feedback (a commit reverted, a branch deleted, a document removed). The reviewer sees what is confirmed and what is outstanding.',
@@ -446,6 +457,10 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('decide_claim', 'For human reviewers: accept or decline an AI claim on a task.', {item: z.string(), accept: z.boolean(), note: z.string().optional()}, false,
     i => tasks.decideClaim(tasks.findItem(i.item).id, actor, i.accept, i.note ?? ''));
   // Plugins: add-ons made of data (themes, built-in modules, pages of safe blocks, view presets, setups). Nothing in them runs.
+  tool('plugin_format', 'How to write a Cadence plugin: the full format, what each part may contain, the safety checks, a working example, and the steps (check_plugin, save_plugin, install_plugin for yourself, submit_plugin). Read before making one.', {}, true,
+    () => ({guide: readPluginGuide(), allowed: {themeVars: THEME_VARS, features: FEATURES, blocks: ['text', 'items', 'count'], settingTypes: ['text', 'number', 'boolean', 'select']},
+      example: {id: 'acme.calm', name: 'Calm', version: '1.0.0', description: 'Softer colors for long days.', publisher: 'Acme', icon: '🌿', tags: ['theme'],
+        highlights: ['Softer greens in light mode.'], changelog: [{version: '1.0.0', date: '2026-11-16', notes: 'First release.'}], contributes: {theme: {light: {accent: '#0f766e'}}}}}));
   tool('list_plugins', 'Plugin store: plugins you can install (built-in, approved for everyone, and your own drafts), searchable with q, plus what is installed for the workspace and for you.', {q: z.string().optional()}, true,
     i => tasks.plugins(actor, i.q ?? ''));
   tool('get_plugin', 'One plugin: its manifest, what it changes (effects), review status and where it is installed.', {id: z.string()}, true, i => tasks.pluginInfo(i.id, actor));

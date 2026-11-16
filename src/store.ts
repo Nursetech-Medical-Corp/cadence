@@ -285,6 +285,17 @@ export function useStore(me: string) {
     },
     fail,
     setPlugins, setFocusId,
+    /** Tasks in focus (the bar at the top): kept in your prefs so they follow you. open: show the full-screen focus view too. */
+    focusAdd(id: string, open = false) {
+      const list = (prefsRef.current.focusList as string[] | undefined) ?? [];
+      if (!list.includes(id)) { const next = [...list, id].slice(-8); setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).catch(fail); }
+      if (open) setFocusId(id);
+    },
+    focusRemove(id: string) {
+      const next = ((prefsRef.current.focusList as string[] | undefined) ?? []).filter(x => x !== id);
+      setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).catch(fail);
+      setFocusId(f => f === id ? null : f);
+    },
     async reloadPlugins() { try { setPlugins((await api<{installed: Install[]}>('/plugins')).installed); } catch (e) { fail(e); } },
     async undo() { await replay(undoStack.current.pop(), 'undo'); },
     async redo() { await replay(redoStack.current.pop(), 'redo'); },

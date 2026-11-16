@@ -121,6 +121,7 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
       onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); for (const f of e.dataTransfer.files) upload(f); }}>
       <h4><Bot size={13} /> Who does it <span style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}}><WorkerToggle item={item} store={store} /></span></h4>
       <ReviewActions item={item} store={store} />
+      <Proposals store={store} open={id => { location.hash = `/open/${id}`; }} all={store.settings.admin} itemId={item.id} />
       <h4><Paperclip size={13} /> Files and links <span className="count">{files.length}</span></h4>
       <div className="files">
         {files.map(f => f.mime.startsWith('image/')
@@ -158,12 +159,12 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
 type Proposal = {id: string; agent: string; owner: string | null; op: string; args: unknown[]; summary: string; reason: string; itemId: string | null; created: string; state: string; note: string | null};
 
 /** Changes your agents want to make, held until you approve them. */
-function Proposals({store, open, all}: {store: Store; open: (id: string) => void; all: boolean}) {
+export function Proposals({store, open, all, itemId}: {store: Store; open: (id: string) => void; all: boolean; itemId?: string}) {
   const [list, setList] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<Record<string, string>>({});
-  const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}`).then(setList).catch(() => setList([]));
-  useEffect(() => { load(); }, [store.tick, all]);
+  const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}${itemId ? `&item=${itemId}` : ''}`).then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, [store.tick, all, itemId]);
   if (!list.length) return null;
   const decide = async (p: Proposal, approve: boolean) => {
     setBusy(p.id);
@@ -173,8 +174,10 @@ function Proposals({store, open, all}: {store: Store; open: (id: string) => void
   };
   return (
     <div className="proposals">
-      <h3>Changes to approve <span className="muted">{list.length}</span></h3>
-      <p className="muted small">Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.</p>
+      {itemId ? <h4>Suggested by the agent <span className="count">{list.length}</span>
+          {list.length > 1 && <button className="btn small" style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}} disabled={!!busy} onClick={async () => { for (const p of list) await decide(p, true); }}><ThumbsUp size={12} /> Approve all</button>}</h4>
+        : <h3>Changes to approve <span className="muted">{list.length}</span></h3>}
+      <p className="muted small">{itemId ? 'Follow-up tasks and changes from this work. Approving creates or changes them now, in your name; rejecting tells the agent no.' : 'Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.'}</p>
       {list.map(p => {
         const agent = store.people.find(x => x.id === p.agent);
         return (
@@ -197,7 +200,9 @@ function Proposals({store, open, all}: {store: Store; open: (id: string) => void
 
 export function AIWorkPage({store, open}: {store: Store; open: (id: string) => void}) {
   const [project, setProject] = useState('');
-  const [whose, setWhose] = useState<'mine' | 'all' | string>('mine');
+  const admin0 = store.settings.admin;
+  // Admins start on every agent's work; everyone else on the agents they own.
+  const [whose, setWhose] = useState<'mine' | 'all' | string>(admin0 ? 'all' : 'mine');
   const [lastLog, setLastLog] = useState<Record<string, LogEntry | undefined>>({});
   const admin = store.settings.admin;
   const myAgents = new Set(store.people.filter(p => p.kind === 'ai' && p.owner === store.me).map(p => p.id));
@@ -228,12 +233,12 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve, send it back with a comment, ask for a redo, or discard it. Mark tasks Human, AI or Either in any item.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <select className="plain-select" value={whose} onChange={e => setWhose(e.target.value)}>
-          <option value="mine">My agents ({myAgents.size})</option>
-          {admin && <option value="all">All agents</option>}
-          {store.people.filter(p => p.kind === 'ai' && (admin || p.owner === store.me)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {admin && <option value="all">All agents ({store.people.filter(p => p.kind === 'ai').length})</option>}
+          <option value="mine">Agents I own ({myAgents.size})</option>
+          {store.people.filter(p => p.kind === 'ai' && (admin || p.owner === store.me)).map(p => <option key={p.id} value={p.id}>{p.name}{p.owner && p.owner !== store.me ? `, owned by ${store.people.find(x => x.id === p.owner)?.name ?? 'someone'}` : ''}</option>)}
         </select>
         <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <span className="muted small">{myAgents.size ? '' : 'You have no AI agents yet. '}Add yours on the Team page (My AI agents) and connect it with its key.</span>
+        <span className="muted small">{whose === 'mine' && !myAgents.size ? 'You own no agents yet. Agents owned by others are under All agents. ' : ''}An agent's owner approves its claims and changes. Add or connect agents on the Team page (My AI agents).</span>
       </div>
       <Proposals store={store} open={open} all={whose === 'all'} />
       <div className="board" style={{padding: 0}}>

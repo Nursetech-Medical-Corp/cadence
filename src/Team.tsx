@@ -3,6 +3,8 @@ import {AREAS, POLICIES} from './customize.ts';
 import {useEffect, useState} from 'react';
 import {Check as CheckIcon, CircleUser, Copy, KeyRound, Mail, Plus, Shield, Trash2} from 'lucide-react';
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
+import {BUILT_IN_AGENT_RULES} from './agentRules.ts';
+import {FocusSettingsCard} from './Focus.tsx';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
 import {WebhooksEditor} from './Webhooks.tsx';
@@ -229,7 +231,9 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
           </div>
         </section>}
         {me.person && <GoogleCard me={me.person.id} ready={me.googleReady} />}
-        {me.person && <AgentsCard />}
+        {me.person && store && <FocusSettingsCard store={store} />}
+        {me.person && store && <FocusSettingsCard store={store} />}
+      {me.person && <AgentsCard />}
         {me.account && <ConnectedAppsCard />}
         {self && <TokensCard people={[self]} admin={false} me={self.id} />}
         {me.person && <MyDataCard />}
@@ -470,13 +474,14 @@ function InvitesCard({roles, jobRoles, signInOn}: {roles: Role[]; jobRoles: JobR
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('editor');
   const [jr, setJr] = useState<string[]>([]);
+  const [agent, setAgent] = useState(false);
   const [last, setLast] = useState<Invite | null>(null);
   const [err, setErr] = useState('');
   const load = () => api<Invite[]>('/invites').then(setList).catch(() => {});
   useEffect(() => { load(); }, []);
   const send = async () => {
     setErr('');
-    try { const inv = await api<Invite>('/invites', {method: 'POST', body: {email, role, jobRoles: jr}}); setLast(inv); setEmail(''); setJr([]); load(); }
+    try { const inv = await api<Invite>('/invites', {method: 'POST', body: {email, role, jobRoles: jr, agent}}); setLast(inv); setEmail(''); setJr([]); setAgent(false); load(); }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
   return (
@@ -487,6 +492,7 @@ function InvitesCard({roles, jobRoles, signInOn}: {roles: Role[]; jobRoles: JobR
         <input className="inline" style={{flex: 1}} placeholder="name@company.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && email.trim() && send()} />
         <JobRolePicker all={jobRoles} value={jr} onChange={setJr} />
         <select className="plain-select" value={role} onChange={e => setRole(e.target.value)} title="Default permission level">{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+        <label className="small" title="It joins as one team member marked AI agent, owned by you, with your agent rules. No email? Use My AI agents below instead: Add agent, then Get connection key."><input type="checkbox" checked={agent} onChange={e => setAgent(e.target.checked)} /> AI agent</label>
         <button className="btn primary" disabled={!email.trim()} onClick={send}><Plus size={14} /> Invite</button>
       </div>
       {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
@@ -704,7 +710,7 @@ const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (t
 3. For work you are accepted on or that was sent back: do it, log_step as you go (links, screenshots), then submit_work with a report and what you missed.
 4. Never mark work done and never invite people outside the workspace. Your changes wait for your owner unless they follow an approved AI SOP.
 5. Follow the rules agent_inbox returns (rules.workspace for every agent, rules.agent for you) on every run.
-6. You are an AI agent, not a person: never accept an invite, sign up or sign in. You act only through your key.`;
+6. You are an AI agent. If you were invited, join as an AI agent (the invite says so); never make a second identity for yourself.`;
 
 /** Where to paste the key, per AI app. Kept short; the Learn page has the full walk-through. */
 function ConnectSteps({provider, url, prompt}: {provider: string; url: string; prompt: string}) {
@@ -749,13 +755,19 @@ function AgentsCard() {
   };
   return (
     <section className="set-card agents-card">
-      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">
-        Optional. The Cadence connector you already use in Claude works <b>as you</b>: what it does is logged as you and applies right away. Add an agent here only when you want an AI to work <b>on its own</b> (on a schedule, while you are away) under its own name, with its changes held for your approval. Its key is its login: whoever has the key acts as the agent, so keep it private. Step-by-step guides for Claude, ChatGPT and Muse (Meta AI) are on the Learn page.</span></div>
+      <div className="set-card-head"><h3>My AI agents</h3><span className="muted small">Three ways to bring an AI in. Pick one per AI so it shows up once.</span></div>
+      <ol className="agent-ways small">
+        <li><b>Your own Claude, as you.</b> Nothing to set up here: the Cadence connector in Claude acts as you, logged as you, applied right away. Use this when you are at the keyboard.</li>
+        <li><b>An agent with no email</b> (your Claude, ChatGPT or Muse working on its own): type a name below, Add agent, then Get connection key and follow the steps shown. Its changes wait for your approval.</li>
+        <li><b>An agent with its own email</b> (it can sign in to the app): Invite people on this page, tick <i>AI agent</i>. It joins as one agent row owned by you.</li>
+      </ol>
+      <div className="small muted">Guided walk-throughs: <a className="link" href="#/help">Help</a>, guides "Connect Claude as an agent", "Connect ChatGPT as an agent" and "Connect Muse (Meta AI) as an agent". Agents you own show under "Agents I own" on AI work; admins see every agent there.</div>
       <div className="time-row">
         <input className="plain-select" placeholder="Agent name, like David's Claude" value={name} onChange={e => setName(e.target.value)} />
         <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Muse (Meta AI)</option><option value="other">Other</option></select>
         <button className="btn primary" disabled={!name.trim()} onClick={async () => { try { await api('/agents', {method: 'POST', body: {name, provider}}); setName(''); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><Plus size={13} /> Add agent</button>
       </div>
+      <details className="agent-builtin small"><summary>Rules Cadence enforces for every agent (always on)</summary><ul>{BUILT_IN_AGENT_RULES.map(r => <li key={r}>{r}</li>)}</ul></details>
       {rules !== null && <label className="agent-rules small">Rules for every AI agent in this workspace (admins). Agents get them each time they check for work.
         <textarea className="plain-input" rows={4} placeholder="Like: Never email customers. Draft only. Follow the SOP linked in the task. Ask in a comment when unsure." defaultValue={rules}
           onBlur={async e => { try { await api('/workspace', {method: 'PUT', body: {aiRules: e.target.value}}); setMsg('Saved the rules for all agents.'); } catch (x) { setMsg(String(x instanceof Error ? x.message : x)); } }} /></label>}

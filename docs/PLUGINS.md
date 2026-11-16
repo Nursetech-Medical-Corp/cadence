@@ -7,6 +7,9 @@ workspace, turn them off without removing them, and make their own.
 ## Why plugins cannot break Cadence
 
 - **Data only.** A manifest never runs. There is no place for script, HTML, CSS rules or links to other sites.
+- **Readable themes.** Text, secondary text, faint text and button text are checked for contrast against the
+  backgrounds they sit on (the WCAG levels: 4.5:1 for text, 3:1 for secondary and button text). A theme that would make
+  the app hard to read is refused with the pair to fix.
 - **Allow lists.** The server checks every value before saving: theme values must be colors (or a size for
   `radius`), images must be PNG, JPEG, WebP or GIF data (no SVG, no web links), text is shown as text, ids and
   keys follow fixed patterns, and sizes are capped (3 MB per plugin). Unknown keys are dropped.
@@ -39,7 +42,9 @@ workspace, turn them off without removing them, and make their own.
 
 - `id`: lowercase letters, digits and dashes, with an optional `publisher.` prefix. `cadence.` is reserved.
 - `version`: `1.2.3`. Raise it for each release.
-- `icon`: an emoji, or an image as a data URL under 150 KB. Up to 4 `screenshots`, each under 650 KB.
+- `icon`: an emoji, or an image as a data URL under 150 KB. Up to 6 `screenshots`, each under 650 KB.
+- `highlights`: up to 15 lines, one per thing it does. Shown as a list on its page and searched.
+- `changelog`: releases, newest first: `[{version: "1.1.0", date: "2026-11-20", notes: "What changed"}]`.
 - `contributes` needs at least one of:
 
 | Part | What it does | Shape |
@@ -80,11 +85,19 @@ Plugins with their own code would run in a sandboxed frame with no access to the
 through a small message API with permissions the installer approves (for example "read my tasks"). Until then
 plugins stay data only.
 
+## Tested
+
+`tests/plugins.test.ts` tries to break the checks: script and CSS injection in colors, `url()` values, SVG and web
+images, unknown theme names, bad ids, unreadable themes, unknown page blocks, setups without a done status. Each must
+be refused with a plain message. It also checks that drafts stay private, ids belong to their maker, workspace installs
+need an approved plugin and an admin, tokens cannot install for others or review, and that turning a plugin off keeps it.
+Built-in plugin screenshots are real, taken from the demo workspace by `node scripts/plugin-shots.cjs`.
+
 ## API and MCP
 
 - REST: `GET /api/plugins?q=` (store and installs), `GET /api/plugins/:id`, `POST /api/plugins/check {manifest}`,
   `POST /api/plugins {manifest}` (save draft), `POST /api/plugins/:id/submit`, `POST /api/plugins/:id/review {approve, note}`
   (server owner), `DELETE /api/plugins/:id`, `POST|DELETE|PATCH /api/plugins/:id/install {scope: me|workspace, enabled?, settings?}`
   (workspace scope is for admins). `GET /api/bootstrap` includes `plugins` (your installs and the workspace's).
-- MCP: `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin`.
+- MCP: `plugin_format` (this guide, the allowed values and an example), `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin`.
   Reviewing is done in the app by the server owner only.

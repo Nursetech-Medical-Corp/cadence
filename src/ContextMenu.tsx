@@ -1,7 +1,8 @@
 // Right-click menus, like ClickUp: on a task (List, Board, Table) and on a sidebar project.
 // One listener for the whole app; text fields keep the browser's own menu.
 import {useEffect, useState} from 'react';
-import {Copy, ExternalLink, LayoutTemplate, Link2, Trash2} from 'lucide-react';
+import {Copy, ExternalLink, Focus, LayoutTemplate, Link2, SkipForward, Trash2} from 'lucide-react';
+import {skippable, skipRoutine} from './skip.ts';
 import {api, type Store} from './store.ts';
 import {itemKey} from './components.tsx';
 
@@ -38,6 +39,8 @@ export function ContextMenus({store, open}: {store: Store; open: (id: string) =>
     <div className="popover ctx-menu" style={{position: 'fixed', left, top}} onMouseDown={e => e.stopPropagation()}>
       <div className="pop-label">{itemKey(item, store.projects)} {item.title.slice(0, 40)}</div>
       <button className="pop-row" onClick={run(() => open(item.id))}><ExternalLink size={14} /> Open</button>
+      <button className="pop-row" onClick={run(() => store.focusAdd(item.id, true))}><Focus size={14} /> Focus on it</button>
+      {skippable(item) && <button className="pop-row" title="Keeps a Skipped record of this time and moves the routine to its next date" onClick={run(() => void skipRoutine(store, item))}><SkipForward size={14} /> Skipped (not done this time)</button>}
       <button className="pop-row" onClick={run(saveTemplate)}><LayoutTemplate size={14} /> Save as template</button>
       <button className="pop-row" onClick={run(() => store.createItem({projectId: item.projectId, parentId: item.parentId, title: `${item.title} (copy)`, type: item.type, priority: item.priority, assignees: item.assignees, tags: item.tags, start: item.start, due: item.due, estimate: item.estimate, body: item.body}))}><Copy size={14} /> Duplicate</button>
       <button className="pop-row" onClick={run(() => navigator.clipboard.writeText(itemKey(item, store.projects)))}><Link2 size={14} /> Copy key</button>

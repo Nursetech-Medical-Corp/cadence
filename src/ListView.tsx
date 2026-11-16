@@ -81,7 +81,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
       }}>
       {id === 'priority' ? <PrioritySelect value={i.priority} onChange={priority => store.updateItem(i.id, {priority})} />
         : id === 'assignees' ? <PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact />
-        : <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} />}
+        : <StatusSelect project={project} item={i} value={i.status} onChange={status => store.updateItem(i.id, {status})} />}
     </span>
   );
 

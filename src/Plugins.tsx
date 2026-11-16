@@ -2,7 +2,7 @@
 // apply view presets and setups, make your own (JSON, checked live), test it on yourself, submit for review,
 // download and import plugin files. Plugin pages render here too. The format is in docs/PLUGINS.md.
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {Download, Puzzle, Search, ShieldCheck, Upload} from 'lucide-react';
+import {ArrowLeft, Copy, Download, Puzzle, RefreshCw, Search, ShieldCheck, Upload} from 'lucide-react';
 import {api, type Store} from './store.ts';
 import {matchFilter} from './FilterBuilder.tsx';
 import {safeMode, pluginPages} from './pluginsClient.ts';
@@ -11,9 +11,10 @@ import type {Install, Manifest} from '../server/plugins.ts';
 import type {Item, ViewKind} from './types.ts';
 import './plugins.css';
 
-type Card = {id: string; name: string; description: string; publisher: string; icon?: string; tags: string[]; version: string; status: string; builtin: boolean; mine: boolean; note: string; installed: ('workspace' | 'me')[]};
+type Card = {id: string; name: string; description: string; publisher: string; icon?: string; tags: string[]; version: string; status: string; builtin: boolean; mine: boolean; note: string; installed: ('workspace' | 'me')[]; created: string; updated: string; shot: string | null};
 type Listing = {catalog: Card[]; installed: Install[]; reviewer: boolean};
-type Info = {id: string; manifest: Manifest; owner: string; status: string; note: string; builtin: boolean; mine: boolean; reviewer: boolean; effects: string[]; installed: Install[]};
+type Info = {id: string; manifest: Manifest; owner: string; status: string; note: string; builtin: boolean; mine: boolean; reviewer: boolean; effects: string[]; installed: Install[]; created: string; updated: string};
+const day = (iso: string) => iso ? new Date(iso.length === 10 ? iso + 'T12:00:00' : iso).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'}) : '';
 
 const go = (h: string) => { location.hash = h; };
 export function PluginIcon({icon, size = 40}: {icon?: string; size?: number}) {
@@ -64,6 +65,7 @@ function PluginBrowse({store}: {store: Store}) {
     {safe && <div className="pl-safe">Safe mode is on: plugins stay installed but are not applied in this browser.</div>}
     <div className="pl-grid">
       {list.map(c => <button key={c.id} className="pl-card" onClick={() => go(`/plugins/${c.id}`)}>
+        {c.shot && <img className="pl-card-shot" src={c.shot} alt="" loading="lazy" />}
         <div className="pl-card-top">
           <PluginIcon icon={c.icon} size={48} />
           <div className="pl-card-title">
@@ -74,7 +76,7 @@ function PluginBrowse({store}: {store: Store}) {
         <p className="pl-card-desc">{c.description}</p>
         <div className="pl-card-foot">
           {c.installed.length ? <span className="pl-installed">✓ {c.installed.includes('workspace') ? 'Installed for everyone' : 'Installed for me'}</span>
-            : c.status !== 'listed' ? <span className={'pl-status ' + c.status}>{STATUS[c.status]}</span> : <span className="muted">v{c.version}</span>}
+            : c.status !== 'listed' ? <span className={'pl-status ' + c.status}>{STATUS[c.status]}</span> : <span className="muted">v{c.version}{c.updated && ` · ${day(c.updated)}`}</span>}
           <span className="spacer" />
           {c.tags.slice(0, 3).map(t => <span key={t} className="pl-tag">{t}</span>)}
         </div>
@@ -122,8 +124,10 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
     } catch (e) { store.fail(e); }
   };
   const maker = m.publisher ?? info.owner;
+  const copyIt = () => { sessionStorage.setItem('plugin-draft', JSON.stringify({...m, id: `my.${m.id.split('.').pop()}`, version: '1.0.0', publisher: undefined, name: `${m.name} (my copy)`, changelog: undefined, screenshots: m.screenshots?.filter(x => x.startsWith('data:'))})); go('/plugins/new'); };
+  const size = Math.round(JSON.stringify(m).length / 1024);
   return <div className="pl-page">
-    <button className="pl-back" onClick={() => go('/plugins')}>← All plugins</button>
+    <button className="pl-back" onClick={() => go('/plugins')}><ArrowLeft size={15} /> All plugins</button>
     <header className="pl-detail-head">
       <PluginIcon icon={m.icon} size={88} />
       <div className="pl-detail-title">
@@ -142,12 +146,12 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
     <div className="pl-detail">
       <main className="pl-detail-main">
         <section className="pl-section">
-          <h2>{m.screenshots?.length ? 'Screenshots' : 'Preview'}</h2>
-          {m.screenshots?.length ? <div className="pl-shots">{m.screenshots.map((s, n) => <a key={n} href={s} target="_blank" rel="noreferrer"><img src={s} alt={`Screenshot ${n + 1}`} /></a>)}</div>
-            : <PluginPreview m={m} />}
+          {m.screenshots?.length ? <Gallery shots={m.screenshots} /> : <><h2>Preview</h2><PluginPreview m={m} /></>}
         </section>
+        {m.highlights?.length ? <section className="pl-section"><h2>What it does</h2><ul className="pl-highlights">{m.highlights.map(h => <li key={h}>{h}</li>)}</ul></section> : null}
         {m.readme && <section className="pl-section"><h2>About</h2><div className="pl-readme">{m.readme}</div></section>}
-        <section className="pl-section"><h2>What it changes</h2><ul className="pl-effects">{info.effects.map(e => <li key={e}>{e}</li>)}</ul></section>
+        <section className="pl-section"><h2>What it changes in Cadence</h2><ul className="pl-effects">{info.effects.map(e => <li key={e}>{e}</li>)}</ul></section>
+        {m.changelog?.length ? <section className="pl-section"><h2>Changelog</h2><ol className="pl-changelog">{m.changelog.map(c => <li key={c.version}><div><b>v{c.version}</b> <span className="muted">{day(c.date)}</span></div><div>{c.notes}</div></li>)}</ol></section> : null}
         {c.views?.length ? <section className="pl-section"><h2>View presets</h2>
           <div className="pl-chips">{c.views.map(v => <span key={v.name} className="pl-tag">{v.name} · {v.kind}</span>)}</div>
           <div className="pl-actions"><select className="plain-select" value={space} onChange={e => setSpace(e.target.value)}><option value="">Pick a space</option>{spaces.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -160,11 +164,14 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
       </main>
       <aside className="pl-side">
         {info.installed.length > 0 && <div className="pl-side-card"><h3>Installed</h3>
-          {info.installed.map(i => <InstallRow key={i.scope} store={store} install={i} admin={admin} reload={async () => { await store.reloadPlugins(); await load(); }} />)}</div>}
+          {info.installed.map(i => <InstallRow key={i.scope} store={store} install={i} admin={admin} latest={m.version} update={() => call('/install', 'POST', {scope: i.scope})} reload={async () => { await store.reloadPlugins(); await load(); }} />)}</div>}
         <div className="pl-side-card"><h3>Details</h3>
           <dl className="pl-facts">
             <dt>Made by</dt><dd>{maker}</dd>
             <dt>Version</dt><dd>{m.version}</dd>
+            {info.created && <><dt>Added</dt><dd>{day(info.created)}</dd></>}
+            {info.updated && <><dt>Updated</dt><dd>{day(info.updated)}</dd></>}
+            <dt>Size</dt><dd>{size} KB</dd>
             <dt>Status</dt><dd className={'pl-status ' + info.status}>{STATUS[info.status]}{info.note && ` (${info.note})`}</dd>
             <dt>Plugin id</dt><dd><code>{m.id}</code></dd>
             {m.tags?.length ? <><dt>Tags</dt><dd className="pl-chips">{m.tags.map(t => <span key={t} className="pl-tag">{t}</span>)}</dd></> : null}
@@ -172,6 +179,7 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
         </div>
         <div className="pl-side-card pl-side-actions">
           <button className="btn" onClick={() => download(m)}><Download size={14} /> Download file</button>
+          <button className="btn" onClick={copyIt} title="Opens the editor with a copy under your own id, to change and save as yours"><Copy size={14} /> Make my own copy</button>
           {info.mine && !info.builtin && <>
             <button className="btn" onClick={() => go(`/plugins/edit:${id}`)}>Edit</button>
             {info.status !== 'listed' && info.status !== 'pending' && <button className="btn" onClick={() => call('/submit', 'POST')}>Submit for everyone</button>}
@@ -180,6 +188,16 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
         </div>
       </aside>
     </div>
+  </div>;
+}
+
+/** Screenshots: one large, the rest as thumbnails. Click the large one to open it full size. */
+function Gallery({shots}: {shots: string[]}) {
+  const [at, setAt] = useState(0);
+  const cur = shots[Math.min(at, shots.length - 1)];
+  return <div className="pl-gallery">
+    <a href={cur} target="_blank" rel="noreferrer" className="pl-gallery-main"><img src={cur} alt={`Screenshot ${at + 1}`} /></a>
+    {shots.length > 1 && <div className="pl-thumbs">{shots.map((s, n) => <button key={n} className={n === at ? 'on' : ''} onClick={() => setAt(n)}><img src={s} alt={`Screenshot ${n + 1}`} /></button>)}</div>}
   </div>;
 }
 
@@ -231,14 +249,16 @@ function ReviewBox({show, note, setNote, review}: {show: boolean; note: string; 
       <button className="btn primary" onClick={() => review(true)}>Approve</button><button className="btn" onClick={() => review(false)}>Reject</button></div></div>;
 }
 
-function InstallRow({store, install, admin, reload}: {store: Store; install: Install; admin: boolean; reload: () => Promise<void>}) {
+function InstallRow({store, install, admin, reload, latest, update}: {store: Store; install: Install; admin: boolean; reload: () => Promise<void>; latest?: string; update?: () => void}) {
   const can = install.scope === 'me' || admin;
   const set = async (patch: {enabled?: boolean; settings?: Record<string, unknown>}) => {
     try { await api(`/plugins/${encodeURIComponent(install.id)}/install`, {method: 'PATCH', body: {scope: install.scope, ...patch}}); await reload(); } catch (e) { store.fail(e); }
   };
   const settings = install.manifest.contributes.settings ?? [];
   return <div className="pl-box">
-    <label className="pop-row"><input type="checkbox" disabled={!can} checked={install.enabled} onChange={e => set({enabled: e.target.checked})} /> On {install.scope === 'me' ? 'for me' : 'for everyone'} <span className="muted small">(v{install.version}, off keeps it installed)</span></label>
+    <label className="pl-switch-row"><input type="checkbox" disabled={!can} checked={install.enabled} onChange={e => set({enabled: e.target.checked})} />
+      <span><b>On {install.scope === 'me' ? 'for me' : 'for everyone'}</b><span className="muted small">v{install.version}. Off keeps it installed.</span></span></label>
+    {latest && latest !== install.version && can && <button className="btn small" onClick={update}><RefreshCw size={12} /> Update to v{latest}</button>}
     {settings.map(s => {
       const v = install.settings[s.key] ?? s.default ?? '';
       const put = (x: unknown) => set({settings: {...install.settings, [s.key]: x}});
@@ -253,6 +273,7 @@ function InstallRow({store, install, admin, reload}: {store: Store; install: Ins
 
 const STARTER = {id: 'my-company.my-plugin', name: 'My plugin', version: '1.0.0', publisher: 'My company', icon: '✨', tags: ['theme'],
   description: 'What it does in one line.', readme: 'Longer notes for people deciding whether to install it.',
+  highlights: ['One line per thing it does, shown as a list.'], changelog: [{version: '1.0.0', date: new Date().toISOString().slice(0, 10), notes: 'First release.'}],
   contributes: {theme: {light: {accent: '#0f766e'}, dark: {accent: '#2dd4bf'}}, pages: [{id: 'home', title: 'My page', blocks: [{type: 'text', text: 'Hello. Lists below are read only.'}, {type: 'items', title: 'My open urgent work', mine: true, filter: {join: 'and', rules: [{field: 'priority', op: 'is', value: '1'}]}}]}]}};
 
 function PluginEditor({store, editId}: {store: Store; editId?: string}) {
@@ -260,7 +281,7 @@ function PluginEditor({store, editId}: {store: Store; editId?: string}) {
   const [check, setCheck] = useState<{ok: boolean; effects?: string[]; error?: string} | null>(null);
   useEffect(() => {
     if (editId) api<Info>(`/plugins/${encodeURIComponent(editId)}`).then(i => setText(JSON.stringify(i.manifest, null, 2))).catch(store.fail);
-    else setText(JSON.stringify(STARTER, null, 2));
+    else { const d = sessionStorage.getItem('plugin-draft'); sessionStorage.removeItem('plugin-draft'); setText(d ? JSON.stringify(JSON.parse(d), null, 2) : JSON.stringify(STARTER, null, 2)); }
   }, [editId]);
   // Check as you type (debounced) so mistakes show before saving.
   useEffect(() => {
@@ -291,7 +312,7 @@ function PluginEditor({store, editId}: {store: Store; editId?: string}) {
     } catch (e) { store.fail(e); }
   };
   return <div className="pl-page">
-    <button className="link small" onClick={() => go('/plugins')}>All plugins</button>
+    <button className="pl-back" onClick={() => go('/plugins')}><ArrowLeft size={15} /> All plugins</button>
     <h1>{editId ? 'Edit plugin' : 'Make a plugin'}</h1>
     <p className="muted">A plugin is a JSON file. Set id, name, version and description, then add what it contributes: theme, features, pages, views, setup or settings. The format is in the Plugins guide (docs/PLUGINS.md). Save it, try it on yourself, then submit it for everyone.</p>
     <div className="pl-actions">

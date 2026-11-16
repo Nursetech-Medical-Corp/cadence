@@ -81,6 +81,14 @@ const begin = (tasks: Tasks, i: Item, prev: Review | null) => ({attempt: (prev?.
 const told = (tasks: Tasks, event: string, i: Item, actor: string | null, details: Record<string, unknown> = {}) =>
   tasks.event(event, {projectId: i.projectId, item: i, actor, details: {review: review(i), ...details}});
 
+/** An agent working on a task (a step, a comment, a file): its timer starts, once it is cleared to work there
+ *  (its claim accepted or sent back, or it was simply assigned). submit_work stops it. */
+export function touch(tasks: Tasks, itemId: string, actor: string | null) {
+  if (!actor || personKind(tasks, actor) !== 'ai' || tasks.runningTimer(actor)?.itemId === itemId) return;
+  const i = tasks.item(itemId), st = review(i)?.state;
+  if (st === 'accepted' || st === 'changes' || st === 'redo' || (!st && i.assignees.includes(actor))) tasks.startTimer(itemId, actor);
+}
+
 export function log(tasks: Tasks, itemId: string, actor: string | null, kind: LogEntry['kind'], text: string, url: string | null = null, opts: {session?: string | null; artifact?: ArtifactInput} = {}) {
   tasks.item(itemId);
   if (!text.trim() && !url) throw new Invalid('Log entries need text or a link');
@@ -93,11 +101,7 @@ export function log(tasks: Tasks, itemId: string, actor: string | null, kind: Lo
   const cur = tasks.item(itemId), r = review(cur);
   if (session && r && r.agent === actor && r.session !== session && OPEN.includes(r.state)) setReview(tasks, cur, {...r, session});
   tasks.emit({kind: 'comment', itemId});
-  // Only once the agent is cleared to work: its claim accepted or sent back, or it was simply assigned.
-  if (actor && kind !== 'review' && kind !== 'result' && personKind(tasks, actor) === 'ai' && tasks.runningTimer(actor)?.itemId !== itemId) {
-    const i = tasks.item(itemId), st = review(i)?.state;
-    if (st === 'accepted' || st === 'changes' || st === 'redo' || (!st && i.assignees.includes(actor))) tasks.startTimer(itemId, actor);
-  }
+  if (kind !== 'review' && kind !== 'result') touch(tasks, itemId, actor);
   return e;
 }
 export function listLog(tasks: Tasks, itemId: string): LogEntry[] {
@@ -196,6 +200,13 @@ export function submit(tasks: Tasks, itemId: string, agent: string, report: stri
   }
   log(tasks, itemId, agent, 'result', report, null, {session: s});
   if (tasks.runningTimer(agent)?.itemId === itemId) tasks.stopTimer(agent, `Submitted: ${report.trim().slice(0, 300)}`);
+  else {
+    // No timer ran (the agent worked through comments or files only): record the time from when it was cleared to work.
+    const from = r && ['accepted', 'changes', 'redo'].includes(r.state) ? r.at : base.started;
+    const had = from ? tasks.db.prepare('select 1 from time_entries where item_id = ? and person = ? and start >= ?').get(itemId, agent, from) : true;
+    // Entries are at most a day long; under a minute is not recorded.
+    if (from && !had) { try { tasks.logTime({itemId, person: agent, start: new Date(Math.max(Date.parse(from), Date.now() - 86400_000 + 1000)).toISOString(), end: now(), note: `Worked from ${r ? 'acceptance' : 'the first step'} to submit (no timer was running)`}); } catch { /* too short */ } }
+  }
   for (const p of humansToTell(tasks, i)) tasks.notifyPublic(p, agent, itemId, 'ai', `submitted "${i.title}" for your review`);
   if (missed.trim()) log(tasks, itemId, agent, 'missed', missed);
   const next: Review = {state: 'submitted', by: agent, agent, at: now(), ...base, ...(s ?? review(tasks.item(itemId))?.session ? {session: s ?? review(tasks.item(itemId))!.session} : {})};

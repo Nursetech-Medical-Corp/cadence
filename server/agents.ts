@@ -10,6 +10,7 @@ import type {Tasks} from './service.ts';
 import type {Item} from '../src/types.ts';
 import {Invalid, NotFound} from './errors.ts';
 import {getWorkspace} from './auth.ts';
+import {BUILT_IN_AGENT_RULES} from '../src/agentRules.ts';
 import {aiQueue, agentOwner, claim, decide, pendingCleanup} from './aiwork.ts';
 import {createEvent, deleteEvent, updateEvent, type EventInput} from './events.ts';
 
@@ -51,7 +52,7 @@ export function listAgents(tasks: Tasks) {
     .map(a => ({...a, ownerName: a.owner ? nameOf(tasks, a.owner) : null, settings: agentSettings(tasks, a.id)}));
 }
 /** Turn an existing person into an AI agent (Team page, Human to AI agent): owned by the admin who switched it
- *  unless it already has an owner, never admin, default agent settings, and it works through its key, not a sign-in. */
+ *  unless it already has an owner, never admin, default agent settings. It keeps any sign-in it has. */
 export function makeAgent(tasks: Tasks, person: string, actor: string | null) {
   if (person === actor) throw new Invalid('You cannot make yourself an AI agent');
   const r = tasks.db.prepare('select owner, agent from people where id = ?').get(person) as {owner?: string | null; agent?: string | null} | undefined;
@@ -178,12 +179,13 @@ export function propose(tasks: Tasks, agent: string, op: string, args: unknown[]
 const toProposal = (r: Record<string, unknown>): Proposal => ({id: r.id as string, agent: r.agent as string, owner: (r.owner as string) ?? null, op: r.op as string, args: JSON.parse(r.args as string),
   summary: r.summary as string, reason: r.reason as string, itemId: (r.item_id as string) ?? null, projectId: (r.project_id as string) ?? null, created: r.created as string,
   state: r.state as Proposal['state'], decidedBy: (r.decided_by as string) ?? null, decidedAt: (r.decided_at as string) ?? null, note: (r.note as string) ?? null, result: r.result ? JSON.parse(r.result as string) : null});
-export function listProposals(tasks: Tasks, q: {owner?: string; agent?: string; state?: string; since?: string} = {}) {
+export function listProposals(tasks: Tasks, q: {owner?: string; agent?: string; state?: string; since?: string; itemId?: string} = {}) {
   const where: string[] = [], vals: string[] = [];
   if (q.owner) { where.push('owner = ?'); vals.push(q.owner); }
   if (q.agent) { where.push('agent = ?'); vals.push(q.agent); }
   if (q.state) { where.push('state = ?'); vals.push(q.state); }
   if (q.since) { where.push('coalesce(decided_at, created) > ?'); vals.push(q.since); }
+  if (q.itemId) { where.push('item_id = ?'); vals.push(q.itemId); }
   return tasks.db.prepare(`select * from proposals ${where.length ? 'where ' + where.join(' and ') : ''} order by created desc limit 500`).all(...vals).map(toProposal);
 }
 export function getProposal(tasks: Tasks, pid: string) {
@@ -193,6 +195,26 @@ export function getProposal(tasks: Tasks, pid: string) {
 }
 
 /** Suggested work, applied on approval: the task (new or existing) goes to the person and the right agent, already accepted. */
+/** Follow-up tasks an agent suggests with its report (submit_work follow_ups). Each waits for the owner on AI work,
+ *  like suggest_work, in the same space as the task unless another is given; noted on the task. */
+export function suggestFollowUps(tasks: Tasks, agent: string, itemId: string, list: {title: string; project?: string; forPerson?: string; reason?: string; estimate?: number; due?: string}[]) {
+  if (!Array.isArray(list) || !list.length) return [];
+  if (list.length > 20) throw new Invalid('Up to 20 follow-ups per report');
+  const it = tasks.item(itemId), owner = agentOwner(tasks, agent);
+  const key = `${tasks.project(it.projectId).key}-${it.number}`;
+  const out = list.map(f => {
+    if (!f || typeof f.title !== 'string' || !f.title.trim()) throw new Invalid('Each follow-up needs a title');
+    const forPerson = f.forPerson ?? owner ?? it.assignees.find(a => !isAgent(tasks, a));
+    if (!forPerson) throw new Invalid('Say who each follow-up is for');
+    const reason = `Follow-up from ${key} (${it.title}): ${f.reason ?? ''}`.trim();
+    const prop = propose(tasks, agent, 'suggestWork', [{title: f.title.trim().slice(0, 500), projectId: f.project ?? it.projectId, forPerson, reason, estimate: f.estimate, due: f.due, agent}], reason);
+    // Kept with the task it came from, so its reviewer sees and decides the follow-ups next to the report.
+    tasks.db.prepare('update proposals set item_id = ? where id = ?').run(itemId, prop.proposal);
+    return prop;
+  });
+  tasks.logWork(itemId, agent, 'note', `Suggested ${out.length} follow-up task${out.length > 1 ? 's' : ''}: ${list.map(f => f.title).join('; ').slice(0, 1000)}. They wait on AI work, Changes to approve.`);
+  return out;
+}
 export type Suggestion = {title?: string; item?: string; projectId?: string; forPerson: string; reason?: string; sop?: string; estimate?: number; due?: string; agent: string};
 export function applySuggestion(tasks: Tasks, s: Suggestion, by: string) {
   const agentFor = agentOwner(tasks, s.agent) === s.forPerson ? s.agent : agentsOf(tasks, s.forPerson).find(a => a.settings.watchAssignments)?.id ?? null;
@@ -269,7 +291,7 @@ export function agentInbox(tasks: Tasks, agent: string, since?: string) {
   return {
     now: now(), owner: owner ? {id: owner, name: nameOf(tasks, owner)} : null, settings: s,
     // Follow these every run: the workspace's rules for all agents, then the owner's rules for this agent.
-    rules: {workspace: getWorkspace(tasks.db).aiRules, agent: s.instructions},
+    rules: {builtIn: BUILT_IN_AGENT_RULES, workspace: getWorkspace(tasks.db).aiRules, agent: s.instructions},
     openClaims: mine.length, canClaimMore: Math.max(0, s.maxClaims - mine.length),
     newForOwner: assigned.map(brief),
     available: queue.filter(x => !x.review || x.review.state === 'declined' || x.review.state === 'discarded').map(x => brief(x.item)),

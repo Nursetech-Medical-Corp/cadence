@@ -41,8 +41,8 @@
 .pl-empty { grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 14px; }
 
 /* Detail page */
-.pl-back { color: var(--text2); font-size: .92em; margin-bottom: 14px; }
-.pl-back:hover { color: var(--accent); }
+.pl-back { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px; margin-bottom: 18px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text2); font-weight: 500; box-shadow: var(--shadow); }
+.pl-back:hover { color: var(--text); border-color: var(--accent-line); }
 .pl-detail-head { display: flex; gap: 24px; align-items: flex-start; padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid var(--line); }
 .pl-detail-head .pl-icon { border-radius: 20px; }
 .pl-detail-title h1 { font-size: 1.9em; }
@@ -101,3 +101,34 @@
 .pl-json { width: 100%; min-height: 420px; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: var(--bg2); margin: 12px 0; }
 .pl-check { padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; }
 .pl-box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 12px 0; display: flex; flex-direction: column; gap: 8px; }
+
+/* Card thumbnails, gallery, highlights, changelog, install switch */
+.pl-card { overflow: hidden; }
+.pl-card-shot { display: block; width: calc(100% + 36px); margin: -18px -18px 4px; aspect-ratio: 16 / 9; object-fit: cover; object-position: top left; border-bottom: 1px solid var(--line); background: var(--bg2); }
+.pl-card-title b, .pl-card-desc { overflow-wrap: anywhere; }
+.pl-gallery-main { display: block; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow-lg); background: var(--bg2); }
+.pl-gallery-main img { display: block; width: 100%; height: auto; }
+.pl-thumbs { display: flex; gap: 8px; margin-top: 10px; overflow-x: auto; }
+.pl-thumbs button { flex: none; width: 120px; border-radius: 8px; overflow: hidden; border: 2px solid transparent; opacity: .7; }
+.pl-thumbs button.on, .pl-thumbs button:hover { border-color: var(--accent); opacity: 1; }
+.pl-thumbs img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: top left; }
+.pl-highlights { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.pl-highlights li { position: relative; padding: 10px 12px 10px 34px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--line2); line-height: 1.45; }
+.pl-highlights li::before { content: '✓'; position: absolute; left: 12px; top: 10px; color: var(--ok); font-weight: 700; }
+.pl-changelog { margin: 0; padding: 0; list-style: none; border-left: 2px solid var(--line); }
+.pl-changelog li { position: relative; padding: 0 0 14px 18px; display: flex; flex-direction: column; gap: 2px; }
+.pl-changelog li::before { content: ''; position: absolute; left: -6px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--card); border: 2px solid var(--accent); }
+.pl-switch-row { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.pl-switch-row input { margin-top: 3px; }
+.pl-switch-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pl-side-card { min-width: 0; } .pl-side-card * { overflow-wrap: anywhere; }
+
+/* Pages made by plugins */
+.pl-page > h1 { font-size: 1.6em; margin-bottom: 14px; }
+.pl-count { display: inline-flex; flex-direction: column; gap: 2px; padding: 14px 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); margin: 6px 0 14px; min-width: 200px; }
+.pl-count b { font-size: 2em; color: var(--accent); line-height: 1; }
+.pl-list { border: 1px solid var(--line); border-radius: 12px; background: var(--card); padding: 6px; margin: 0 0 16px; }
+.pl-list h3 { margin: 6px 10px 6px; font-size: .95em; }
+.pl-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px; }
+.pl-row + .pl-row { border-top: 1px solid var(--line2); }
+.pl-row:hover { background: var(--hover); }
