@@ -12,6 +12,22 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Drag and drop always shows where the drop will land before you let go.
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
 
+## Focus mode and timer
+- Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.
+- Done in focus mode, on the timer bar or in the pop-out stops a running timer and completes the task.
+- A running timer shows a bar at the top of every page, in every open tab, with Stop, Done, Focus and Pop out.
+- Pop out opens a small always-on-top timer (Chrome, Edge); a blocked pop-up says so.
+- Starting a timer opens focus mode or the pop-out only if the person turned that on.
+
+## Plugins
+- The store lists built-in and approved plugins; search matches name, description, publisher and tags.
+- Install for me changes only my view; install for everyone is admin only and approved plugins only.
+- Turning a plugin off keeps it installed; on brings it back as it was, settings included.
+- A theme plugin recolors light or dark mode; safe mode (switch or ?safe) turns every plugin off in this browser.
+- Removing the Day planner or Whiteboards plugin hides its page and sidebar link; the page link says it is off.
+- The editor checks JSON as you type and refuses anything outside the allow list with a plain message.
+- Drafts are seen only by their maker; a new version of an approved plugin goes back to review.
+
 ## Day planner
 - Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)
 - Box edges show a small grab line only when the pointer is on that edge.

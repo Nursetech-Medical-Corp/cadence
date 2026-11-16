@@ -88,6 +88,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Whiteboards | `list_boards`, `get_board`, `create_board`, `update_board` (add, change, remove nodes and connections), `delete_board`, `board_from_items` (routines by SOP, a tag, a parent, items), `boards_by_sop` (one board per SOP), `import_board` (from Claude Whiteboards), `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` (cancel, retry, skip) |
 | Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |
 | Agents | `agent_inbox`, `suggest_work`, `my_proposals` |
+| Plugins (docs/PLUGINS.md) | `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 
 Agents can run a board like a project manager: create and change anything their role allows, set up views,
 import and export items, and track time. They cannot approve: accepting a claim, approving or sending back AI work,

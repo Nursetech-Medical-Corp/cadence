@@ -4,6 +4,7 @@ import {defaultTokens} from './QuickAssist.tsx';
 import {rollupTarget} from './rollup.ts';
 export {rollupTarget, rollupSpaces} from './rollup.ts';
 import type {ChangeEvent, Item, ItemPatch, Person, Project, Sprint, TimeEntry, View, ViewKind} from './types.ts';
+import type {Install} from '../server/plugins.ts';
 import {DEFAULT_CUSTOM, DEFAULT_FEATURES, type Customization, type Features} from './types.ts';
 
 // Which workspace this tab works in. The cookie lets images, file links and live updates reach the same one.
@@ -68,7 +69,7 @@ export const realProjects = (ps: Project[]) => ps.filter(p => !p.settings.rollup
 export type Store = ReturnType<typeof useStore>;
 
 type Settings = {custom: Customization; features: Features; admin: boolean};
-type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]; time?: Record<string, number>; prefs?: Record<string, unknown>; settings?: Settings};
+type Boot = {people: Person[]; projects: Project[]; items: Item[]; today: string; sprints: Sprint[]; views: View[]; time?: Record<string, number>; prefs?: Record<string, unknown>; settings?: Settings; plugins?: Install[]};
 
 export function useStore(me: string) {
   const [people, setPeople] = useState<Person[]>([]);
@@ -82,6 +83,10 @@ export function useStore(me: string) {
   const [tick, setTick] = useState(0); // bumps on any server event so panels refetch comments/time
   const [calTick, setCalTick] = useState(0); // bumps when meetings or calendar events change
   const [running, setRunning] = useState<TimeEntry | null>(null);
+  // null: the server did not say (an older server or the demo), so built-in modules stay on.
+  const [plugins, setPlugins] = useState<Install[] | null>(null);
+  // The task open in focus mode (Focus.tsx), if any.
+  const [focusId, setFocusId] = useState<string | null>(null);
   const [timeTotals, setTimeTotals] = useState<Map<string, number>>(new Map()); // logged minutes per item
   const [prefs, setPrefs] = useState<Record<string, unknown>>({}); // your own layout (src/customize.ts)
   const [settings, setSettings] = useState<Settings>({custom: DEFAULT_CUSTOM, features: DEFAULT_FEATURES, admin: true});
@@ -124,7 +129,7 @@ export function useStore(me: string) {
   const load = useCallback(async () => {
     const b = await api<Boot>('/bootstrap');
     setPeople(b.people); setProjects(b.projects); setToday(b.today); setSprints(b.sprints); setViews(b.views); setTimeTotals(new Map(Object.entries(b.time ?? {})));
-    setPrefs(b.prefs ?? {}); if (b.settings) setSettings(prev => JSON.stringify(prev) === JSON.stringify(b.settings) ? prev : b.settings!);
+    setPrefs(b.prefs ?? {}); setPlugins(b.plugins ?? null); if (b.settings) setSettings(prev => JSON.stringify(prev) === JSON.stringify(b.settings) ? prev : b.settings!);
     setItems(new Map(b.items.map(i => [i.id, i])));
     setReady(true);
   }, []);
@@ -271,12 +276,16 @@ export function useStore(me: string) {
       return api(`/sprints/${id}`, {method: 'DELETE'}).catch(fail);
     },
     async startTimer(itemId: string, kind: 'work' | 'review' = 'work') {
+      // Said before the request, while the click still counts as a user action (a pop-out window needs one).
+      window.dispatchEvent(new CustomEvent('cadence:timer-start', {detail: {itemId}}));
       try { setRunning(await api<TimeEntry>('/time/start', {method: 'POST', body: {itemId, kind}})); } catch (e) { fail(e); }
     },
     async stopTimer() {
       try { await api('/time/stop', {method: 'POST', body: {}}); setRunning(null); } catch (e) { fail(e); }
     },
     fail,
+    setPlugins, setFocusId,
+    async reloadPlugins() { try { setPlugins((await api<{installed: Install[]}>('/plugins')).installed); } catch (e) { fail(e); } },
     async undo() { await replay(undoStack.current.pop(), 'undo'); },
     async redo() { await replay(redoStack.current.pop(), 'redo'); },
   }), [load, loadSprints, loadViews, fail]);
@@ -330,7 +339,7 @@ export function useStore(me: string) {
   }
   function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(n => n === msg ? null : n), 2500); }
 
-  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, lastNew, flash, ...actions};
+  return {me, people, projects, items, sprints, views, today, error, ready, tick, calTick, running, timeTotals, prefs, settings, lastEvent, notice, lastNew, flash, plugins, focusId, ...actions};
 }
 
 // Sort key between two neighbors, for drag and insert.
