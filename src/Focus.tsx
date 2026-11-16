@@ -38,14 +38,46 @@ async function finish(store: Store, item: Item) {
 /** Everything focus related; mount once in the app. */
 export function FocusHost({store, open}: {store: Store; open: (id: string) => void}) {
   const cfg = focusPrefs(store);
-  // The pop-out is its own small window (#/popout), not tied to this page: reloading or going back here leaves it open.
-  const popOut = () => {
-    const w = window.open('', POPOUT_NAME, 'width=400,height=320,popup=yes');
-    if (!w) { store.flash('Allow pop-ups for this site to pop out the timer'); return; }
-    try { if (w.location.href === 'about:blank' || !w.location.hash.startsWith('#/popout')) w.location.href = `${location.pathname}${location.search}#/popout`; } catch { /* another site: leave it */ }
-    w.focus();
+  // The pop-out: a small always-on-top window in the corner (Chrome and Edge), showing on top of every page and app.
+  // The browser closes it when this page reloads; it comes back by itself on your next click or key press here
+  // (browsers only open it after one). Browsers without it get a plain small window instead.
+  const [pip, setPip] = useState<Window | null>(null);
+  const dpip = (window as unknown as {documentPictureInPicture?: {requestWindow: (o: {width: number; height: number}) => Promise<Window>}}).documentPictureInPicture;
+  const popOut = async () => {
+    if (pip && !pip.closed) { pip.focus(); return; }
+    if (!dpip) {
+      const w = window.open('', POPOUT_NAME, 'width=400,height=320,popup=yes');
+      if (!w) { store.flash('Allow pop-ups for this site to pop out the timer'); return; }
+      try { if (w.location.href === 'about:blank' || !w.location.hash.startsWith('#/popout')) w.location.href = `${location.pathname}${location.search}#/popout`; } catch { /* leave it */ }
+      return;
+    }
+    let w: Window;
+    try { w = await dpip.requestWindow({width: 380, height: 300}); } catch { store.flash('Click once on the page, then Pop out again'); return; }
+    w.document.title = 'Cadence focus';
+    for (const ss of [...document.styleSheets]) {
+      try { const st = w.document.createElement('style'); st.textContent = [...ss.cssRules].map(r => r.cssText).join('\n'); w.document.head.appendChild(st); }
+      catch { if (ss.href) { const l = w.document.createElement('link'); l.rel = 'stylesheet'; l.href = ss.href; w.document.head.appendChild(l); } }
+    }
+    w.document.documentElement.dataset.theme = document.documentElement.dataset.theme;
+    w.document.body.className = 'pip-body';
+    // Closing it yourself forgets it; this page reloading or leaving closes it too, and then it comes back.
+    w.addEventListener('pagehide', () => { setPip(null); if (!unloading) localStorage.removeItem(PIP_KEY); });
+    localStorage.setItem(PIP_KEY, '1');
+    setPip(w);
   };
-  // The pop-out asks for the full page focus view here.
+  useEffect(() => {
+    const bye = () => { unloading = true; };
+    window.addEventListener('pagehide', bye);
+    if (!dpip || localStorage.getItem(PIP_KEY) !== '1') return () => window.removeEventListener('pagehide', bye);
+    // After a reload: the first click or key press anywhere brings the pop-out back. It listens after the page has
+    // handled the click, so the click still does what you meant.
+    const back = () => { off(); if (localStorage.getItem(PIP_KEY) === '1') void popOut(); };
+    const off = () => { window.removeEventListener('click', back); window.removeEventListener('keydown', back); };
+    window.addEventListener('click', back); window.addEventListener('keydown', back);
+    return () => { off(); window.removeEventListener('pagehide', bye); };
+  }, []);
+  useEffect(() => () => { pip?.close(); }, [pip]);
+  // The plain-window pop-out (other browsers) asks for the full page focus view here.
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const ch = new BroadcastChannel(`cadence-focus-${wsId()}`);
@@ -70,6 +102,7 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
     {/* On document.body so they sit above the sidebar and the task panel. */}
     {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} />, document.body)}
     {focusItem && createPortal(<FocusView store={store} item={focusItem} list={list} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
+    {pip && !pip.closed && createPortal(<div className="popout-page"><MiniFocus store={store} list={list} focus={id => { fullPage(true); store.setFocusId(id); window.focus(); }} /><PopoutNotes store={store} list={list} /></div>, pip.document.body)}
   </>;
 }
 
@@ -79,6 +112,9 @@ function Clock({start, className = 'fx-clock'}: {start: string; className?: stri
 }
 
 const POPOUT_NAME = 'cadence-popout';
+const PIP_KEY = 'pip-open';
+/** Set while this page unloads, so the pop-out closing with it is not taken as you closing it. */
+let unloading = false;
 
 /** Whether the focus view fills the screen (kept per browser). */
 const isFullPage = () => localStorage.getItem('fv-full') === '1';
@@ -132,7 +168,7 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
       })}
     </div>
     <button className="fb-btn fb-labeled" title="Full page focus on the running task (or the first one)" onClick={() => { fullPage(true); store.setFocusId(store.running && list.some(i => i.id === store.running!.itemId) ? store.running.itemId : list[0].id); }}><Maximize size={13} /> Full page</button>
-    <button className="fb-btn fb-labeled" title="Pop out a small timer window; it stays open when this page reloads" onClick={popOut}><PictureInPicture2 size={13} /> Pop out</button>
+    <button className="fb-btn fb-labeled" title="Pop out a small timer that stays in the corner on top of every window" onClick={popOut}><PictureInPicture2 size={13} /> Pop out</button>
     <FocusSettings store={store} />
   </div>;
 }
