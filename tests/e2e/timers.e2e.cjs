@@ -64,11 +64,32 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 
     await a.keyboard.press('Escape'); await a.waitForTimeout(300);
     check('the focus bar has a labeled Full page and a labeled Pop out, with different icons', await a.locator('.focus-bar').getByRole('button', {name: 'Full page', exact: true}).isVisible() && await a.locator('.focus-bar').getByRole('button', {name: 'Pop out', exact: true}).isVisible());
-    await a.evaluate(() => sessionStorage.setItem('pip-open', '1')); await a.reload(); await a.waitForTimeout(1500);
-    check('after a reload that closed the pop-out, the bar offers to reopen it', await a.locator('.focus-bar').getByRole('button', {name: 'Reopen pop-out'}).isVisible());
-    await a.evaluate(() => sessionStorage.removeItem('pip-open'));
-    await a.locator('.focus-bar .fb-item').first().getByTitle('Full page focus on this task').click(); await a.waitForTimeout(500);
+    // Clicking a task name in the focus bar opens its task panel, not the focus view.
+    await a.locator('.focus-bar .fb-title').first().click(); await a.waitForTimeout(600);
+    check('the task name in the focus bar opens the task panel', !(await a.locator('.fv-backdrop').count()) && await a.locator('aside.panel').first().isVisible().catch(() => false));
+    await a.keyboard.press('Escape'); await a.waitForTimeout(300);
 
+    // The pop-out is its own window: same clock, progress against the estimate (red when over), the notes; it stays when the page reloads.
+    await call(a, `/items/${item.id}`, 'PATCH', {estimate: 0.25, body: 'Popout notes check'});
+    const [c] = await Promise.all([ctx.waitForEvent('page'), a.locator('.focus-bar').getByRole('button', {name: 'Pop out', exact: true}).click()]);
+    c.on('pageerror', e => errors.push(e.message));
+    await c.waitForTimeout(2000);
+    check('Pop out opens its own small window', c.url().includes('#/popout'), c.url());
+    let sameC = true, seenC = '';
+    for (let k = 0; k < 4; k++) {
+      const [x, y] = await Promise.all([a.locator('.timer-chip .tc-run').textContent(), c.locator('.pip-clock .tc-run').textContent()]);
+      seenC = `${x} / ${y}`; if (x !== y) { sameC = false; break; } await c.waitForTimeout(450);
+    }
+    check('the pop-out shows the same run time as the page', sameC, seenC);
+    check('the pop-out shows progress against the estimate, red once past it', await c.locator('.pip-card.on .tp.over').isVisible(), await c.locator('.pip-card.on .tp').getAttribute('class').catch(() => 'none'));
+    check('the pop-out shows the running task\'s notes', (await c.locator('.popout-notes').textContent()).includes('Popout notes check'));
+    await a.reload(); await a.waitForTimeout(1500);
+    check('reloading the page leaves the pop-out open and running', !c.isClosed() && await c.locator('.pip-clock .tc-run').isVisible());
+    await c.locator('.pip-card.on').getByTitle('Full page focus in Cadence').click(); await a.waitForTimeout(800);
+    check('Full page in the pop-out opens the full page focus in the Cadence tab and the pop-out stays', await a.locator('.fv-backdrop.full').isVisible() && !c.isClosed() && await c.locator('.pip-card').first().isVisible());
+    await c.close();
+    await a.keyboard.press('Escape'); await a.waitForTimeout(200);
+    await a.locator('.focus-bar .fb-item').first().getByTitle('Full page focus on this task').click(); await a.waitForTimeout(500);
     // 3. Stop in the focus view; the other tab stops too.
     await a.locator('.fv').getByRole('button', {name: /Stop timer/}).click(); await a.waitForTimeout(1500);
     check('stopping in the focus view stops it here', !(await a.locator('.timer-chip').count()));
