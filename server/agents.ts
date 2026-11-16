@@ -179,12 +179,13 @@ export function propose(tasks: Tasks, agent: string, op: string, args: unknown[]
 const toProposal = (r: Record<string, unknown>): Proposal => ({id: r.id as string, agent: r.agent as string, owner: (r.owner as string) ?? null, op: r.op as string, args: JSON.parse(r.args as string),
   summary: r.summary as string, reason: r.reason as string, itemId: (r.item_id as string) ?? null, projectId: (r.project_id as string) ?? null, created: r.created as string,
   state: r.state as Proposal['state'], decidedBy: (r.decided_by as string) ?? null, decidedAt: (r.decided_at as string) ?? null, note: (r.note as string) ?? null, result: r.result ? JSON.parse(r.result as string) : null});
-export function listProposals(tasks: Tasks, q: {owner?: string; agent?: string; state?: string; since?: string} = {}) {
+export function listProposals(tasks: Tasks, q: {owner?: string; agent?: string; state?: string; since?: string; itemId?: string} = {}) {
   const where: string[] = [], vals: string[] = [];
   if (q.owner) { where.push('owner = ?'); vals.push(q.owner); }
   if (q.agent) { where.push('agent = ?'); vals.push(q.agent); }
   if (q.state) { where.push('state = ?'); vals.push(q.state); }
   if (q.since) { where.push('coalesce(decided_at, created) > ?'); vals.push(q.since); }
+  if (q.itemId) { where.push('item_id = ?'); vals.push(q.itemId); }
   return tasks.db.prepare(`select * from proposals ${where.length ? 'where ' + where.join(' and ') : ''} order by created desc limit 500`).all(...vals).map(toProposal);
 }
 export function getProposal(tasks: Tasks, pid: string) {
@@ -206,7 +207,10 @@ export function suggestFollowUps(tasks: Tasks, agent: string, itemId: string, li
     const forPerson = f.forPerson ?? owner ?? it.assignees.find(a => !isAgent(tasks, a));
     if (!forPerson) throw new Invalid('Say who each follow-up is for');
     const reason = `Follow-up from ${key} (${it.title}): ${f.reason ?? ''}`.trim();
-    return propose(tasks, agent, 'suggestWork', [{title: f.title.trim().slice(0, 500), projectId: f.project ?? it.projectId, forPerson, reason, estimate: f.estimate, due: f.due, agent}], reason);
+    const prop = propose(tasks, agent, 'suggestWork', [{title: f.title.trim().slice(0, 500), projectId: f.project ?? it.projectId, forPerson, reason, estimate: f.estimate, due: f.due, agent}], reason);
+    // Kept with the task it came from, so its reviewer sees and decides the follow-ups next to the report.
+    tasks.db.prepare('update proposals set item_id = ? where id = ?').run(itemId, prop.proposal);
+    return prop;
   });
   tasks.logWork(itemId, agent, 'note', `Suggested ${out.length} follow-up task${out.length > 1 ? 's' : ''}: ${list.map(f => f.title).join('; ').slice(0, 1000)}. They wait on AI work, Changes to approve.`);
   return out;

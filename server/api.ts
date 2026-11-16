@@ -1282,7 +1282,7 @@ If you did not ask for it, ignore this email.`)
           const all = q('all') === '1' && (isAdmin(actor) || !ws.requireLogin);
           const agentQ = q('agent');
           if (agentQ && !all && !agentsOf(tasks, actor).some(x => x.id === agentQ) && agentQ !== actor) throw new Denied('Not your agent');
-          return send(res, 200, listProposals(tasks, {owner: all || agentQ ? undefined : actor, agent: agentQ, state: q('state')}));
+          return send(res, 200, listProposals(tasks, {owner: all || agentQ ? undefined : actor, agent: agentQ, state: q('state'), itemId: q('item')}));
         }
         if (b && !c && m === 'GET') { const p0 = getProposal(tasks, b); if (p0.owner !== actor && p0.agent !== actor) needAdmin(); return send(res, 200, p0); }
         if (b && c === 'decide' && m === 'POST') {

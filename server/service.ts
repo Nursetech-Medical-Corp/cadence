@@ -803,6 +803,7 @@ export class Tasks {
     const item = this.item(itemId);
     this.person(author);
     if (!body.trim()) throw new Invalid('Comment is empty');
+    ai.touch(this, itemId, author);
     if (assignee) this.person(assignee);
     const c: Comment = {id: id(), itemId, author, body: body.trim(), created: now(), assignee, resolved: null};
     this.db.prepare('insert into comments (id,item_id,author,body,created,assignee) values (?,?,?,?,?,?)').run(c.id, c.itemId, c.author, c.body, c.created, assignee);
@@ -1723,7 +1724,7 @@ export class Tasks {
   workFeedback(itemId: string) { return ai.feedback(this, itemId); }
   workLog(itemId: string) { return ai.listLog(this, itemId); }
   aiQueue(agent: string | null, projectId?: string) { return ai.aiQueue(this, agent, projectId); }
-  attachFile(itemId: string, by: string | null, name: string, mime: string, base64: string) { return ai.saveFile(this, itemId, by, name, mime, base64); }
+  attachFile(itemId: string, by: string | null, name: string, mime: string, base64: string) { const f = ai.saveFile(this, itemId, by, name, mime, base64); ai.touch(this, itemId, by); return f; }
   itemFiles(itemId: string) { return ai.listFiles(this, itemId); }
   projectFiles(projectId: string) { this.project(projectId); return ai.projectFiles(this, projectId); }
   /** Saves a file as its own task: the title is the file name without its extension, the file is attached. */

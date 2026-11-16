@@ -12,6 +12,22 @@ const DECIDED: Record<string, string> = {approved: 'Signed', changes: 'Changes r
 
 /** The kind of signature asked for, as a noun, so it never reads like a decision already made. */
 const MEANING_LABEL: Record<string, string> = {approved: 'Approval', reviewed: 'Review', verified: 'Verification', authored: 'Author signature'};
+const MEANING_VERB: Record<string, string> = {approved: 'to approve', reviewed: 'to review', verified: 'to verify', authored: 'to sign as author'};
+
+/** Sign from a list (no panel): asks for a password only when the account has one. */
+async function quickSign(store: Store, a: Approval, decision: 'approved' | 'changes', onDone: () => void) {
+  let comment = '';
+  if (decision === 'changes') { const c = prompt('What needs to change?'); if (!c?.trim()) return; comment = c; }
+  const send = (password?: string) => api(`/approvals/${a.id}/sign`, {method: 'POST', body: {decision, comment, password}});
+  try { await send(); }
+  catch (e) {
+    if (!/password/i.test(String((e as Error).message))) { store.fail(e); return; }
+    const pw = prompt('Signing needs your password'); if (!pw) return;
+    try { await send(pw); } catch (e2) { store.fail(e2); return; }
+  }
+  store.flash(decision === 'approved' ? 'Signed' : 'Changes requested');
+  onDone();
+}
 
 export function ApprovalsSection({item, store, me}: {item: Item; store: Store; me: string}) {
   const [list, setList] = useState<Approval[]>([]);
@@ -49,15 +65,27 @@ export function ApprovalsSection({item, store, me}: {item: Item; store: Store; m
         <div key={a.id} className={'approval a-' + a.decision}>
           <Avatar person={person(a.approver)} size={22} />
           <div className="grow">
-            <div className="small"><b>{person(a.approver)?.name}</b> <span className="muted">to {a.meaning === 'authored' ? 'sign as author' : a.meaning.replace(/ed$/, '')}</span> <span className={'tag'}>{DECIDED[a.decision]}</span></div>
+            <div className="small"><b>{person(a.approver)?.name}</b> <span className="muted">{MEANING_VERB[a.meaning] ?? a.meaning}</span> <span className={'tag'}>{DECIDED[a.decision]}</span></div>
             {a.note && <div className="small muted">Request: {a.note}</div>}
             {a.signedAt && <div className="small muted">{a.signerName}, {new Date(a.signedAt).toLocaleString()}{a.passwordChecked ? ', identity confirmed by password' : ', no password on file'}{a.comment ? `. "${a.comment}"` : ''}</div>}
-            {a.decision === 'pending' && a.approver === me && <SignBox approval={a} store={store} onDone={load} />}
+            {a.decision === 'pending' && a.approver === me && <><HandedIn approval={a} store={store} /><SignBox approval={a} store={store} onDone={load} /></>}
           </div>
         </div>
       ))}
     </>
   );
+}
+
+/** What the person asking handed in (their latest report or step), right above the sign buttons. */
+function HandedIn({approval, store}: {approval: Approval; store: Store}) {
+  const [last, setLast] = useState<{text: string; at: string; kind: string} | null>(null);
+  useEffect(() => {
+    api<{actor: string | null; text: string; at: string; kind: string}[]>(`/items/${approval.itemId}/log`)
+      .then(l => setLast([...l].reverse().find(e => e.actor === approval.requestedBy && ['result', 'step', 'note'].includes(e.kind)) ?? null)).catch(() => {});
+  }, [approval.id, store.tick]);
+  if (!last) return null;
+  const who = store.people.find(p => p.id === approval.requestedBy)?.name ?? 'They';
+  return <div className="handed-in small"><b>{who}{last.kind === 'result' ? ' handed in' : ' last wrote'}</b> <span className="muted">{new Date(last.at).toLocaleString()}</span><div className="handed-text">{last.text.slice(0, 1200)}</div></div>;
 }
 
 function SignBox({approval, store, onDone}: {approval: Approval; store: Store; onDone: () => void}) {
@@ -87,10 +115,11 @@ function SignBox({approval, store, onDone}: {approval: Approval; store: Store; o
 export function ApprovalsPage({store, me, open}: {store: Store; me: string; open: (id: string) => void}) {
   const [mine, setMine] = useState<Approval[]>([]);
   const [all, setAll] = useState<Approval[]>([]);
-  useEffect(() => {
+  const reload = () => {
     api<Approval[]>('/approvals?mine=1&pending=true').then(setMine).catch(() => {});
     api<Approval[]>('/approvals').then(setAll).catch(() => {});
-  }, [store.tick, me]);
+  };
+  useEffect(reload, [store.tick, me]);
   const row = (a: Approval) => {
     const it = store.items.get(a.itemId);
     if (!it) return null;
@@ -101,13 +130,18 @@ export function ApprovalsPage({store, me, open}: {store: Store; me: string; open
       <span className="tag" title="What signing means">{MEANING_LABEL[a.meaning] ?? a.meaning}</span>
       {a.requestedBy && <span className="muted small" title="Who asked">from {store.people.find(p => p.id === a.requestedBy)?.name ?? 'someone'}{store.people.find(p => p.id === a.requestedBy)?.kind === 'ai' ? ' (AI)' : ''}</span>}
       <Avatar person={store.people.find(p => p.id === a.approver)} size={18} />
-      <span className={'small ' + (a.decision === 'approved' ? 'good' : a.decision === 'pending' ? 'muted' : 'overdue')}>{DECIDED[a.decision]}</span>
+      {a.decision === 'pending' && a.approver === me
+        ? <span className="row-actions" onClick={e => e.stopPropagation()}>
+            <button className="btn primary small" title="Sign it now" onClick={() => quickSign(store, a, 'approved', reload)}><ShieldCheck size={12} /> Sign</button>
+            <button className="btn small" title="Send it back with a comment" onClick={() => quickSign(store, a, 'changes', reload)}>Changes</button>
+          </span>
+        : <span className={'small ' + (a.decision === 'approved' ? 'good' : a.decision === 'pending' ? 'muted' : 'overdue')}>{DECIDED[a.decision]}</span>}
     </div>;
   };
   return (
     <div className="page">
       <h1><FileSignature size={20} /> Approvals</h1>
-      <p className="muted">Signatures record who, what it means, when, and a fingerprint of the item at that moment. Open an item to sign.</p>
+      <p className="muted">Signatures record who, what it means, when, and a fingerprint of the item at that moment. Sign right here, or open the item to read it first. Work an AI agent hands in is decided by your signature too.</p>
       <h3>Waiting for you <span className="count">{mine.length}</span></h3>
       {mine.map(row)}
       {!mine.length && <p className="muted small">Nothing waiting for your signature.</p>}

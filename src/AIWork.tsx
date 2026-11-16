@@ -121,6 +121,7 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
       onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); for (const f of e.dataTransfer.files) upload(f); }}>
       <h4><Bot size={13} /> Who does it <span style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}}><WorkerToggle item={item} store={store} /></span></h4>
       <ReviewActions item={item} store={store} />
+      <Proposals store={store} open={id => { location.hash = `/open/${id}`; }} all={store.settings.admin} itemId={item.id} />
       <h4><Paperclip size={13} /> Files and links <span className="count">{files.length}</span></h4>
       <div className="files">
         {files.map(f => f.mime.startsWith('image/')
@@ -158,12 +159,12 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
 type Proposal = {id: string; agent: string; owner: string | null; op: string; args: unknown[]; summary: string; reason: string; itemId: string | null; created: string; state: string; note: string | null};
 
 /** Changes your agents want to make, held until you approve them. */
-function Proposals({store, open, all}: {store: Store; open: (id: string) => void; all: boolean}) {
+export function Proposals({store, open, all, itemId}: {store: Store; open: (id: string) => void; all: boolean; itemId?: string}) {
   const [list, setList] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<Record<string, string>>({});
-  const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}`).then(setList).catch(() => setList([]));
-  useEffect(() => { load(); }, [store.tick, all]);
+  const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}${itemId ? `&item=${itemId}` : ''}`).then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, [store.tick, all, itemId]);
   if (!list.length) return null;
   const decide = async (p: Proposal, approve: boolean) => {
     setBusy(p.id);
@@ -173,8 +174,10 @@ function Proposals({store, open, all}: {store: Store; open: (id: string) => void
   };
   return (
     <div className="proposals">
-      <h3>Changes to approve <span className="muted">{list.length}</span></h3>
-      <p className="muted small">Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.</p>
+      {itemId ? <h4>Suggested by the agent <span className="count">{list.length}</span>
+          {list.length > 1 && <button className="btn small" style={{marginLeft: 'auto', textTransform: 'none', letterSpacing: 0}} disabled={!!busy} onClick={async () => { for (const p of list) await decide(p, true); }}><ThumbsUp size={12} /> Approve all</button>}</h4>
+        : <h3>Changes to approve <span className="muted">{list.length}</span></h3>}
+      <p className="muted small">{itemId ? 'Follow-up tasks and changes from this work. Approving creates or changes them now, in your name; rejecting tells the agent no.' : 'Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.'}</p>
       {list.map(p => {
         const agent = store.people.find(x => x.id === p.agent);
         return (

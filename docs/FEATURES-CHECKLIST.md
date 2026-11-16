@@ -29,6 +29,11 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Workspace AI rules (admins) and each agent's own rules are saved on blur and come back in agent_inbox.
 - Boards and lists show Claim, AI working, Review or Sent back on tasks with open AI work; the chip opens AI work.
 
+- An agent asking for approval moves its card to Ready for review; signing (in the panel or the Approvals list) approves it or sends it back; deciding on AI work settles the approval.
+- Approvals list rows have Sign and Changes; the panel shows what the agent handed in above the sign buttons; labels read Approval, Review, Verification, not a decision.
+- Follow-ups from submit_work show in the task panel under Suggested by the agent, with Approve all.
+- An agent's time is recorded from its first step, comment or file to hand-in; with no timer, from acceptance to hand-in.
+
 ## Team page
 - Job roles table: the name column is readable and stays put while scrolling sideways; every column resizes by dragging its header edge, double-click resets.
 
