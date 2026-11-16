@@ -54,7 +54,7 @@ export function TimeGrid({store, days, projectId, items, open, onDropTask}: {sto
           <div key={d} className={'tg-day-head' + (d === todayStr ? ' today' : '')}>
             <b>{parseDay(d).toLocaleDateString(undefined, {weekday: 'short'})}</b> <span>{parseDay(d).getDate()}</span>
             <div className="tg-allday">
-              {allDay.filter(e => e.start.slice(0, 10) <= d && e.end.slice(0, 10) > d).map(e => <EventChip key={e.id + e.start} e={e} people={store.people} onClick={() => setEdit({event: e})} />)}
+              {allDay.filter(e => e.start.slice(0, 10) <= d && e.end.slice(0, 10) > d).map(e => <EventChip key={e.id + e.start} e={e} people={store.people} color={eventColor(store.prefs, e)} onClick={() => setEdit({event: e})} />)}
               {dueOn(d).map(i => <div key={i.id} className="tg-due" draggable onDragStart={ev => ev.dataTransfer.setData('text/item', i.id)} onClick={() => open(i.id)} title="Task due this day. Drag onto an hour to block time for it.">{i.title}</div>)}
             </div>
           </div>
@@ -81,7 +81,7 @@ export function TimeGrid({store, days, projectId, items, open, onDropTask}: {sto
                   const me = e.attendees.find(a => a.person === store.me);
                   return (
                     <div key={e.id + e.start} className={`tg-ev ${e.kind}${e.readonly ? ' ro' : ''}${me?.response === 'declined' ? ' declined' : ''}`} title={`${e.title}\n${hhmm(s)} to ${hhmm(en)}`}
-                      style={{top, height: h, left: `calc(${(col / cols) * 100}% + 2px)`, width: `calc(${100 / cols}% - 4px)`}} onClick={() => setEdit({event: e})}>
+                      style={{top, height: h, left: `calc(${(col / cols) * 100}% + 2px)`, width: `calc(${100 / cols}% - 4px)`, ...(eventColor(store.prefs, e) ? {borderLeftColor: eventColor(store.prefs, e), background: `color-mix(in srgb, ${eventColor(store.prefs, e)} 22%, var(--card))`} : {})}} onClick={() => setEdit({event: e})}>
                       <b>{e.title}</b><span>{hhmm(s)} to {hhmm(en)}{e.rrule || e.occurrenceOf ? ' ⟳' : ''}{e.meetUrl ? ' · Meet' : ''}</span>
                     </div>
                   );
@@ -113,9 +113,9 @@ function layout(list: CalEvent[]) {
   return out;
 }
 
-function EventChip({e, people, onClick}: {e: CalEvent; people: Person[]; onClick: () => void}) {
+function EventChip({e, people, onClick, color}: {e: CalEvent; people: Person[]; onClick: () => void; color?: string}) {
   void people;
-  return <div className={`tg-chip ${e.kind}${e.readonly ? ' ro' : ''}`} onClick={onClick} title={e.title} style={e.color && GCAL_COLORS[e.color] ? {background: GCAL_COLORS[e.color][1], color: '#fff'} : undefined}>{e.title}</div>;
+  return <div className={`tg-chip ${e.kind}${e.readonly ? ' ro' : ''}`} onClick={onClick} title={e.title} style={color ? {background: color, color: '#fff'} : undefined}>{e.title}</div>;
 }
 
 const REPEATS: {label: string; rule: (d: Date) => string | null}[] = [
@@ -137,6 +137,12 @@ const repeatLabel = (rule: string | null) => {
 };
 
 /** Create or change a meeting. Repeating meetings ask: this one or all. */
+/** The color an event shows in: your own color for it (prefs.eventColors, any event, only you see it), else its calendar color. */
+export function eventColor(prefs: Record<string, unknown>, e: {id: string; occurrenceOf?: string | null; color?: string | null}) {
+  const mine = (prefs.eventColors as Record<string, string> | undefined)?.[e.occurrenceOf ?? e.id];
+  const id = mine ?? e.color ?? null;
+  return id && GCAL_COLORS[id] ? GCAL_COLORS[id][1] : undefined;
+}
 /** Google Calendar's event colors (colorId 1 to 11). */
 export const GCAL_COLORS: Record<string, [string, string]> = {'1': ['Lavender', '#7986cb'], '2': ['Sage', '#33b679'], '3': ['Grape', '#8e24aa'], '4': ['Flamingo', '#e67c73'], '5': ['Banana', '#f6bf26'], '6': ['Tangerine', '#f4511e'],
   '7': ['Peacock', '#039be5'], '8': ['Graphite', '#616161'], '9': ['Blueberry', '#3f51b5'], '10': ['Basil', '#0b8043'], '11': ['Tomato', '#d50000']};
@@ -158,12 +164,24 @@ export function EventEditor({store, event, draft, items, onClose, open, onSaved}
   const [itemId, setItemId] = useState(base.itemId ?? '');
   const [visibility, setVisibility] = useState(base.visibility ?? 'space');
   const [color, setColor] = useState<string | null>(base.color ?? null);
+  const evKey = event ? (event.occurrenceOf ?? event.id) : null;
+  const myColors = (store.prefs.eventColors as Record<string, string> | undefined) ?? {};
+  const [mine, setMine] = useState<string | null>(evKey ? myColors[evKey] ?? null : null);
   const [scope, setScope] = useState<'one' | 'all'>(event?.occurrenceOf ? 'one' : 'all');
   const [slots, setSlots] = useState<{start: string; end: string}[] | null>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const isRepeating = !!(event?.rrule || event?.occurrenceOf);
   const canEdit = !event || (!event.readonly && (event.organizer === store.me));
+  // Events you can change get a real color; any other event gets your own color, saved at once and only for you.
+  const shownColor = canEdit ? color : (mine ?? color);
+  const pickColor = (c: string | null) => {
+    if (canEdit) { setColor(c); return; }
+    if (!evKey) return;
+    setMine(c);
+    const next = {...myColors}; if (c) next[evKey] = c; else delete next[evKey];
+    store.setPref('eventColors', next);
+  };
   const me = event?.attendees.find(a => a.person === store.me);
   const organizer = store.people.find(p => p.id === (event?.organizer ?? store.me));
   const durationMin = Math.max(15, (new Date(toIso(day, end)).getTime() - new Date(toIso(day, start)).getTime()) / 60000);
@@ -251,9 +269,9 @@ export function EventEditor({store, event, draft, items, onClose, open, onSaved}
           {event?.meetUrl ? <a href={event.meetUrl} target="_blank" rel="noreferrer">{event.meetUrl}</a>
             : !event ? <label className="small"><input type="checkbox" checked={meet} onChange={e => setMeet(e.target.checked)} /> Add a Google Meet link (needs Google Calendar connected)</label> : <span className="small muted">No video link</span>}
         </div>
-        <div className="ev-row"><span className="small muted">Color</span>
-          <button className={'ev-color' + (!color ? ' on' : '')} title="Calendar color" disabled={!canEdit} onClick={() => setColor(null)} style={{background: 'var(--line)'}} />
-          {Object.entries(GCAL_COLORS).map(([id, [name, hex]]) => <button key={id} className={'ev-color' + (color === id ? ' on' : '')} title={name} disabled={!canEdit} onClick={() => setColor(id)} style={{background: hex}} />)}
+        <div className="ev-row"><span className="small muted" title={canEdit ? 'Saved with the event (and on Google Calendar)' : 'Only on your planner and calendar here; the event itself is not changed'}>{canEdit ? 'Color' : 'My color'}</span>
+          <button className={'ev-color' + (!shownColor ? ' on' : '')} title="Calendar color" onClick={() => pickColor(null)} style={{background: 'var(--line)'}} />
+          {Object.entries(GCAL_COLORS).map(([id, [name, hex]]) => <button key={id} className={'ev-color' + (shownColor === id ? ' on' : '')} title={name} onClick={() => pickColor(id)} style={{background: hex}} />)}
           {event?.googleUrl && <a className="btn small ghost" href={event.googleUrl} target="_blank" rel="noreferrer" title="Open it in Google Calendar for everything Google offers there">Open in Google Calendar</a>}
         </div>
         <input className="plain-select ev-wide" placeholder="Location" value={location} disabled={!canEdit} onChange={e => setLocation(e.target.value)} />
