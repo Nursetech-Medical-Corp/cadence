@@ -69,27 +69,36 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     check('the task name in the focus bar opens the task panel', !(await a.locator('.fv-backdrop').count()) && await a.locator('aside.panel').first().isVisible().catch(() => false));
     await a.keyboard.press('Escape'); await a.waitForTimeout(300);
 
-    // The pop-out is its own window: same clock, progress against the estimate (red when over), the notes; it stays when the page reloads.
+    // The pop-out: a small always-on-top window in the corner (document picture-in-picture), on every page.
     await call(a, `/items/${item.id}`, 'PATCH', {estimate: 0.25, body: 'Popout notes check'});
-    const [c] = await Promise.all([ctx.waitForEvent('page'), a.locator('.focus-bar').getByRole('button', {name: 'Pop out', exact: true}).click()]);
-    c.on('pageerror', e => errors.push(e.message));
-    await c.waitForTimeout(2000);
-    check('Pop out opens its own small window', c.url().includes('#/popout'), c.url());
+    await a.waitForTimeout(500);
+    await a.locator('.focus-bar').getByRole('button', {name: 'Pop out', exact: true}).click(); await a.waitForTimeout(1200);
+    const pipText = sel => a.evaluate(sel => documentPictureInPicture.window?.document.querySelector(sel)?.textContent ?? null, sel);
+    check('Pop out opens the corner window (picture-in-picture), not a page', await a.evaluate(() => !!documentPictureInPicture.window));
     let sameC = true, seenC = '';
     for (let k = 0; k < 4; k++) {
-      const [x, y] = await Promise.all([a.locator('.timer-chip .tc-run').textContent(), c.locator('.pip-clock .tc-run').textContent()]);
-      seenC = `${x} / ${y}`; if (x !== y) { sameC = false; break; } await c.waitForTimeout(450);
+      const [x, y] = await Promise.all([a.locator('.timer-chip .tc-run').textContent(), pipText('.pip-clock .tc-run')]);
+      seenC = `${x} / ${y}`; if (x !== y) { sameC = false; break; } await a.waitForTimeout(450);
     }
     check('the pop-out shows the same run time as the page', sameC, seenC);
-    check('the pop-out shows progress against the estimate, red once past it', await c.locator('.pip-card.on .tp.over').isVisible(), await c.locator('.pip-card.on .tp').getAttribute('class').catch(() => 'none'));
-    check('the pop-out shows the running task\'s notes', (await c.locator('.popout-notes').textContent()).includes('Popout notes check'));
-    await a.reload(); await a.waitForTimeout(1500);
-    check('reloading the page leaves the pop-out open and running', !c.isClosed() && await c.locator('.pip-clock .tc-run').isVisible());
-    await c.locator('.pip-card.on').getByTitle('Full page focus in Cadence').click(); await a.waitForTimeout(800);
-    check('Full page in the pop-out opens the full page focus in the Cadence tab and the pop-out stays', await a.locator('.fv-backdrop.full').isVisible() && !c.isClosed() && await c.locator('.pip-card').first().isVisible());
-    await c.close();
-    await a.keyboard.press('Escape'); await a.waitForTimeout(200);
+    check('the pop-out shows progress against the estimate, red once past it', await a.evaluate(() => !!documentPictureInPicture.window?.document.querySelector('.pip-card.on .tp.over')));
+    check('the pop-out shows the running task\'s notes', ((await pipText('.popout-notes')) ?? '').includes('Popout notes check'));
+    await a.evaluate(() => { location.hash = '/team'; }); await a.waitForTimeout(800);
+    check('it stays open on other pages', await a.evaluate(() => !!documentPictureInPicture.window));
+    await a.evaluate(() => documentPictureInPicture.window.document.querySelector('.pip-card.on [title="Full page focus in Cadence"]').click()); await a.waitForTimeout(800);
+    check('its Full page button opens the full page focus and the pop-out stays', await a.locator('.fv-backdrop.full').isVisible() && await a.evaluate(() => !!documentPictureInPicture.window));
+    await a.keyboard.press('Escape'); await a.waitForTimeout(300);
+    await a.evaluate(() => { location.hash = '/mywork'; }); await a.reload(); await a.waitForTimeout(1500);
+    check('a reload closes it (the browser does that)', await a.evaluate(() => !documentPictureInPicture.window));
+    await a.locator('.sidebar, nav').getByText('Day planner', {exact: true}).first().click(); await a.waitForTimeout(1200);
+    check('the next click brings it back by itself', await a.evaluate(() => !!documentPictureInPicture.window));
+    check('and that click still did what it was for', (await a.evaluate(() => location.hash)).startsWith('#/day'));
+    await a.evaluate(() => documentPictureInPicture.window?.close()); await a.waitForTimeout(400);
+    await a.reload(); await a.waitForTimeout(1200);
+    await a.locator('.sidebar, nav').getByText('My work', {exact: true}).first().click(); await a.waitForTimeout(800);
+    check('closing it yourself keeps it closed after a reload', await a.evaluate(() => !documentPictureInPicture.window));
     await a.locator('.focus-bar .fb-item').first().getByTitle('Full page focus on this task').click(); await a.waitForTimeout(500);
+
     // 3. Stop in the focus view; the other tab stops too.
     await a.locator('.fv').getByRole('button', {name: /Stop timer/}).click(); await a.waitForTimeout(1500);
     check('stopping in the focus view stops it here', !(await a.locator('.timer-chip').count()));
