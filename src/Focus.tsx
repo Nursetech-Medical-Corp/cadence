@@ -9,7 +9,7 @@
 import {TaskClock} from './TimeTracker.tsx';
 import {useEffect, useState} from 'react';
 import {createPortal} from 'react-dom';
-import {Calendar, CheckCircle2, ExternalLink, Focus as FocusIcon, Maximize2, Minimize2, Play, Settings2, Square, X} from 'lucide-react';
+import {Calendar, CheckCircle2, Focus as FocusIcon, Maximize, Minimize, PanelRightOpen, PictureInPicture2, Play, Settings2, Square, X} from 'lucide-react';
 import {fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {BlockEditor} from './BlockEditor.tsx';
 import {Check, InlineText, Popover, PriorityIcon, StatusIcon, itemKey} from './components.tsx';
@@ -53,9 +53,20 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
     }
     w.document.documentElement.dataset.theme = document.documentElement.dataset.theme;
     w.document.body.className = 'pip-body';
-    w.addEventListener('pagehide', () => setPip(null));
+    // Closing the pop-out yourself forgets it; a reload of this page closes it too (the browser ties it to the page),
+    // and the focus bar then offers to reopen it.
+    w.addEventListener('pagehide', () => { setPip(null); if (!unloading) sessionStorage.removeItem('pip-open'); });
+    sessionStorage.setItem('pip-open', '1');
     setPip(w);
   };
+  // After a reload the bar offers Reopen pop-out (a pulsing button): browsers only open it from a click.
+  const [reopen, setReopen] = useState(() => sessionStorage.getItem('pip-open') === '1');
+  useEffect(() => {
+    const bye = () => { unloading = true; };
+    window.addEventListener('pagehide', bye);
+    return () => window.removeEventListener('pagehide', bye);
+  }, []);
+  useEffect(() => { if (pip) setReopen(false); }, [pip]);
 
   // Starting a timer anywhere puts its task in focus, and opens the focus view or the pop-out if this person wants that.
   useEffect(() => {
@@ -73,16 +84,19 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
   const focusItem = store.focusId ? store.items.get(store.focusId) : undefined;
   return <>
     {/* On document.body so they sit above the sidebar and the task panel. */}
-    {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} />, document.body)}
+    {cfg.bar && list.length > 0 && createPortal(<FocusBar store={store} list={list} open={open} popOut={popOut} reopen={reopen} />, document.body)}
     {focusItem && createPortal(<FocusView store={store} item={focusItem} list={list} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
     {pip && !pip.closed && createPortal(<MiniFocus store={store} list={list} focus={id => { window.focus(); store.setFocusId(id); }} />, pip.document.body)}
   </>;
 }
 
 function Clock({start, className = 'fx-clock'}: {start: string; className?: string}) {
-  const now = useSharedNow(true);
+  const now = useSharedNow(true, start);
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
+
+/** Set while this page unloads, so the pop-out closing with it is not taken as you closing it. */
+let unloading = false;
 
 /** Whether the focus view fills the screen (kept per browser). */
 const isFullPage = () => localStorage.getItem('fv-full') === '1';
@@ -117,7 +131,7 @@ export function FocusSettingsCard({store}: {store: Store}) {
   </section>;
 }
 
-function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void}) {
+function FocusBar({store, list, open, popOut, reopen}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void; reopen?: boolean}) {
   const run = store.running;
   return <div className="focus-bar" role="status">
     <span className="fb-label"><FocusIcon size={13} /> Focus</span>
@@ -129,14 +143,15 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
             : <button className="fb-btn" title="Start the timer on this task" onClick={() => store.startTimer(i.id)}><Play size={10} fill="currentColor" /></button>}
           {on && <TaskClock store={store} itemId={i.id} className="fx-clock" />}
           <button className="fb-title" title={`${i.title}. Click for the focus view`} onClick={() => store.setFocusId(i.id)}>{i.title}</button>
-          <button className="fb-btn" title="Full page focus on this task" onClick={() => { fullPage(true); store.setFocusId(i.id); }}><Maximize2 size={12} /></button>
+          <button className="fb-btn" title="Full page focus on this task" onClick={() => { fullPage(true); store.setFocusId(i.id); }}><Maximize size={12} /></button>
           <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
-          <button className="fb-btn" title="Open the task" onClick={() => open(i.id)}><ExternalLink size={12} /></button>
+          <button className="fb-btn" title="Open the task panel" onClick={() => open(i.id)}><PanelRightOpen size={12} /></button>
           <button className="fb-btn" title="Take out of focus" onClick={() => store.focusRemove(i.id)}><X size={12} /></button>
         </div>;
       })}
     </div>
-    <button className="fb-btn" title="Pop out a small timer that stays on top of other windows" onClick={popOut}><ExternalLink size={13} /></button>
+    <button className="fb-btn fb-labeled" title="Full page focus on the running task (or the first one)" onClick={() => { fullPage(true); store.setFocusId(store.running && list.some(i => i.id === store.running!.itemId) ? store.running.itemId : list[0].id); }}><Maximize size={13} /> Full page</button>
+    <button className={'fb-btn fb-labeled' + (reopen ? ' pulse' : '')} title={reopen ? 'The page reloaded, which closed the pop-out. Click anywhere (or here) to bring it back' : 'Pop out a small timer that stays on top of other windows'} onClick={popOut}><PictureInPicture2 size={13} /> {reopen ? 'Reopen pop-out' : 'Pop out'}</button>
     <FocusSettings store={store} />
   </div>;
 }
@@ -163,8 +178,8 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
       <header className="fv-head">
         <span className="fv-crumb"><span className="fv-space">{project.name}</span> {itemKey(item, store.projects)}</span>
         <span className="spacer" />
-        <button className="btn small" onClick={() => { fullPage(!full); setFull(!full); }} title={full ? 'Back to a window over the page' : 'Fill the whole screen'}>{full ? <><Minimize2 size={13} /> Window</> : <><Maximize2 size={13} /> Full page</>}</button>
-        <button className="btn small" onClick={popOut} title="A small timer that stays on top of other windows"><ExternalLink size={13} /> Pop out</button>
+        <button className="btn small" onClick={() => { fullPage(!full); setFull(!full); }} title={full ? 'Back to a window over the page' : 'Fill the whole screen'}>{full ? <><Minimize size={13} /> Window</> : <><Maximize size={13} /> Full page</>}</button>
+        <button className="btn small" onClick={popOut} title="A small timer that stays on top of other windows"><PictureInPicture2 size={13} /> Pop out</button>
         <FocusSettings store={store} />
         <button className="fb-btn" title="Leave the focus view (Esc)" onClick={close}><X size={18} /></button>
       </header>
@@ -188,9 +203,9 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
         </main>
         <aside className="fv-side">
           <section className={'fv-timer' + (run ? ' on' : '')}>
-            <TaskClock store={store} itemId={item.id} className={'fv-clock' + (run ? '' : ' idle')} />
+            <TaskClock store={store} itemId={item.id} total="below" className={'fv-clock' + (run ? '' : ' idle')} />
             <div className="fv-progress" title={est ? `${pct}% of the estimate` : 'No estimate'}><span style={{width: `${est ? pct : 0}%`}} /></div>
-            <div className="muted small">{run ? <>This run <Clock start={run.start} className="" />. </> : null}{est ? `${pct}% of ${fmtMinutes(est)} estimate` : 'Total logged on the task'}</div>
+            <div className="muted small">{est ? `${pct}% of the ${fmtMinutes(est)} estimate` : run ? 'Big number: this run' : 'Total logged on the task'}</div>
             {run ? <button className="btn fv-wide" onClick={() => store.stopTimer()}><Square size={12} fill="currentColor" /> Stop timer</button>
               : <button className="btn primary fv-wide" onClick={() => store.startTimer(item.id)}><Play size={12} fill="currentColor" /> Start timer</button>}
             <button className="btn fv-wide" disabled={!!item.completed} onClick={() => finish(store, item).then(close)}><CheckCircle2 size={14} /> {item.completed ? 'Done' : 'Done (stops the timer)'}</button>
@@ -219,7 +234,7 @@ function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id
         {on ? <TaskClock store={store} itemId={i.id} className="fx-clock" /> : null}
         <span className="pip-title" title={i.title}>{i.title}</span>
         <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
-        <button className="fb-btn pip-full" title="Full page focus in Cadence" onClick={() => { fullPage(true); focus(i.id); }}><Maximize2 size={12} /> Full page</button>
+        <button className="fb-btn pip-full" title="Full page focus in Cadence" onClick={() => { fullPage(true); focus(i.id); }}><Maximize size={12} /> Full page</button>
       </div>;
     })}
   </div>;

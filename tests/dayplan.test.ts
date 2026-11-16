@@ -127,3 +127,26 @@ test('day planner over MCP: only your own day', async () => {
   assert.equal((await call('get_day_plan', {})).blocks[0].start, '07:00');
   assert.throws(() => guarded(t, david.id).dayPlan(sam.id, '2026-11-14'), /own/);
 });
+
+test('day planner: a reminder minutes before the start, once; changing the lead arms it again', () => {
+  const {t, david} = setup();
+  // 09:00 Denver is 16:00 UTC; 10 minutes before is 15:50 UTC.
+  t.updateDayPlan(david.id, '2026-11-14', {tz: 'America/Denver', blocks: [{id: 'r', text: 'Board call', start: '09:00', minutes: 60, remind: true, remindBefore: 10}]});
+  assert.equal(t.dayPlan(david.id, '2026-11-14').blocks[0].remindBefore, 10, 'the lead time is kept');
+  dayPlanReminders(t, new Date('2026-11-14T15:49:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 0, 'not 11 minutes before');
+  dayPlanReminders(t, new Date('2026-11-14T15:50:30Z'));
+  dayPlanReminders(t, new Date('2026-11-14T15:55:00Z'));
+  const n = t.listNotifications(david.id);
+  assert.equal(n.length, 1, 'once');
+  assert.match(n[0].text, /^In 10 min \(09:00, 60 min\): Board call/);
+  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Board call', start: '09:00', minutes: 60, remind: true, remindBefore: 60}]});
+  dayPlanReminders(t, new Date('2026-11-14T15:56:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 1, 'an hour-before reminder that is already past by more than 15 minutes stays quiet');
+  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Board call', start: '09:00', minutes: 60, remind: true, remindBefore: 5}]});
+  dayPlanReminders(t, new Date('2026-11-14T15:56:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 2, 'a new lead time arms it again');
+  assert.match(t.listNotifications(david.id)[0].text, /^In 5 min/);
+  t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Board call', start: '09:00', minutes: 60, remind: false, remindBefore: 30}]});
+  assert.equal(t.dayPlan(david.id, '2026-11-14').blocks[0].remindBefore, undefined, 'no lead time without a reminder');
+});

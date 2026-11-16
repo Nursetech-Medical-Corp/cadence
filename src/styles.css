@@ -1901,3 +1901,8 @@ body.dp-resizing { cursor: col-resize; user-select: none; }
 .dp-gcal { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--text2); text-decoration: none; }
 .dp-gcal.on { border-color: color-mix(in srgb, #33b679 50%, var(--line)); color: var(--text); }
 .dp-gcal.on::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #33b679; }
+/* One task clock: this run big, the total on the task small beside or below (src/TimeTracker.tsx TaskClock) */
+.task-clock { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.task-clock.below { flex-direction: column; align-items: flex-start; gap: 2px; }
+.task-clock .tc-total { font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+.task-clock.below .tc-total { font-size: 12px; }

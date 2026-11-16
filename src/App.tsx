@@ -35,6 +35,7 @@ import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
 import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
 import {resumeConnect} from './ConnectedApps.tsx';
+import {deviceOn} from './device.ts';
 import {DialogHost, uiAlert, uiConfirm, uiPrompt} from './dialogs.tsx';
 
 // Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
@@ -144,7 +145,20 @@ export function App() {
 
   useEffect(() => { const f = () => setRoute(readRoute()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   useEffect(() => { if (store.ready && !store.people.some(p => p.id === me) && store.people[0]) setMe(store.people[0].id); }, [store.ready, store.people]);
-  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}&unread=true`).then(n => { setUnread(n.length); setBadge(n.length); }).catch(() => {}); }, [me, store.tick]);
+  // Reminders (day planner boxes, timers): an alert on screen while the app is open, and a desktop alert from this
+  // tab when the browser allows it. Each reminder alerts once per browser (other tabs of it skip it).
+  useEffect(() => { if (me) api<Notification[]>(`/notifications?person=${me}&unread=true`).then(n => {
+    setUnread(n.length); setBadge(n.length);
+    const seen = new Set<string>(JSON.parse(localStorage.getItem('alerted') ?? '[]'));
+    const fresh = n.filter(x => x.kind === 'reminder' && !seen.has(x.id) && Date.now() - Date.parse(x.created) < 10 * 60_000);
+    if (!fresh.length) return;
+    localStorage.setItem('alerted', JSON.stringify([...seen, ...fresh.map(x => x.id)].slice(-200)));
+    for (const x of fresh) {
+      // With push on for this device the service worker already shows it; otherwise this tab does.
+      void deviceOn().catch(() => false).then(push => { try { if (!push && 'Notification' in window && Notification.permission === 'granted') { const d = new Notification('Cadence reminder', {body: x.text, tag: x.id, icon: '/icon-192.png'}); d.onclick = () => { window.focus(); if (x.itemId) open(x.itemId); }; } } catch { /* no desktop alerts here */ } });
+      void uiAlert(`Reminder\n\n${x.text}`);
+    }
+  }).catch(() => {}); }, [me, store.tick]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       // Undo/redo for item changes. Text fields keep their own native undo.
