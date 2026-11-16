@@ -15,12 +15,14 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 ## Focus mode and timer
 - Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.
 - Done in focus mode, on the timer bar or in the pop-out stops a running timer and completes the task.
-- A running timer shows a bar at the top of every page, in every open tab, with Stop, Done, Focus and Pop out.
+- Starting a timer adds its task to the focus bar at the top of every page; several tasks can be in focus, one timer runs; each has play or stop, Done, open and remove.
 - Pop out opens a small always-on-top timer (Chrome, Edge); a blocked pop-up says so.
-- Starting a timer opens focus mode or the pop-out only if the person turned that on.
+- Starting a timer opens the focus view, the pop-out, or both, only if the person turned them on (bar gear, focus view gear, or Team page, Focus and timer).
 
 ## Routines
 - Skip moves the routine to its next date and keeps a closed record of the skipped cycle, shown as ✕ Skipped, with the routine keeping its id.
+- Skipped (not done this time) is in the status menu of a live routine (list, table, backlog, task panel) and in the right-click menu (board cards too); not for other tasks.
+- The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.
 
 ## AI agents
 - An AI is one team row: adding an agent with a name already on the team is refused with a hint; switching a person row to AI agent makes it owned, not admin, and stops its sign-ins.
@@ -38,6 +40,9 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Removing the Day planner or Whiteboards plugin hides its page and sidebar link; the page link says it is off.
 - The editor checks JSON as you type and refuses anything outside the allow list with a plain message.
 - Drafts are seen only by their maker; a new version of an approved plugin goes back to review.
+- A theme with unreadable text (contrast below the WCAG levels) is refused and names the pair to fix.
+- Built-in plugins show real screenshots, what they do, a changelog with dates, added and updated dates; an older install offers Update.
+- Make my own copy opens the editor with the plugin under a new id.
 
 ## Day planner
 - Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)

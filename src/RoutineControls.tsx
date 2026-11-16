@@ -8,6 +8,9 @@ import {describeRecur, nextOccurrence} from './recur.ts';
 import {itemKey} from './components.tsx';
 import {addDays} from './dates.ts';
 
+export {skippable, skipRoutine} from './skip.ts';
+import {skipRoutine} from './skip.ts';
+
 export function RoutineControls({store, item}: {store: Store; item: Item}) {
   const r = item.recur;
   if (!r || r.spawned || item.completed) return null;
@@ -17,15 +20,19 @@ export function RoutineControls({store, item}: {store: Store; item: Item}) {
     try { const res = await api<{errors?: string[]}>('/routines/act', {method: 'POST', body: {ids: [item.id], action, ...extra}}); if (res.errors?.length) alert(res.errors.join('\n')); } catch (e) { store.fail(e); }
   };
   const waitingOn = r.waiting ? item.deps.map(d => store.items.get(d)).filter(d => d && !d.completed).map(d => itemKey(d!, store.projects)) : [];
+  const live = !r.paused && !r.waiting;
   return <div className="routine-ctl small">
-    {r.paused ? <span className="rt-note paused">Paused</span> : r.waiting ? <span className="rt-note waiting">Waiting on {waitingOn.join(', ') || 'its dependencies'}</span>
-      : <span className="muted">This one {item.due ?? 'no date'}{r.slot && ` (moved from ${r.slot})`}{next && <>, then <b>{next}</b></>}</span>}
-    <span className="spacer" />
-    <a className="btn ghost small" href={`#/routines/${item.id}`} title="See it with all routines: timeline, workload, pause or end"><Repeat size={12} /> In Routines</a>
-    {!r.paused && !r.waiting && <button className="btn ghost small" title="Done for this cycle without doing it: moves to the next date" onClick={() => act('skip')}><SkipForward size={12} /> Skip</button>}
-    {!r.paused && !r.waiting && <button className="btn ghost small" title="Push only this copy; the next one stays on schedule. Change the date above to move the whole schedule" onClick={() => { const to = prompt(`Delay only this copy to (YYYY-MM-DD). The next stays on ${next ?? 'schedule'}.`, item.due ? addDays(item.due, 3) : store.today); if (to) act('delay', {to}); }}><Clock3 size={12} /> Delay</button>}
-    <button className="btn ghost small" title="Start only after other work is done, like a hire or a W-2 setup" onClick={() => { const k = prompt('Wait until which item is done? Its key, like GEN-12 (comma for several).'); if (!k) return; const on = k.split(/[,\s]+/).filter(Boolean).map(x => [...store.items.values()].find(i => itemKey(i, store.projects).toUpperCase() === x.toUpperCase())?.id ?? x); act('wait', {on}); }}><Hourglass size={12} /> Wait</button>
-    {r.paused ? <button className="btn ghost small" onClick={() => act('resume')}><Play size={12} /> Turn on</button> : <button className="btn ghost small" title="Hide from views, sprints and plans; history kept" onClick={() => act('pause')}><Pause size={12} /> Pause</button>}
+    <div className="rt-when">
+      {r.paused ? <span className="rt-note paused">Paused</span> : r.waiting ? <span className="rt-note waiting">Waiting on {waitingOn.join(', ') || 'its dependencies'}</span>
+        : <span className="muted">This one <b>{item.due ?? 'no date'}</b>{r.slot && ` (moved from ${r.slot})`}{next && <>, next <b>{next}</b></>}</span>}
+      <a className="rt-link" href={`#/routines/${item.id}`} title="See it with all routines: timeline, workload, pause or end"><Repeat size={12} /> Routines</a>
+    </div>
+    <div className="rt-actions">
+      {live && <button title="Not done this time: keeps a Skipped record and moves to the next date" onClick={() => skipRoutine(store, item)}><SkipForward size={12} /> Skip</button>}
+      {live && <button title="Push only this copy; the next one stays on schedule" onClick={() => { const to = prompt(`Delay only this copy to (YYYY-MM-DD). The next stays on ${next ?? 'schedule'}.`, item.due ? addDays(item.due, 3) : store.today); if (to) act('delay', {to}); }}><Clock3 size={12} /> Delay</button>}
+      <button title="Start only after other work is done, like a hire or a W-2 setup" onClick={() => { const k = prompt('Wait until which item is done? Its key, like GEN-12 (comma for several).'); if (!k) return; const on = k.split(/[,\s]+/).filter(Boolean).map(x => [...store.items.values()].find(i => itemKey(i, store.projects).toUpperCase() === x.toUpperCase())?.id ?? x); act('wait', {on}); }}><Hourglass size={12} /> Wait</button>
+      {r.paused ? <button onClick={() => act('resume')}><Play size={12} /> Turn on</button> : <button title="Hide from views, sprints and plans; history kept" onClick={() => act('pause')}><Pause size={12} /> Pause</button>}
+    </div>
   </div>;
 }
 

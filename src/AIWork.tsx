@@ -197,7 +197,9 @@ function Proposals({store, open, all}: {store: Store; open: (id: string) => void
 
 export function AIWorkPage({store, open}: {store: Store; open: (id: string) => void}) {
   const [project, setProject] = useState('');
-  const [whose, setWhose] = useState<'mine' | 'all' | string>('mine');
+  const admin0 = store.settings.admin;
+  // Admins start on every agent's work; everyone else on the agents they own.
+  const [whose, setWhose] = useState<'mine' | 'all' | string>(admin0 ? 'all' : 'mine');
   const [lastLog, setLastLog] = useState<Record<string, LogEntry | undefined>>({});
   const admin = store.settings.admin;
   const myAgents = new Set(store.people.filter(p => p.kind === 'ai' && p.owner === store.me).map(p => p.id));
@@ -228,12 +230,12 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve, send it back with a comment, ask for a redo, or discard it. Mark tasks Human, AI or Either in any item.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <select className="plain-select" value={whose} onChange={e => setWhose(e.target.value)}>
-          <option value="mine">My agents ({myAgents.size})</option>
-          {admin && <option value="all">All agents</option>}
-          {store.people.filter(p => p.kind === 'ai' && (admin || p.owner === store.me)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {admin && <option value="all">All agents ({store.people.filter(p => p.kind === 'ai').length})</option>}
+          <option value="mine">Agents I own ({myAgents.size})</option>
+          {store.people.filter(p => p.kind === 'ai' && (admin || p.owner === store.me)).map(p => <option key={p.id} value={p.id}>{p.name}{p.owner && p.owner !== store.me ? `, owned by ${store.people.find(x => x.id === p.owner)?.name ?? 'someone'}` : ''}</option>)}
         </select>
         <select className="plain-select" value={project} onChange={e => setProject(e.target.value)}><option value="">All spaces</option>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <span className="muted small">{myAgents.size ? '' : 'You have no AI agents yet. '}Add yours on the Team page (My AI agents) and connect it with its key.</span>
+        <span className="muted small">{whose === 'mine' && !myAgents.size ? 'You own no agents yet. Agents owned by others are under All agents. ' : ''}An agent's owner approves its claims and changes. Add or connect agents on the Team page (My AI agents).</span>
       </div>
       <Proposals store={store} open={open} all={whose === 'all'} />
       <div className="board" style={{padding: 0}}>

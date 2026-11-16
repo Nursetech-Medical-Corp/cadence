@@ -25,7 +25,7 @@ import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEm
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
 import {googleUrl, allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
-import {addAgent, makeAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
+import {addAgent, makeAgent, suggestFollowUps, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
 import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {Forbidden, createToken, deleteToken, guarded, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
@@ -688,8 +688,8 @@ If you did not ask for it, ignore this email.`)
           if (body.active === false) revokePerson(accounts.db, info.id, b);
           if (body.kind !== undefined) {
             needAdmin();
-            // An AI agent is one identity: owned, never admin, connected by its key. Its old sign-ins stop working.
-            if (body.kind === 'ai') { makeAgent(tasks, b, actor); revokePerson(accounts.db, info.id, b); }
+            // An AI agent is one identity: owned, never admin. It keeps its sign-in if it has one and also works through keys.
+            if (body.kind === 'ai') makeAgent(tasks, b, actor);
             else tasks.db.prepare("update people set kind = 'human' where id = ?").run(b);
           }
           if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
@@ -1303,7 +1303,10 @@ If you did not ask for it, ignore this email.`)
         if (it) need(it.projectId, b === 'log' || b === 'cleanup' ? 'comment' : 'edit');
         if (b === 'claim' && m === 'POST') return send(res, 200, tasks.claimTask(it!.id, actor ?? '', body.note ?? '', body.session ?? null));
         if (b === 'decide' && m === 'POST') return send(res, 200, tasks.decideClaim(it!.id, actor, !!body.accept, body.note ?? ''));
-        if (b === 'submit' && m === 'POST') return send(res, 200, tasks.submitWork(it!.id, actor ?? '', String(body.report ?? ''), String(body.missed ?? ''), {session: body.session, artifacts: body.artifacts}));
+        if (b === 'submit' && m === 'POST') {
+          const out = tasks.submitWork(it!.id, actor ?? '', String(body.report ?? ''), String(body.missed ?? ''), {session: body.session, artifacts: body.artifacts});
+          return send(res, 200, Array.isArray(body.followUps) && body.followUps.length ? {...out, followUps: suggestFollowUps(tasks, actor ?? '', it!.id, body.followUps)} : out);
+        }
         // decision: approve, changes, redo or discard. The older {approve: true|false} still works.
         if (b === 'review' && m === 'POST') return send(res, 200, tasks.reviewWork(it!.id, actor, body.decision ?? !!body.approve, String(body.comment ?? ''), {keep: !!body.keep}));
         if (b === 'cleanup' && m === 'POST') return send(res, 200, tasks.confirmCleanup(it!.id, actor, String(body.artifact ?? ''), String(body.note ?? '')));

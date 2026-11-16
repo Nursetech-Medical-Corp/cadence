@@ -173,7 +173,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
       {(() => {
         // Each property is a row; the order and which rows show are yours to change (saved per project in this browser).
         const rows: [string, string, React.ReactNode][] = [
-          ['status', 'Status', <StatusSelect project={project} value={item.status} onChange={status => up({status})} />],
+          ['status', 'Status', <StatusSelect project={project} item={item} value={item.status} onChange={status => up({status})} />],
           ['type', 'Type', <TypeSelect project={project} value={item.type} onChange={type => up({type})} />],
           ['assignees', 'Assignees', <PeoplePicker value={item.assignees} people={peopleFor(item, store.people)} onReorder={store.reorderPeople} onChange={assignees => up({assignees})} />],
           ['priority', 'Priority', <PrioritySelect value={item.priority} onChange={priority => up({priority})} showLabel />],

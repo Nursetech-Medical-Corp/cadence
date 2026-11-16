@@ -8,7 +8,7 @@ import {openDb} from '../server/db.ts';
 import {Tasks} from '../server/service.ts';
 import {apiMiddleware} from '../server/api.ts';
 import {migrate, saveWorkspace} from '../server/auth.ts';
-import {BUILTIN, PluginCatalog, checkManifest, listInstalls, migratePluginInstalls} from '../server/plugins.ts';
+import {BUILTIN, PluginCatalog, checkManifest, contrast, listInstalls, migratePluginInstalls} from '../server/plugins.ts';
 import {guarded} from '../server/tokens.ts';
 
 process.env.TASKS_BACKUPS = mkdtempSync(join(tmpdir(), 'tasks-plugins-'));
@@ -17,7 +17,8 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 const base = (extra: Record<string, unknown> = {}) => ({id: 'acme.blue', name: 'Blue', version: '1.0.0', description: 'Blue accent', contributes: {theme: {light: {accent: '#1d4ed8'}}}, ...extra});
 
 test('a plugin is data only: values outside the allow list are refused', () => {
-  for (const b of BUILTIN) assert.doesNotThrow(() => checkManifest(b), b.id);
+  for (const b of BUILTIN) assert.doesNotThrow(() => checkManifest(b, {builtin: true}), b.id);
+  for (const b of BUILTIN) assert.ok(b.highlights?.length && b.changelog?.length && b.screenshots?.length, `${b.id} has highlights, a changelog and screenshots`);
   assert.equal(checkManifest(base({icon: PNG, screenshots: [PNG]})).contributes.theme!.light!.accent, '#1d4ed8');
   const bad: [unknown, RegExp][] = [
     [base({contributes: {theme: {light: {accent: 'red; } body { display: none'}}}}), /color/],
@@ -31,8 +32,15 @@ test('a plugin is data only: values outside the allow list are refused', () => {
     [base({contributes: {pages: [{id: 'p', title: 'P', blocks: [{type: 'html', html: '<script>'}]}]}}), /Block type/],
     [base({contributes: {setup: {spaces: [{name: 'X', statuses: [{id: 'a', name: 'A', category: 'todo'}]}]}}}), /done status/],
     [base({version: 'latest'}), /version/],
+    [base({contributes: {theme: {light: {text: '#dddddd'}}}}), /too hard to read/],
+    [base({contributes: {theme: {dark: {bg: '#ffffff'}}}}), /too hard to read/],
+    [base({contributes: {theme: {light: {accent: '#ffe066'}}}}), /button text/],
+    [base({screenshots: ['/plugin-shots/day-planner.jpg']}), /screenshot/],
+    [base({changelog: [{version: '1.0.0', date: 'yesterday', notes: 'x'}]}), /date/],
+    [base({highlights: ['x'.repeat(300)]}), /highlight/],
   ];
   for (const [m, re] of bad) assert.throws(() => checkManifest(m), re);
+  assert.ok(contrast('#000000', '#ffffff')! > 20 && contrast('#ffffff', '#ffffff') === 1);
   const clean = checkManifest({...base(), evil: 'x', contributes: {theme: {light: {accent: '#1d4ed8'}}, extra: 1}}) as unknown as Record<string, unknown>;
   assert.equal(clean.evil, undefined, 'unknown keys are dropped');
 });

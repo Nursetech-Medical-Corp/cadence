@@ -2,10 +2,11 @@ import {createContext, useContext, useEffect, useLayoutEffect, useRef, useState,
 import {personHours} from './hours.ts';
 import {parseDuration} from './dates.ts';
 import {createPortal} from 'react-dom';
-import {Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon, GripVertical} from 'lucide-react';
+import {SkipForward, Check as CheckIcon, Circle, CircleCheck, CircleDashed, CircleDot, Plus, X as XIcon, GripVertical} from 'lucide-react';
 import type {Item, Person, Project, Sprint, Status} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import type {Store} from './store.ts';
+import {skippable, skipRoutine} from './skip.ts';
 
 /** The store, for components deep in the tree that need project edits (adding an option from a dropdown). */
 export const StoreContext = createContext<Store | null>(null);
@@ -14,7 +15,8 @@ const useStoreCtx = () => useContext(StoreContext);
 export function Avatar({person, size = 22}: {person?: Person; size?: number}) {
   if (!person) return null;
   const initials = person.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-  return <span className="avatar" title={person.name} style={{background: person.color, width: size, height: size, fontSize: size * 0.42}}>{initials}</span>;
+  // AI agents get a rounded square, so a person and an agent with the same name never look alike.
+  return <span className={'avatar' + (person.kind === 'ai' ? ' ai' : '')} title={person.kind === 'ai' ? `${person.name} (AI agent)` : person.name} style={{background: person.color, width: size, height: size, fontSize: size * 0.42}}>{initials}</span>;
 }
 
 /** Overlapping avatars, at most `max`; the rest collapse into "+N" so rows keep their width. */
@@ -137,7 +139,8 @@ export function StatusIcon({status, size = 14}: {status?: Status; size?: number}
   return <CircleDashed size={size} color={c} />;
 }
 
-export function StatusSelect({project, value, onChange, compact}: {project: Project; value: string; onChange: (v: string) => void; compact?: boolean}) {
+const SKIP = '__skip';
+export function StatusSelect({project, value, onChange, compact, item}: {project: Project; value: string; onChange: (v: string) => void; compact?: boolean; item?: Item}) {
   const s = project.statuses.find(s => s.id === value);
   const store = useStoreCtx();
   const onAdd = store ? (name: string) => {
@@ -148,8 +151,11 @@ export function StatusSelect({project, value, onChange, compact}: {project: Proj
     store.updateProject(project.id, {statuses: list});
     return id;
   } : undefined;
-  return <Menu value={value} title="Status" onChange={onChange} className="status-btn" onReorder={store ? (ids: string[]) => store.updateProject(project.id, {statuses: ids.map(id => project.statuses.find(s => s.id === id)!)}) : undefined} onAdd={onAdd} addLabel="Add status"
-    options={project.statuses.map(s => ({value: s.id, label: s.name, icon: <StatusIcon status={s} />}))}
+  // Repeating tasks also get "Skipped": not done this time (a record is kept, the routine moves to its next date).
+  const canSkip = !!item && !!store && skippable(item);
+  const pick = (v: string) => { if (v === SKIP) { if (item && store) void skipRoutine(store, item); } else onChange(v); };
+  return <Menu value={value} title="Status" onChange={pick} className="status-btn" onReorder={store ? (ids: string[]) => store.updateProject(project.id, {statuses: ids.filter(id => id !== SKIP).map(id => project.statuses.find(s => s.id === id)!)}) : undefined} onAdd={onAdd} addLabel="Add status"
+    options={[...project.statuses.map(s => ({value: s.id, label: s.name, icon: <StatusIcon status={s} />})), ...(canSkip ? [{value: SKIP, label: 'Skipped (not done this time)', icon: <SkipForward size={13} color="var(--warn)" />}] : [])]}
     render={<span className="status-pill" style={{'--c': s?.color ?? '#999'} as React.CSSProperties}><StatusIcon status={s} size={13} />{!compact && <span>{s?.name ?? value}</span>}</span>} />;
 }
 
@@ -254,7 +260,7 @@ export function PeoplePicker({value, people, onChange, compact, onReorder}: {val
         {list.map((p, n) => (
           <button key={p.id} className={'pop-row' + (value.includes(p.id) ? ' on' : '') + (movable ? ' reorderable' : '') + (rows.dragging(n) ? ' dragging' : '')}
             onClick={() => onChange(value.includes(p.id) ? value.filter(x => x !== p.id) : [...value, p.id])} {...rows.row(n)}>
-            {movable && <GripVertical size={12} className="opt-grip" />}<Avatar person={p} /><span className="grow">{p.name}</span>{value.includes(p.id) && <CheckIcon size={14} />}
+            {movable && <GripVertical size={12} className="opt-grip" />}<Avatar person={p} /><span className="grow">{p.name}{p.kind === 'ai' && <span className="ai-tag" title="AI agent">AI</span>}</span>{value.includes(p.id) && <CheckIcon size={14} />}
           </button>
         ))}
       </Popover>

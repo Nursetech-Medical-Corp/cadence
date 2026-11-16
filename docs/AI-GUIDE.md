@@ -23,7 +23,8 @@ Read this once, then call `get_workspace`. Everything a person can do on screen,
 2. `claim_task` asks to take one. A person accepts it (you get assigned) or declines. Do not start before acceptance unless you are already assigned. Pass `session`: the id or URL of the chat, session or run you work in.
 3. While working, `log_step` short factual entries: what you did (`step`), links you used or produced (`link`, with `url`), and anything you could not do (`missed`). Attach screenshots with `attach_file` (base64), then reference them in reports as `![name](/api/files/<id>)`. Pass `session` again when it changes.
 4. Register what you make outside the task as artifacts, so it can be undone: `log_step` with `artifact`, or `artifacts` on `submit_work`. Each is `{kind: file|doc|design|commit|branch|pr|item|url|other, ref, url?, undo?}`; write `undo` for an agent that has none of your context ("git revert abc123 on main", "delete the page Draft memo"). Files you attach and subitems you create under the task are tracked for you.
-5. `submit_work` with a Markdown report: what was done, links, screenshots, `missed` for gaps, and `artifacts`. Status moves to review.
+5. `submit_work` with a Markdown report: what was done, links, screenshots, `missed` for gaps, and `artifacts`. Status moves to review. Add `follow_ups` (`[{title, project?, for_person?, reason?, estimate?, due?}]`) for new tasks your work found, like problems found in a review: each waits for your owner under Changes to approve, in the task's space unless you name another. REST: `POST /api/ai/submit` takes `followUps`.
+   - Asking a person for approval (`request_approval`) on a task you are working on also submits it. When they sign, the review is decided too: approved approves it, changes or rejected sends it back with the comment. Deciding on AI work settles their open approval request. Use one or the other; both end in the same place.
 6. `get_feedback` tells you what the reviewer decided and what to do next (below).
 
 ### After review: continue, redo, discard, clean up
@@ -73,7 +74,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Templates | Templates page, gallery packs | `list_templates`, `get_template`, `create_template`, `update_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack`, `delete_template` |
 | AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim`, `suggest_work`, `my_proposals` |
 | Time | Timers, Timesheet, timer bar, focus mode, pop-out timer | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
-| Plugins (docs/PLUGINS.md) | Plugins page: store, search, install for me or everyone, on/off, settings, make, submit, review | `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
+| Plugins (docs/PLUGINS.md) | Plugins page: store, search, install for me or everyone, on/off, settings, make, submit, review | `plugin_format`, `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 | Inbox, comments | Inbox | `my_notifications`, `mark_notifications_read`, `add_comment`, `resolve_comment` |
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
@@ -133,17 +134,17 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 
 ## Focus mode and the timer bar
 
-- Focus mode (Focus button on a task, or on the timer bar) fills the screen with one task: title, notes, subitems and the timer. Done stops a running timer and completes the task. Esc leaves.
-- While a timer runs, a bar at the top of every page shows the task, the clock, Stop, Done, Focus and Pop out.
-- Pop out opens a small timer window that stays on top of every window (Chrome and Edge; other browsers get a normal small window).
-- Each person picks what starting a timer does (gear on the bar or in focus mode): open focus mode, pop out the timer, show the bar. Saved in prefs `focus` `{onStart: none|focus, popOut, bar}`.
+- The focus bar at the top of every page lists the tasks a person is focused on (prefs `focusList`, up to 8). Starting a timer adds its task. One timer runs at a time; each task has play or stop, Done, open and remove.
+- The focus view (Focus button on a task, right-click Focus on it, or a title in the bar) fills the screen with one task: details, notes, subitems, the timer against the estimate, and the other tasks in focus. Done stops a running timer, completes the task and takes it out of focus. Esc leaves.
+- Pop out opens a small window listing the tasks in focus that stays on top of every window (Chrome and Edge; other browsers get a normal small window).
+- Each person picks what starting a timer does (gear on the bar, in the focus view, or Team page, Focus and timer): open the focus view, pop out, show the bar. Any of them can be on together. Saved in prefs `focus` `{onStart: none|focus, popOut, bar}`.
 - Agents start and stop timers with `start_timer` and `stop_timer`; the bar and focus mode follow in every open tab.
 
 ## Plugins
 
 - Add-ons made of data only (docs/PLUGINS.md): themes, built-in modules (Day planner and Whiteboards are plugins), pages of safe blocks, view presets, setups and settings. The server checks every value; nothing runs.
 - Install for yourself (`scope: me`) or the workspace (`scope: workspace`, admins, approved plugins only). `set_plugin` turns one off without removing it. Drafts are seen only by their maker; the server owner approves plugins for everyone.
-- Agents can build a plugin: `check_plugin` until it passes, `save_plugin`, `install_plugin` for themselves to test, then `submit_plugin`.
+- Agents can build a plugin: `plugin_format` for the format and an example, then `check_plugin` until it passes, `save_plugin`, `install_plugin` for themselves to test, then `submit_plugin`.
 
 ## Day planner
 

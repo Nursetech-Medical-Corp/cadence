@@ -73,7 +73,7 @@ export function BacklogView({store, project, items, allItems, sprints, open, con
             <span className="small est-slot"><EstimateText item={i} items={store.items} /></span>
             <span className="sprint-slot"><SprintSelect projectId={project.id} sprints={sprints} value={i.sprint} onChange={sprint => store.updateItem(i.id, {sprint})} /></span>
             <span className="person-slot"><PeoplePicker value={i.assignees} people={store.people} onReorder={store.reorderPeople} onChange={assignees => store.updateItem(i.id, {assignees})} compact /></span>
-            <StatusSelect project={project} value={i.status} onChange={status => store.updateItem(i.id, {status})} compact />
+            <StatusSelect project={project} item={i} value={i.status} onChange={status => store.updateItem(i.id, {status})} compact />
             <button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button>
           </span>
         </div>
