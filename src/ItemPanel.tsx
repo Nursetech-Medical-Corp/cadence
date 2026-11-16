@@ -156,6 +156,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
           {itemKey(item, store.projects)}
         </span>
         <RoutineBadge item={item} />
+        {!!item.fields.skipped && <span className="tag" title="This cycle of the routine was skipped, not done">Skipped</span>}
         <span className="spacer" />
         <FocusButton store={store} item={item} />
         <SaveTemplateButton store={store} item={item} />

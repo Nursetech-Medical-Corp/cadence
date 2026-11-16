@@ -282,6 +282,8 @@ export function Check({item, project, onToggle}: {item: Item; project: Project; 
   const done = item.completed !== null;
   const doneStatus = project.statuses.find(s => s.category === 'done')?.id;
   const todoStatus = project.statuses.find(s => s.category === 'todo')?.id ?? project.statuses[0].id;
+  // A routine cycle that was skipped (not done) is a closed record: shown as skipped, not as done.
+  if (item.fields.skipped) return <span className="check skipped" title="Skipped: this cycle of the routine was not done">✕</span>;
   return (
     <button className={'check' + (done ? ' on' : '')} aria-label={done ? 'Mark not done' : 'Mark done'} title={done ? 'Mark not done' : 'Mark done'}
       onClick={e => { e.stopPropagation(); onToggle(done ? todoStatus : (doneStatus ?? todoStatus)); }}>

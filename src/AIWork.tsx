@@ -26,6 +26,16 @@ export function WorkerToggle({item, store}: {item: Item; store: Store}) {
 
 const STATE_LABEL: Record<Review['state'], string> = {claimed: 'AI asked to take this', accepted: 'AI is working on it', submitted: 'Ready for your review', changes: 'Sent back to AI', redo: 'Redo: AI starts over', approved: 'Approved', declined: 'Claim declined', discarded: 'Work discarded'};
 
+/** Small chip on cards and rows in any view: where AI work on this task stands. Click opens AI work.
+ *  The AI work page is the approval dashboard; every other board shows the same task with this chip. */
+export function AIStateChip({item}: {item: Item}) {
+  const r = reviewOf(item);
+  if (!r || ['approved', 'declined', 'discarded'].includes(r.state)) return null;
+  const urgent = r.state === 'claimed' || r.state === 'submitted';
+  return <a className={'ai-chip' + (urgent ? ' urgent' : '')} href="#/ai" title={`${STATE_LABEL[r.state]}. Open AI work to approve or send back.`} onClick={e => e.stopPropagation()}>
+    <Bot size={11} /> {r.state === 'submitted' ? 'Review' : r.state === 'claimed' ? 'Claim' : r.state === 'accepted' ? 'AI working' : 'Sent back'}</a>;
+}
+
 /** Review actions, shared by the dashboard cards and the item panel. */
 export function ReviewActions({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
   const r = reviewOf(item);

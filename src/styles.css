@@ -1,4 +1,9 @@
 /* Design tokens. Theme, density, text size and accent come from data attributes set by Appearance. */
+/* AI work state on cards and rows in any view (AIWork.tsx), and agent rules on the Team page. */
+.ai-chip { display: inline-flex; align-items: center; gap: 3px; font-size: .78em; padding: 0 6px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); text-decoration: none; white-space: nowrap; }
+.ai-chip.urgent { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.agent-rules { display: flex; flex-direction: column; gap: 4px; grid-column: 1 / -1; margin-bottom: 6px; }
+.agent-rules textarea { width: 100%; resize: vertical; }
 :root {
   --accent: #6d5dfc;
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -1402,11 +1407,15 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .r-state { display: inline-flex; align-items: center; gap: 6px; }
 /* Job roles matrix (Team page) */
 .jr-wrap { overflow-x: auto; }
-.jr-table { border-collapse: collapse; font-size: 12px; }
-.jr-table th { text-align: left; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line2); white-space: nowrap; }
+.jr-table { border-collapse: separate; border-spacing: 0; font-size: 12px; table-layout: fixed; width: max-content; }
+.jr-table th { position: relative; text-align: left; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jr-table td { padding: 4px 6px; border-bottom: 1px solid var(--line2); vertical-align: top; }
-.jr-table td:first-child { min-width: 150px; }
-.jr-cell { font-size: 12px; max-width: 110px; }
+.jr-table td.jr-name input { width: 100%; font-weight: 600; }
+.jr-sticky { position: sticky; left: 0; background: var(--card); z-index: 1; }
+.jr-table .jr-name { left: 28px; box-shadow: 1px 0 0 var(--line2); }
+.jr-resize { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; }
+.jr-resize:hover { background: var(--accent-line); }
+.jr-cell { font-size: 12px; width: 100%; }
 .jr-cell.inherit { color: var(--muted); }
 .jr-cell.none { color: var(--danger); }
 .jr-pick { display: inline-flex; align-items: center; gap: 4px; max-width: 180px; }
@@ -1814,3 +1823,4 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .pl-check ul { margin: 4px 0 0; padding-left: 20px; }
 .pl-count { font-size: 1.1em; margin: 10px 0; } .pl-count b { font-size: 1.6em; color: var(--accent); }
 .pl-list { margin: 12px 0; } .pl-row { display: block; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px; } .pl-row:hover { background: var(--hover); }
+.check.skipped { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; color: var(--warn); border-color: var(--warn); cursor: default; }

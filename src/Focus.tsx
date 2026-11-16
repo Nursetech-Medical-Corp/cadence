@@ -65,8 +65,9 @@ export function FocusHost({store, open}: {store: Store; open: (id: string) => vo
 
   const focusItem = store.focusId ? store.items.get(store.focusId) : undefined;
   return <>
-    {cfg.bar && store.running && <TimerBar store={store} open={open} popOut={popOut} />}
-    {focusItem && <FocusOverlay store={store} item={focusItem} close={() => store.setFocusId(null)} popOut={popOut} />}
+    {/* On document.body so they sit above the sidebar and the task panel, whatever page is open. */}
+    {cfg.bar && store.running && createPortal(<TimerBar store={store} open={open} popOut={popOut} />, document.body)}
+    {focusItem && createPortal(<FocusOverlay store={store} item={focusItem} close={() => store.setFocusId(null)} popOut={popOut} />, document.body)}
     {pip && !pip.closed && createPortal(<MiniTimer store={store} itemId={store.running?.itemId ?? last} focus={id => { window.focus(); store.setFocusId(id); }} />, pip.document.body)}
   </>;
 }

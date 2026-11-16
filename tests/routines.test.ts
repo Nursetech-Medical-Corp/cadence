@@ -27,6 +27,12 @@ test('routines: skip moves to the next date, pause hides from open lists, resume
   const skipped = t.routine(weekly.id, 'skip', david.id);
   assert.equal(skipped.due, '2026-11-23');
   assert.equal(skipped.start, '2026-11-22', 'start moves with due');
+  assert.equal(skipped.id, weekly.id, 'the live copy keeps its id');
+  const record = t.listItems({}).find(i => i.fields.skipped && i.title === 'Weekly check')!;
+  assert.ok(record?.completed, 'the skipped cycle is kept as a closed record');
+  assert.equal(record.due, '2026-11-16', 'for the date that was skipped');
+  assert.equal(record.recur?.spawned, weekly.id, 'linked to the routine');
+  assert.equal(t.listRoutines().length, 1, 'the record is not a routine of its own');
 
   const paused = t.routine(weekly.id, 'pause', david.id);
   assert.equal(paused.recur?.paused, true);
