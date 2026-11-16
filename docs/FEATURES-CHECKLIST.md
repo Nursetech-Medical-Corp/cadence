@@ -66,7 +66,10 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - A time box that is not a task offers the closest tasks to make it that task; Not this task undoes it. (manual)
 - Color by space tints task lines and boxes. Events you cannot edit take a personal color (only you see it). (manual)
 - The header shows the Google Calendar connection or a Connect button that comes back to the day planner. (manual)
-- Every clock for the same task shows the same time (focus bar, pop-out, focus view, task panel, top bar). Bug found: the focus view showed the total while the bar showed this run. (manual)
+- Every clock for the same task shows the same second (focus bar, pop-out, focus view, task panel, top bar): one shared app clock. Bug found: the pop-out and the focus view were a second apart. (e2e timers)
+- Starting or stopping a timer in one tab updates every other tab: same browser at once, other devices through the event stream (kept open with a ping every 25 s, reloaded after a reconnect), and a tab checks again when it comes back into view. Bug found: a stopped timer still showed running in the calendar tab. (e2e timers)
+- Full page focus: Full page in the focus view header, the expand button on each focus bar task, and Full page in the pop-out; Window goes back. (e2e timers)
+- Preferences: every key the app saves is accepted by the server. Bug found: focus list, focus settings, new-item defaults, rollup targets and event colors were refused and never saved. (unit prefs-keys)
 - Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)
 - Box edges show a small grab line only when the pointer is on that edge.
 - Brain dump: Enter adds a line; pasting many lines adds them all. (e2e)
