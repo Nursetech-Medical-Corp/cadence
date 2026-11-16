@@ -9,7 +9,7 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import * as z from 'zod';
 import {openDb} from './db.ts';
 import {listSopLinks, setSopLinks} from './sops.ts';
-import {personalAccess} from './auth.ts';
+import {getWorkspace, personalAccess} from './auth.ts';
 import {Tasks} from './service.ts';
 import {readFileSync} from 'node:fs';
 import {HOOK_EVENTS} from '../src/hooks.ts';
@@ -71,7 +71,7 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   };
 
   tool('get_guide', 'Read the guide for AI agents: concepts, field meanings, quick-add syntax, recipes for common jobs. Read this first.', {}, true,
-    () => ({guide: readGuide()}));
+    () => ({guide: readGuide(), ...(getWorkspace(tasks.db).aiRules ? {workspaceRules: getWorkspace(tasks.db).aiRules} : {})}));
   server.registerResource('guide', 'tasks://guide', {mimeType: 'text/markdown', description: 'How to use this task app as an AI agent'}, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: readGuide()}]}));
   tool('get_workspace', 'List projects (with statuses, types, custom fields) and people.', {}, true,
     () => ({projects: tasks.listProjects(), people: people(), today: tasks.today(), actingAs: actor}));
