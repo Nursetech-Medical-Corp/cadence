@@ -19,6 +19,12 @@ const ICONS = ['Rocket', 'Briefcase', 'House', 'Heart', 'Star', 'Flag', 'Target'
 export const isRollup = (p: Project) => !!p.settings.rollup;
 
 /** A project's mark: its chosen icon (or emoji) on its color, else the first letters of its key. */
+/** A space's color as the sidebar shows it: its own, else one from the palette by its place in the list. */
+export function spaceColor(projects: Project[], id: string | null | undefined) {
+  const i = projects.findIndex(p => p.id === id);
+  if (i < 0) return undefined;
+  return projects[i].settings.color ?? PROJECT_COLORS[i % PROJECT_COLORS.length];
+}
 export function ProjectIcon({project, index = 0, big}: {project: Project; index?: number; big?: boolean}) {
   const s = project.settings, color = s.color ?? (isRollup(project) ? undefined : PROJECT_COLORS[index % PROJECT_COLORS.length]);
   const Icon = s.icon?.startsWith('lucide:') ? ICON_SET[s.icon.slice(7)] : null;

@@ -26,6 +26,16 @@ export function Elapsed({start, className}: {start: string; className?: string})
   return <span className={className}>{fmtClock(now - Date.parse(start))}</span>;
 }
 
+/** One clock for a task, the same everywhere (focus bar, pop-out, focus view, lists): all time logged on it, counting up while
+ *  its timer runs. Every place reads the one running timer, so starting or stopping it anywhere updates them all. */
+export function TaskClock({store, itemId, className}: {store: Store; itemId: string; className?: string}) {
+  const run = store.running?.itemId === itemId ? store.running : null;
+  const now = useNow(!!run);
+  const before = store.timeTotals.get(itemId) ?? 0;
+  const session = run ? Math.max(0, now - Date.parse(run.start)) : 0;
+  return <span className={className} title={run ? `This run ${fmtClock(session)}; total on the task` : 'Total on the task'}>{fmtClock(before * 60000 + session)}</span>;
+}
+
 /** Table and list cell: play or stop, then the total (or the running clock). Click the total for the full box. */
 /** compact: with no time yet, only a play button that shows on hover (board cards, list rows). */
 export function TimeCell({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
@@ -40,7 +50,7 @@ export function TimeCell({item, store, compact}: {item: Item; store: Store; comp
         {mine ? <Square size={8} fill="currentColor" /> : <Play size={9} fill="currentColor" />}
       </button>
       <button data-pop-trigger className={'time-total' + (mine ? ' on' : '')} onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        {mine ? <Elapsed start={mine.start} /> : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
+        {mine ? <TaskClock store={store} itemId={item.id} /> : total ? fmtMinutes(total) : compact ? null : <span className="time-add">Add time</span>}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} className="time-pop"><TimeBox item={item} store={store} /></Popover>
     </span>
@@ -98,7 +108,7 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
           {running
             ? <button className="time-play on big" title="Stop timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
             : <button className="time-play big" title="Start timer" onClick={() => store.startTimer(item.id)}><Play size={11} fill="currentColor" /></button>}
-          {running && <Elapsed start={running.start} className="time-live" />}
+          {running && <TaskClock store={store} itemId={item.id} className="time-live" />}
         </div>
         <div className="time-when">
           <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} />

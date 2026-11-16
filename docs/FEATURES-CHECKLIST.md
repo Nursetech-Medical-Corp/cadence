@@ -60,6 +60,13 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Make my own copy opens the editor with the plugin under a new id.
 
 ## Day planner
+- Side panels resize by dragging their edge in Focus and Three columns; the bottom area resizes in Timeline across; double-click resets; sizes are kept. (manual)
+- Hovering a brain dump or assigned line shows its full name. (manual)
+- Match on: a line with no close task still offers Create task. Bug found: no way to make one line a task when nothing matched. (manual)
+- A time box that is not a task offers the closest tasks to make it that task; Not this task undoes it. (manual)
+- Color by space tints task lines and boxes. Events you cannot edit take a personal color (only you see it). (manual)
+- The header shows the Google Calendar connection or a Connect button that comes back to the day planner. (manual)
+- Every clock for the same task shows the same time (focus bar, pop-out, focus view, task panel, top bar). Bug found: the focus view showed the total while the bar showed this run. (manual)
 - Three views with the same features: Focus (default), Three columns, Timeline across. Each keeps the week row, day arrows and Today in view while the hours scroll, and opens at now. (e2e)
 - Box edges show a small grab line only when the pointer is on that edge.
 - Brain dump: Enter adds a line; pasting many lines adds them all. (e2e)

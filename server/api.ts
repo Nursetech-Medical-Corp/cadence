@@ -456,7 +456,7 @@ If you did not ask for it, ignore this email.`)
           const mode = q('mode') === 'connect' ? 'connect' : 'link';
           // A browser link cannot send x-person, so in open mode the app passes ?as=.
           const who = actor ?? (!ws.requireLogin ? q('as') ?? null : null);
-          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' | 'calendar-full' => w === 'calendar' || w === 'gmail' || w === 'calendar-full'));
+          return googleStart(tasks.db, req, res, mode, who, (q('want') ?? 'calendar').split(',').filter((w): w is 'calendar' | 'gmail' | 'calendar-full' => w === 'calendar' || w === 'gmail' || w === 'calendar-full'), q('back'));
         }
         if (b === 'google' && c === 'callback') return googleCallback(tasks.db, req, res, url);
       }

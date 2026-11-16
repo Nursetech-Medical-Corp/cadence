@@ -11,7 +11,7 @@ import {getWorkspace, saveWorkspace} from './auth.ts';
 import {SCOPES, saveLink, type Want} from './googlelinks.ts';
 import {publicUrl} from './signin.ts';
 
-const pending = new Map<string, {mode: 'connect' | 'link'; actor: string | null; at: number; want?: string}>();
+const pending = new Map<string, {mode: 'connect' | 'link'; actor: string | null; at: number; want?: string; back?: string}>();
 /** The address people use to reach this server: PUBLIC_URL when set, otherwise what the HTTPS proxy (Coolify,
  * Caddy, nginx) forwarded, so Google's redirect is https:// behind a proxy. */
 export function publicOrigin(req: IncomingMessage) {
@@ -25,12 +25,13 @@ const redirectUri = (req: IncomingMessage) => `${publicOrigin(req)}/api/auth/goo
 
 function go(res: ServerResponse, to: string) { res.statusCode = 302; res.setHeader('location', to); res.end(); }
 
-export function googleStart(db: Db, req: IncomingMessage, res: ServerResponse, mode: 'connect' | 'link', actor: string | null, want: Want[] = []) {
+export function googleStart(db: Db, req: IncomingMessage, res: ServerResponse, mode: 'connect' | 'link', actor: string | null, want: Want[] = [], back?: string | null) {
   const g = getWorkspace(db).google;
   if (!g.clientId || !g.clientSecret) return go(res, '/#/team?error=' + encodeURIComponent('Google is not set up yet. An admin adds the OAuth client on the Team page.'));
   const state = randomBytes(16).toString('hex');
   if (mode === 'link' && !actor) return go(res, '/#/team?error=' + encodeURIComponent('Pick who you are first, then connect Google.'));
-  pending.set(state, {mode, actor, at: Date.now(), want: want.join(',')});
+  // back: an app page to return to (a hash route only, like /plan), so connecting from the day planner lands there again.
+  pending.set(state, {mode, actor, at: Date.now(), want: want.join(','), back: back && /^\/[a-z0-9/_-]{0,60}$/i.test(back) ? back : undefined});
   for (const [k, v] of pending) if (Date.now() - v.at > 600_000) pending.delete(k);
   const scope = mode === 'connect' ? 'openid email https://www.googleapis.com/auth/gmail.send' : ['openid email', ...want.map(w => SCOPES[w])].join(' ');
   const u = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -60,7 +61,7 @@ export async function googleCallback(db: Db, req: IncomingMessage, res: ServerRe
     if (state.mode === 'link') {
       if (!t.refresh_token) return fail('Google did not grant offline access. Remove the app at myaccount.google.com/permissions and connect again.');
       saveLink(db, state.actor!, info.email, t.refresh_token, t.scope ?? '');
-      return go(res, '/#/team?linked=' + encodeURIComponent(info.email));
+      return go(res, `/#${state.back ?? '/team'}?linked=` + encodeURIComponent(info.email));
     }
     const admin = state.actor && (db.prepare('select admin from people where id = ?').get(state.actor) as {admin: number} | undefined)?.admin;
     if (getWorkspace(db).requireLogin && !admin) return fail('Only admins can connect the email sender.');

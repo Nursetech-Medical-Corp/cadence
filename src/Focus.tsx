@@ -6,6 +6,7 @@
 //   Pop out: a small always-on-top window (Chrome and Edge keep it above every window and app).
 // Each person picks what starting a timer does (prefs "focus"): open the focus view, pop out, show the bar.
 // Any of these can be on together. Set on the bar's gear, in the focus view, or on the Team page (My account).
+import {TaskClock} from './TimeTracker.tsx';
 import {useEffect, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {Calendar, CheckCircle2, ExternalLink, Focus as FocusIcon, Play, Settings2, Square, X} from 'lucide-react';
@@ -122,7 +123,7 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
         return <div key={i.id} className={'fb-item' + (on ? ' on' : '')}>
           {on ? <button className="fb-btn" title="Stop the timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
             : <button className="fb-btn" title="Start the timer on this task" onClick={() => store.startTimer(i.id)}><Play size={10} fill="currentColor" /></button>}
-          {on && <Clock start={run!.start} />}
+          {on && <TaskClock store={store} itemId={i.id} className="fx-clock" />}
           <button className="fb-title" title={`${i.title}. Click for the focus view`} onClick={() => store.setFocusId(i.id)}>{i.title}</button>
           <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
           <button className="fb-btn" title="Open the task" onClick={() => open(i.id)}><ExternalLink size={12} /></button>
@@ -180,9 +181,9 @@ function FocusView({store, item, list, close, popOut}: {store: Store; item: Item
         </main>
         <aside className="fv-side">
           <section className={'fv-timer' + (run ? ' on' : '')}>
-            {run ? <Clock start={run.start} className="fv-clock" /> : <span className="fv-clock idle">{fmtClock(0)}</span>}
+            <TaskClock store={store} itemId={item.id} className={'fv-clock' + (run ? '' : ' idle')} />
             <div className="fv-progress" title={est ? `${pct}% of the estimate` : 'No estimate'}><span style={{width: `${est ? pct : 0}%`}} /></div>
-            <div className="muted small">{fmtMinutes(logged)} logged{est ? ` of ${fmtMinutes(est)}` : ''}</div>
+            <div className="muted small">{run ? <>This run <Clock start={run.start} className="" />. </> : null}{est ? `${pct}% of ${fmtMinutes(est)} estimate` : 'Total logged on the task'}</div>
             {run ? <button className="btn fv-wide" onClick={() => store.stopTimer()}><Square size={12} fill="currentColor" /> Stop timer</button>
               : <button className="btn primary fv-wide" onClick={() => store.startTimer(item.id)}><Play size={12} fill="currentColor" /> Start timer</button>}
             <button className="btn fv-wide" disabled={!!item.completed} onClick={() => finish(store, item).then(close)}><CheckCircle2 size={14} /> {item.completed ? 'Done' : 'Done (stops the timer)'}</button>
@@ -208,7 +209,7 @@ function MiniFocus({store, list, focus}: {store: Store; list: Item[]; focus: (id
       return <div key={i.id} className={'pip-row' + (on ? ' on' : '')}>
         {on ? <button className="fb-btn" title="Stop" onClick={() => store.stopTimer()}><Square size={11} fill="currentColor" /></button>
           : <button className="fb-btn" title="Start" onClick={() => store.startTimer(i.id)}><Play size={11} fill="currentColor" /></button>}
-        {on ? <Clock start={run!.start} /> : null}
+        {on ? <TaskClock store={store} itemId={i.id} className="fx-clock" /> : null}
         <span className="pip-title" title={i.title}>{i.title}</span>
         <button className="fb-btn" title="Done: stops the timer and completes the task" onClick={() => finish(store, i)}><CheckCircle2 size={13} /></button>
         <button className="fb-btn" title="Focus view in Cadence" onClick={() => focus(i.id)}><FocusIcon size={12} /></button>

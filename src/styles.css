@@ -1885,3 +1885,19 @@ details.tokens-card[open] > summary h3::before { content: '▾ '; }
 .tour-catch { position: fixed; inset: 0; pointer-events: auto; }
 .tour-hole { pointer-events: none; }
 .tour-card { z-index: 1; }
+
+/* Day planner: resizable panels, full names on hover, space colors */
+.dp-split { flex: none; width: 6px; margin: 0 -3px; cursor: col-resize; position: relative; z-index: 3; }
+.dp-split::after { content: ''; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; transition: background .15s; }
+.dp-split:hover::after, body.dp-resizing .dp-split::after { background: var(--accent); }
+.dp-split.row { width: auto; height: 6px; margin: -3px 0; cursor: row-resize; }
+.dp-split.row::after { top: 2px; bottom: auto; left: 0; right: 0; width: auto; height: 2px; }
+body.dp-resizing { cursor: col-resize; user-select: none; }
+.dp-entry:hover .dp-text, .dp-entry:focus-within .dp-text { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.dp-entry:hover { align-items: flex-start; }
+.dp-entry.spaced { box-shadow: inset 3px 0 0 var(--sc); padding-left: 6px; }
+.dp-sug.make { color: var(--accent); border-color: var(--accent-line); }
+@media (max-width: 760px) { .dp-left { width: auto !important; } .dp-split { display: none; } }
+.dp-gcal { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--text2); text-decoration: none; }
+.dp-gcal.on { border-color: color-mix(in srgb, #33b679 50%, var(--line)); color: var(--text); }
+.dp-gcal.on::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #33b679; }
