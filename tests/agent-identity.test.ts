@@ -67,4 +67,5 @@ test('AI work and Approvals are one flow: asking for approval hands the work in,
   const ups = suggestFollowUps(t, a.id, two.id, [{title: 'Fix the two broken links', reason: 'Found in review'}]);
   assert.equal(ups.length, 1);
   assert.ok(listProposals(t, {agent: a.id}).some(x => x.state === 'pending' && /Fix the two broken links/.test(x.summary)), 'follow-ups wait for the owner');
+  assert.equal(listProposals(t, {itemId: two.id}).length, 1, 'kept with the task they came from, for its reviewer');
 });
