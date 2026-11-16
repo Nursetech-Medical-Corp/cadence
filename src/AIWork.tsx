@@ -8,6 +8,7 @@ import {Elapsed} from './TimeTracker.tsx';
 import {Avatar, Empty, itemKey} from './components.tsx';
 import {MarkdownView} from './BlockEditor.tsx';
 import {canQuickView, quickView} from './QuickView.tsx';
+import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 type Review = {state: 'claimed' | 'accepted' | 'submitted' | 'changes' | 'redo' | 'approved' | 'declined' | 'discarded'; by: string | null; at: string; note?: string; agent?: string; session?: string; attempt?: number};
 /** What the agent made. cleanup: pending (the agent must undo it), confirmed (it said it did), removed (Cadence removed it), null (kept). */
@@ -163,12 +164,13 @@ export function Proposals({store, open, all, itemId}: {store: Store; open: (id: 
   const [list, setList] = useState<Proposal[]>([]);
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState<Record<string, string>>({});
+  const [doer, setDoer] = useState<Record<string, string>>({});
   const load = () => api<Proposal[]>(`/proposals?state=pending${all ? '&all=1' : ''}${itemId ? `&item=${itemId}` : ''}`).then(setList).catch(() => setList([]));
   useEffect(() => { load(); }, [store.tick, all, itemId]);
   if (!list.length) return null;
   const decide = async (p: Proposal, approve: boolean) => {
     setBusy(p.id);
-    try { const r = await api<Proposal>(`/proposals/${p.id}/decide`, {method: 'POST', body: {approve, note: note[p.id]}}); if (r.state === 'failed') alert(`Could not apply: ${r.note}`); }
+    try { const r = await api<Proposal>(`/proposals/${p.id}/decide`, {method: 'POST', body: {approve, note: note[p.id], doer: doer[p.id] || undefined}}); if (r.state === 'failed') void uiAlert(`Could not apply: ${r.note}`); }
     catch (e) { store.fail(e); }
     setBusy(''); load();
   };
@@ -180,11 +182,22 @@ export function Proposals({store, open, all, itemId}: {store: Store; open: (id: 
       <p className="muted small">{itemId ? 'Follow-up tasks and changes from this work. Approving creates or changes them now, in your name; rejecting tells the agent no.' : 'Your agents asked to make these changes. Nothing happens until you approve. Approving makes the change now, in your name, and tells the agent.'}</p>
       {list.map(p => {
         const agent = store.people.find(x => x.id === p.agent);
+        const sug = p.op === 'suggestWork' ? p.args[0] as {title?: string; item?: string; projectId?: string} : null;
+        const same = sug && !sug.item ? list.filter(x => x.id !== p.id && x.op === 'suggestWork' && !(x.args[0] as {item?: string}).item
+          && (x.args[0] as {projectId?: string}).projectId === sug.projectId && String((x.args[0] as {title?: string}).title ?? '').trim().toLowerCase() === String(sug.title ?? '').trim().toLowerCase()) : [];
+        const agents = store.people.filter(x => x.kind === 'ai');
         return (
           <div key={p.id} className="proposal">
             <div className="proposal-head">{agent && <Avatar person={agent} size={18} />}<b>{agent?.name ?? 'Agent'}</b><span className="grow">{p.summary}</span>
               {p.itemId && store.items.has(p.itemId) && <button className="btn ghost small" onClick={() => open(p.itemId!)}>Open</button>}</div>
             {p.reason && <div className="small muted">{p.reason}</div>}
+            {same.length > 0 && <div className="small"><span className="tag">Also suggested by {same.map(x => store.people.find(y => y.id === x.agent)?.name ?? 'an agent').join(', ')}</span> Approving one makes the task once and closes the others.</div>}
+            {sug && agents.length > 0 && <label className="small proposal-doer">Who does it
+              <select className="plain-select" value={doer[p.id] ?? ''} onChange={e => setDoer({...doer, [p.id]: e.target.value})}>
+                <option value="">{agent?.name ?? 'The agent'} (suggested it)</option>
+                {agents.filter(a => a.id !== p.agent).map(a => <option key={a.id} value={a.id}>{a.name} (AI)</option>)}
+                <option value="none">A person, no agent</option>
+              </select></label>}
             <details className="small"><summary>Details</summary><pre className="proposal-args">{JSON.stringify(p.args[1] ?? p.args[0], null, 1).slice(0, 2000)}</pre></details>
             <div className="review-actions">
               <input className="plain-select" style={{flex: 1}} placeholder="Note for the agent (optional)" value={note[p.id] ?? ''} onChange={e => setNote({...note, [p.id]: e.target.value})} />
@@ -198,12 +211,19 @@ export function Proposals({store, open, all, itemId}: {store: Store; open: (id: 
   );
 }
 
+/** Lanes a person can drag AI work into (server: moveWork). */
+const MOVABLE = new Set(['working', 'review', 'done', 'discarded']);
+
 export function AIWorkPage({store, open}: {store: Store; open: (id: string) => void}) {
   const [project, setProject] = useState('');
   const admin0 = store.settings.admin;
   // Admins start on every agent's work; everyone else on the agents they own.
   const [whose, setWhose] = useState<'mine' | 'all' | string>(admin0 ? 'all' : 'mine');
   const [lastLog, setLastLog] = useState<Record<string, LogEntry | undefined>>({});
+  const [waiting, setWaiting] = useState<Set<string>>(new Set());
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  useEffect(() => { api<{itemId: string}[]>('/approvals?pending=true').then(l => setWaiting(new Set(l.map(a => a.itemId)))).catch(() => {}); }, [store.tick]);
   const admin = store.settings.admin;
   const myAgents = new Set(store.people.filter(p => p.kind === 'ai' && p.owner === store.me).map(p => p.id));
   // Your agents' work by default; admins can look at every agent or one agent.
@@ -217,8 +237,8 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
   const cols: {id: string; title: string; hint: string; list: Item[]}[] = [
     {id: 'open', title: 'Ready for AI', hint: 'Marked for AI, nobody on it yet', list: items.filter(i => !i.completed && i.fields.worker === 'ai' && (!r(i) || ['declined', 'discarded'].includes(r(i)!.state)) && !i.assignees.some(a => ais.has(a)))},
     {id: 'claimed', title: 'Claims to approve', hint: 'An agent asked to take these', list: items.filter(i => r(i)?.state === 'claimed')},
-    {id: 'working', title: 'AI working', hint: 'Accepted, sent back with changes, or starting over', list: items.filter(i => !i.completed && (['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '') || (!r(i) && i.assignees.some(a => ais.has(a)))))},
-    {id: 'review', title: 'Ready for review', hint: 'Check the report: approve, send back, redo or discard', list: items.filter(i => r(i)?.state === 'submitted')},
+    {id: 'working', title: 'AI working', hint: 'Accepted, sent back with changes, or starting over', list: items.filter(i => !i.completed && !waiting.has(i.id) && (['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '') || (!r(i) && i.assignees.some(a => ais.has(a)))))},
+    {id: 'review', title: 'Ready for review', hint: 'Check the report: approve, send back, redo or discard', list: items.filter(i => r(i)?.state === 'submitted' || (!i.completed && waiting.has(i.id) && ['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '')))},
     {id: 'done', title: 'Approved this week', hint: '', list: items.filter(i => r(i)?.state === 'approved' && r(i)!.at > weekAgo)},
     {id: 'discarded', title: 'Discarded this week', hint: 'Rejected work. Open one to see what is left to clean up.', list: items.filter(i => r(i)?.state === 'discarded' && r(i)!.at > weekAgo)},
   ];
@@ -230,7 +250,7 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
   return (
     <div className="page" style={{maxWidth: 'none'}}>
       <h1><Bot size={20} /> AI work</h1>
-      <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve, send it back with a comment, ask for a redo, or discard it. Mark tasks Human, AI or Either in any item.</p>
+      <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve, send it back with a comment, ask for a redo, or discard it. Mark tasks Human, AI or Either in any item. Drag a card to another column to move it yourself.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <select className="plain-select" value={whose} onChange={e => setWhose(e.target.value)}>
           {admin && <option value="all">All agents ({store.people.filter(p => p.kind === 'ai').length})</option>}
@@ -243,14 +263,20 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
       <Proposals store={store} open={open} all={whose === 'all'} />
       <div className="board" style={{padding: 0}}>
         {cols.map(c => (
-          <div key={c.id} className="column ai-col">
+          <div key={c.id} className={'column ai-col' + (over === c.id && dragging ? ' drop-on' : '')}
+            onDragOver={e => { if (dragging && MOVABLE.has(c.id)) { e.preventDefault(); setOver(c.id); } }} onDragLeave={() => setOver(o => o === c.id ? null : o)}
+            onDrop={async e => { e.preventDefault(); const id = dragging; setDragging(null); setOver(null); if (!id || !MOVABLE.has(c.id)) return;
+              const to = c.id;
+              if (to === 'discarded' && !(await uiConfirm('Discard this work? Files the agent made in this attempt are hidden and its changes undone.'))) return;
+              try { await api('/ai/move', {method: 'POST', body: {itemId: id, to}}); store.flash(`Moved to ${c.title}`); } catch (err) { store.fail(err); } }}>
             <div className="col-head">{c.title}<span className="muted">{c.list.length}</span></div>
             {c.hint && <div className="muted small" style={{padding: '0 6px 8px'}}>{c.hint}</div>}
             {c.list.map(i => {
               const rv = r(i), agent = store.people.find(p => p.id === (rv?.agent ?? i.assignees.find(a => ais.has(a))));
               const last = lastLog[i.id];
               return (
-                <div key={i.id} className="card" onClick={() => open(i.id)}>
+                <div key={i.id} className={'card' + (dragging === i.id ? ' dragging' : '')} onClick={() => open(i.id)} draggable={!!rv} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragging(i.id); }} onDragEnd={() => { setDragging(null); setOver(null); }}
+                  title={rv ? 'Drag to another column to move it: working, review, approved or discarded' : undefined}>
                   <div className="card-top"><span className="muted small">{itemKey(i, store.projects)}</span><span className="spacer" />{agent && <><Avatar person={agent} size={18} /><span className="small muted">{agent.name}</span></>}</div>
                   <div className="card-title">{i.title}</div>
                   {last && <div className="small muted ai-last">{last.kind === 'result' ? 'Report: ' : ''}{last.text.slice(0, 140)}</div>}

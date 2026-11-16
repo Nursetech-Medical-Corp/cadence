@@ -98,7 +98,7 @@ test('OAuth for the MCP endpoint: discovery, register, sign in, consent, PKCE, c
       assert.match(html, /Connect Claude to Cadence\?/);
       assert.match(html, /claude\.ai/);
       const csrf = /name="csrf" value="([^"]+)"/.exec(html)![1];
-      const r = await form('/oauth/authorize', {...Object.fromEntries(qs), csrf, workspace: 'main', decision, ...extra}, {cookie});
+      const r = await form('/oauth/authorize', {...Object.fromEntries(qs), csrf, workspace: 'main', decision, as: 'me', ...extra}, {cookie});
       return {status: r.status, location: r.headers.get('location') ?? '', html, ...k};
     };
     const first = await approve(a);
@@ -144,6 +144,14 @@ test('OAuth for the MCP endpoint: discovery, register, sign in, consent, PKCE, c
     assert.equal((await mcp(t2.json.access_token)).status, 401);
     assert.equal((await mcp(t3.json.access_token)).status, 200);
     assert.equal((await token({grant_type: 'refresh_token', refresh_token: t2.json.refresh_token, client_id: clientId})).json.error, 'invalid_grant');
+    // Works as its own AI agent: a new agent owned by the person; connecting again reuses it.
+    assert.match(first.html, /Its own AI agent/);
+    const ag = await approve(a, 'allow', {as: 'agent', agent: 'new', agentName: 'Claude helper'});
+    const ta = await token({grant_type: 'authorization_code', code: new URL(ag.location).searchParams.get('code')!, redirect_uri: CB, client_id: clientId, code_verifier: ag.verifier});
+    assert.equal(ta.status, 200);
+    assert.equal((await mcp(ta.json.access_token)).status, 200, 'the agent grant works');
+    const again = await approve(a, 'allow', {as: 'agent', agent: 'new', agentName: 'claude helper'});
+    assert.match(again.location, /code=/, 'same name reuses the agent');
     // Revoke (RFC 7009).
     const rv = await form('/oauth/revoke', {token: t3.json.access_token});
     assert.equal(rv.status, 200);

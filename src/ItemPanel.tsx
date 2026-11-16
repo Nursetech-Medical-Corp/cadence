@@ -17,6 +17,7 @@ import {ApprovalsSection} from './Approvals.tsx';
 import {ActivityList} from './History.tsx';
 import {ApplyToChildrenButton, SaveTemplateButton} from './TemplateMenus.tsx';
 import {Avatar, Check, DateInput, InlineText, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TagEditor, TypeBadge, TypeSelect, itemKey, EstimateCell, estimateOf, PersonHoursEditor} from './components.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 type PanelNav = {back: () => void; forward: () => void; canBack: boolean; canForward: boolean; pinned: boolean; togglePin: () => void};
 export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: string; close: () => void; open: (id: string) => void; me: string; nav?: PanelNav}) {
@@ -161,7 +162,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         <FocusButton store={store} item={item} />
         <SaveTemplateButton store={store} item={item} />
         <ParkButtons store={store} item={item} />
-        <button className="icon" title="Delete" onClick={() => { if (confirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`)) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>
+        <button className="icon" title="Delete" onClick={async () => { if ((await uiConfirm(`Delete "${item.title}"${children.length ? ' and its subitems' : ''}?`))) { store.deleteItem(item.id); close(); } }}><Trash2 size={16} /></button>
         {nav && <button className={'icon' + (nav.pinned ? ' on' : '')} title={nav.pinned ? 'Pinned: stays open when you click elsewhere. Click to unpin' : 'Pin open (otherwise clicking outside closes it)'} onClick={nav.togglePin}>{nav.pinned ? <Pin size={15} /> : <PinOff size={15} />}</button>}
         <button className="icon" title="Close (Esc)" onClick={close}><X size={16} /></button>
       </div>

@@ -682,6 +682,7 @@ a.btn { text-decoration: none; }
 .fc-hire { width: 100%; background: #e2a400; }
 /* Tours */
 .tour { position: fixed; inset: 0; z-index: 300; pointer-events: none; }
+.tour { position: fixed; inset: 0; z-index: 2000; pointer-events: none; }
 .tour-dim { position: fixed; inset: 0; background: rgba(10,10,20,.45); pointer-events: auto; }
 .tour-hole { position: fixed; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(10,10,20,.45); outline: 2px solid var(--accent); transition: all .25s ease; animation: tour-pulse 1.6s ease-in-out infinite; }
 @keyframes tour-pulse { 0%, 100% { outline-offset: 0; } 50% { outline-offset: 5px; } }
@@ -716,7 +717,7 @@ a.btn { text-decoration: none; }
 
 .role-grid { display: grid; gap: 0; align-items: center; overflow-x: auto; }
 .role-grid > div { padding: 6px 4px; border-bottom: 1px solid var(--line2); }
-.role-head { display: flex; align-items: center; gap: 2px; font-weight: 600; font-size: .85em; }
+.role-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: .85em; }
 .role-head .inline { font-weight: 600; } .role-cap { color: var(--text2); } .role-cell { text-align: center; }
 .hist-row .grow { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
 .history, .page { min-width: 0; }
@@ -835,7 +836,7 @@ a.btn { text-decoration: none; }
 
 /* Column kinds, property panel, totals */
 .add-field2 { min-width: 330px; padding: 2px; }
-.kind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; padding: 0 4px; }
+.kind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 4px; }
 .kind-cell { display: flex; align-items: center; gap: 8px; background: none; border: 0; padding: 5px 8px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; color: var(--text); text-align: left; }
 .kind-cell:hover { background: var(--hover); }
 .kind-cell svg { color: var(--text2); }
@@ -1337,7 +1338,7 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .routine-stats b { font-size: 1.15em; } .routine-stats span { font-size: .8em; color: var(--muted); }
 .routine-group { display: flex; align-items: center; gap: 8px; }
 .routine-row { gap: 8px; } .routine-row.paused > .grow { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
-.routine-actions { display: flex; gap: 2px; opacity: .35; } .routine-row:hover .routine-actions { opacity: 1; }
+.routine-actions { display: flex; gap: 4px; opacity: .35; } .routine-row:hover .routine-actions { opacity: 1; }
 .mode-chip { font-size: 11px; border-radius: 10px; padding: 1px 8px; border: 1px solid var(--line); white-space: nowrap; width: 62px; text-align: center; }
 .mode-auto-job { border-color: #8bb8f0; color: #2f6fbf; } .mode-hybrid { border-color: #e7c27a; color: #a07415; } .mode-manual { border-color: #a9d6a1; color: #3b8a32; } .mode-unset { color: var(--muted); }
 .gantt-ghost { opacity: .32; border-style: dashed !important; pointer-events: none; }
@@ -1853,3 +1854,34 @@ tr.draft .qa-bar { position: absolute; left: 0; top: 100%; z-index: 6; backgroun
 .handed-text { margin-top: 4px; white-space: pre-wrap; max-height: 180px; overflow: auto; }
 .alert-kinds { flex-wrap: wrap; gap: 6px; }
 .alert-kinds .chip-toggle input { display: none; }
+.ai-col.drop-on { background: var(--accent-soft); outline: 1px dashed var(--accent-line); }
+
+/* In-app dialogs (src/dialogs.tsx) */
+.dlg-back { align-items: flex-start; padding-top: 18vh; z-index: 120; }
+.dlg { position: relative; width: min(460px, 92vw); background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-lg); padding: 20px 20px 16px; display: flex; flex-direction: column; gap: 14px; }
+.dlg-msg { white-space: pre-wrap; line-height: 1.5; padding-right: 24px; }
+.dlg .plain-input { width: 100%; box-sizing: border-box; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dlg-x { position: absolute; top: 10px; right: 10px; }
+.btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+.appr-bulk { display: inline-flex; gap: 8px; margin-left: 12px; vertical-align: middle; }
+.appr-row.sel { background: var(--accent-soft); }
+.appr-setting { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+.sign-list { max-height: 160px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.tag.warn { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+details.tokens-card > summary { cursor: pointer; list-style: none; }
+details.tokens-card > summary::-webkit-details-marker { display: none; }
+details.tokens-card > summary h3::before { content: '▸ '; color: var(--muted); }
+details.tokens-card[open] > summary h3::before { content: '▾ '; }
+.proposal-doer { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.agent-rules-all { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 10px 0; display: flex; flex-direction: column; gap: 12px; }
+.agent-rules-all[open] { gap: 12px; }
+.agent-rules-all > summary { cursor: pointer; }
+.agent-rules-all .agent-rules { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+
+/* Spacing: stacked blocks in sections and cards never touch (checked by tests/e2e/spacing.e2e.cjs) */
+.pl-section > * + * { margin-top: 12px; }
+.person-name-email { display: flex; flex-direction: column; gap: 4px; }
+.tour-catch { position: fixed; inset: 0; pointer-events: auto; }
+.tour-hole { pointer-events: none; }
+.tour-card { z-index: 1; }

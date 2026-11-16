@@ -5,6 +5,7 @@ import {Copy, ExternalLink, Focus, LayoutTemplate, Link2, SkipForward, Trash2} f
 import {skippable, skipRoutine} from './skip.ts';
 import {api, type Store} from './store.ts';
 import {itemKey} from './components.tsx';
+import {uiConfirm, uiPrompt} from './dialogs.tsx';
 
 type At = {id: string; x: number; y: number};
 
@@ -30,7 +31,7 @@ export function ContextMenus({store, open}: {store: Store; open: (id: string) =>
   if (!item) return null;
   const run = (f: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); setAt(null); f(); };
   const saveTemplate = async () => {
-    const name = prompt('Template name', item.title);
+    const name = (await uiPrompt('Template name', item.title));
     if (name === null) return;
     try { const t = await api<{id: string}>('/templates', {method: 'POST', body: {kind: 'item', itemId: item.id, name}}); location.hash = `/templates/${t.id}`; } catch (e) { store.fail(e); }
   };
@@ -45,7 +46,7 @@ export function ContextMenus({store, open}: {store: Store; open: (id: string) =>
       <button className="pop-row" onClick={run(() => store.createItem({projectId: item.projectId, parentId: item.parentId, title: `${item.title} (copy)`, type: item.type, priority: item.priority, assignees: item.assignees, tags: item.tags, start: item.start, due: item.due, estimate: item.estimate, body: item.body}))}><Copy size={14} /> Duplicate</button>
       <button className="pop-row" onClick={run(() => navigator.clipboard.writeText(itemKey(item, store.projects)))}><Link2 size={14} /> Copy key</button>
       <div className="pop-sep" />
-      <button className="pop-row" style={{color: 'var(--danger)'}} onClick={run(() => { if (confirm(`Delete "${item.title}" and its subitems?`)) store.deleteItem(item.id); })}><Trash2 size={14} /> Delete</button>
+      <button className="pop-row" style={{color: 'var(--danger)'}} onClick={run(async () => { if ((await uiConfirm(`Delete "${item.title}" and its subitems?`))) store.deleteItem(item.id); })}><Trash2 size={14} /> Delete</button>
     </div>
   );
 }

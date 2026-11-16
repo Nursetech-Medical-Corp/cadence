@@ -32,7 +32,13 @@ export type Workspace = {requireLogin: boolean; roles: Role[]; google: {clientId
   /** Rules every AI agent in this workspace follows (admins write them; agents get them in agent_inbox and get_guide). */
   aiRules: string;
   /** How SOP flows are drawn on whiteboards; empty means the built-in rules (src/flowRules.ts). */
-  drawingRules: string};
+  drawingRules: string;
+  /** Wording of the built-in agent rules sent to agents; empty means the default text (src/agentRules.ts). Enforcement is in code either way. */
+  agentBaseRules: string;
+  /** Onboarding guide for a new agent (get_guide): how to scan, install checklist. Empty means the default. */
+  agentGuide: string;
+  /** Signing approvals: password every time, once per session (8 hours), or never. */
+  signPassword: 'every' | 'session' | 'never'};
 export type Access = {default: string; members: Record<string, string>; private?: boolean}; // role ids, or 'none'
 /** A personal space: only its owner until they share it. Workspace admins get no automatic access. */
 export const personalAccess = (owner: string): Access => ({default: 'none', members: {[owner]: 'admin'}, private: true});
@@ -76,7 +82,9 @@ export function getWorkspace(db: Db): Workspace {
   const w = stored(db);
   return {requireLogin: loginForced() || !!w.requireLogin, roles: w.roles?.length ? w.roles : DEFAULT_ROLES, google: {clientId: '', clientSecret: '', ...w.google},
     custom: {...DEFAULT_CUSTOM, ...w.custom}, features: {...DEFAULT_FEATURES, ...w.features},
-    jobRoles: Array.isArray(w.jobRoles) ? w.jobRoles : [], domainJoin: {...NO_DOMAIN_JOIN, ...w.domainJoin}, aiRules: typeof w.aiRules === 'string' ? w.aiRules : '', drawingRules: typeof w.drawingRules === 'string' ? w.drawingRules : ''};
+    jobRoles: Array.isArray(w.jobRoles) ? w.jobRoles : [], domainJoin: {...NO_DOMAIN_JOIN, ...w.domainJoin}, aiRules: typeof w.aiRules === 'string' ? w.aiRules : '', drawingRules: typeof w.drawingRules === 'string' ? w.drawingRules : '',
+    agentBaseRules: typeof w.agentBaseRules === 'string' ? w.agentBaseRules : '', agentGuide: typeof w.agentGuide === 'string' ? w.agentGuide : '',
+    signPassword: w.signPassword === 'every' || w.signPassword === 'never' ? w.signPassword : 'session'};
 }
 /** Whether a view config change touches its settings, not just its lock or privacy. */
 export const settingsChanged = (before: object, after: object) => {
@@ -98,6 +106,8 @@ export function saveWorkspace(db: Db, patch: Partial<Workspace>) {
     return [k, typeof n === 'boolean' ? n : v];
   })) as Features};
   if (patch.drawingRules !== undefined) { if (typeof patch.drawingRules !== 'string') throw new Error('Drawing rules must be text'); patch = {...patch, drawingRules: patch.drawingRules.slice(0, 20000)}; }
+  for (const k of ['agentBaseRules', 'agentGuide'] as const) if (patch[k] !== undefined) { if (typeof patch[k] !== 'string') throw new Error('Rules must be text'); patch = {...patch, [k]: patch[k]!.slice(0, 20000)}; }
+  if (patch.signPassword !== undefined && !['every', 'session', 'never'].includes(patch.signPassword)) throw new Error('signPassword is every, session or never');
   if (patch.aiRules !== undefined) { if (typeof patch.aiRules !== 'string') throw new Error('AI rules must be text'); patch = {...patch, aiRules: patch.aiRules.slice(0, 8000)}; }
   const levels = (patch.roles ?? cur.roles).map(r => r.id);
   if (patch.jobRoles !== undefined) patch = {...patch, jobRoles: cleanJobRoles(patch.jobRoles, levels)};

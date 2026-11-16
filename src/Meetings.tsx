@@ -6,6 +6,7 @@ import {CalendarClock, Repeat, Trash2, Users, Video, X} from 'lucide-react';
 import type {Item, Person} from './types.ts';
 import {api, type Store} from './store.ts';
 import {addDays, parseDay} from './dates.ts';
+import {uiConfirm} from './dialogs.tsx';
 
 export type Attendee = {person: string | null; email: string | null; name?: string | null; response: string; optional?: boolean};
 export type CalEvent = {id: string; projectId: string | null; itemId: string | null; kind: 'meeting' | 'timeblock' | 'deadline'; title: string; body: string; location: string;
@@ -199,7 +200,7 @@ export function EventEditor({store, event, draft, items, onClose, open, onSaved}
   };
   const remove = async () => {
     if (!event) return;
-    if (!confirm(isRepeating && scope === 'all' ? 'Cancel every occurrence? Attendees are told.' : 'Cancel this meeting? Attendees are told.')) return;
+    if (!(await uiConfirm(isRepeating && scope === 'all' ? 'Cancel every occurrence? Attendees are told.' : 'Cancel this meeting? Attendees are told.'))) return;
     setBusy(true);
     try {
       const q = isRepeating && scope === 'one' ? `?scope=one&occurrence=${encodeURIComponent(event.originalStart ?? event.start)}` : '';

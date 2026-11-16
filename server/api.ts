@@ -32,7 +32,7 @@ import {Forbidden, createToken, deleteToken, guarded, listTokens, migrateTokens,
 import {buildMcp} from './mcp.ts';
 import * as z from 'zod';
 import {handleMcpHttp} from './mcp-http.ts';
-import {accessGrant, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
+import {accessGrant, connectionAs, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
 import {devLogMode, googleSignInCallback, googleSignInReady, googleSignInStart, logSignIn, clientIp, publicUrl, sendSmtp, smtpReady, staffGoogleOnly, type SignInMethod} from './signin.ts';
 import {migratePlanning, planningPeople} from './planner.ts';
 import {migrateAiWork, readFile} from './aiwork.ts';
@@ -230,8 +230,18 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   /** People rows keep a copy of the account's password hash, for re-checking it when signing approvals. */
   const syncHash = (email: string, hash: string | null) => { for (const w of all()) w.tasks.db.prepare('update people set password = ? where lower(email) = ?').run(hash, email); };
   // Sign-in for apps (OAuth, oauth.ts): a grant acts as one person in one workspace, while that person is active with that account.
-  const grantAlive = (g: Grant) => { const w = all().find(x => x.id === g.workspace); return !!w && memberId(w.tasks, g.email) === g.person; };
+  // A grant may also act as an AI agent the approving person owns (Connect Claude as its own agent).
+  const grantAlive = (g: Grant) => {
+    const w = all().find(x => x.id === g.workspace); if (!w) return false;
+    const me = memberId(w.tasks, g.email); if (!me) return false;
+    if (me === g.person) return true;
+    const a = w.tasks.db.prepare("select owner from people where id = ? and kind = 'ai' and coalesce(active, 1) = 1").get(g.person) as {owner: string | null} | undefined;
+    return !!a && a.owner === me;
+  };
+  const wsTasks = (id: string) => { const w = all().find(x => x.id === id); if (!w) throw new Invalid('No such workspace'); return w.tasks; };
   const oauthCtx = (): OAuthContext => ({accounts, alive: grantAlive, workspaceIds: () => all().map(w => w.id), signInOn: getWorkspace(tasks.db).requireLogin,
+    agents: (wid, owner) => agentsOf(wsTasks(wid), owner).map(a => ({id: a.id, name: a.name})),
+    newAgent: (wid, owner, name) => { const a = addAgent(wsTasks(wid), owner, {name: name.slice(0, 60), provider: /chatgpt|openai/i.test(name) ? 'chatgpt' : /claude/i.test(name) ? 'claude' : 'other'}); return {id: a.id, name: a.name}; },
     memberships: emails => all().flatMap(w => {
       const email = emails.find(e => memberId(w.tasks, e));
       if (!email) return [];
@@ -420,8 +430,22 @@ If you did not ask for it, ignore this email.`)
         if (b === 'apps' && account && !bearer) {
           if (!c && m === 'GET') {
             const names = new Map(all().map(w => [w.id, w.name]));
+            const who = (x: {workspace: string; person: string}) => { try { const w = all().find(y => y.id === x.workspace); const r = w?.tasks.db.prepare('select name, kind from people where id = ?').get(x.person) as {name: string; kind: string | null} | undefined; return r ? {asName: r.name, asAgent: r.kind === 'ai'} : {}; } catch { return {}; } };
             return send(res, 200, {mcpUrl: publicUrl() ? mcpResource() : null, workspaceUrl: publicUrl() ? mcpResource(info.id) : null,
-              apps: listConnections(accounts.db, emails).map(x => ({...x, workspaceName: names.get(x.workspace) ?? x.workspace}))});
+              apps: listConnections(accounts.db, emails).map(x => ({...x, ...who(x), workspaceName: names.get(x.workspace) ?? x.workspace,
+                agents: (() => { try { const w = all().find(y => y.id === x.workspace)!; const me = emails.map(e => memberId(w.tasks, e)).find(Boolean); return me ? agentsOf(w.tasks, me).map(a => ({id: a.id, name: a.name})) : []; } catch { return []; } })()}))});
+          }
+          // Switch a connected app to one of your AI agents (or a new one), or back to you: {workspace, agent: id | 'new' | 'me', name?}.
+          if (c && parts[3] === 'as' && m === 'POST') {
+            const w = all().find(y => y.id === String(body.workspace)); if (!w) throw new NotFound('No such workspace');
+            const me = emails.map(e => memberId(w.tasks, e)).find(Boolean); if (!me) throw new Denied('You are not in that workspace');
+            let person = me;
+            if (body.agent !== 'me') {
+              const mine = agentsOf(w.tasks, me), found = mine.find(a => a.id === body.agent);
+              person = found ? found.id : addAgent(w.tasks, me, {name: String(body.name ?? 'Claude').slice(0, 60), provider: 'claude'}).id;
+            }
+            const n = connectionAs(accounts.db, emails, decodeURIComponent(c), w.id, person);
+            return send(res, 200, {ok: true, changed: n, person});
           }
           if (c && m === 'DELETE') { disconnect(accounts.db, emails, decodeURIComponent(c), q('workspace')); return send(res, 200, {ok: true}); }
         }
@@ -729,6 +753,9 @@ If you did not ask for it, ignore this email.`)
           if (body.features) patch.features = body.features;
           if (body.aiRules !== undefined) patch.aiRules = body.aiRules;
           if (body.drawingRules !== undefined) patch.drawingRules = body.drawingRules;
+          if (body.agentBaseRules !== undefined) patch.agentBaseRules = body.agentBaseRules;
+          if (body.agentGuide !== undefined) patch.agentGuide = body.agentGuide;
+          if (body.signPassword !== undefined) patch.signPassword = body.signPassword;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});
@@ -1117,12 +1144,19 @@ If you did not ask for it, ignore this email.`)
           return send(res, 200, list.filter(x => seesItem(x.itemId)));
         }
         if (!b && m === 'POST') { const it = tasks.findItem(body.itemId); need(it.projectId, 'edit'); return send(res, 201, tasks.requestApproval(it.id, actor, body.approvers ?? [], body.meaning ?? 'approved', body.note ?? '')); }
+        if (b === 'needs' && m === 'GET') return send(res, 200, actor ? tasks.signNeeds(actor) : {mode: 'never', password: false, until: null});
+        // Sign several at once (the Approvals page): {ids, decision, comment?, password?}. Tokens cannot sign.
+        if (b === 'sign-many' && m === 'POST') {
+          if (!actor || bearer) throw new Denied('Sign approvals in the app');
+          const ids = (Array.isArray(body.ids) ? body.ids.map(String) : []).filter((id: string) => { const ap = tasks.listApprovals({}).find(x => x.id === id); return ap && seesItem(ap.itemId); });
+          return send(res, 200, tasks.signApprovals(ids, actor, body.decision, String(body.comment ?? ''), body.password || undefined));
+        }
         if (b && c === 'sign' && m === 'POST') {
           if (!actor) throw new Invalid('Pick who you are (or sign in) to sign');
           const ap = tasks.listApprovals({}).find(x => x.id === b);
           if (!ap) throw new NotFound('Approval not found');
           need(tasks.item(ap.itemId).projectId, 'view');
-          return send(res, 200, tasks.signApproval(b, actor, body.decision, String(body.comment ?? ''), body.password));
+          return send(res, 200, tasks.signApproval(b, actor, body.decision, String(body.comment ?? ''), body.password || undefined));
         }
       }
       if (a === 'items' && b && c === 'approval-state' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.approvalState(it.id)); }
@@ -1299,7 +1333,7 @@ If you did not ask for it, ignore this email.`)
           if (bearer) throw new Denied('A person decides proposals in the app');
           const p0 = getProposal(tasks, b);
           if (p0.itemId) need(tasks.item(p0.itemId).projectId, 'edit');
-          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined}));
+          return send(res, 200, decideProposal(tasks, b, actor, !!body.approve, {note: body.note ? String(body.note) : undefined, doer: body.doer ? String(body.doer) : undefined}));
         }
       }
       // ---- Human and AI work: claims, reviews, work log, files ----
@@ -1319,6 +1353,7 @@ If you did not ask for it, ignore this email.`)
         }
         // decision: approve, changes, redo or discard. The older {approve: true|false} still works.
         if (b === 'review' && m === 'POST') return send(res, 200, tasks.reviewWork(it!.id, actor, body.decision ?? !!body.approve, String(body.comment ?? ''), {keep: !!body.keep}));
+        if (b === 'move' && m === 'POST') return send(res, 200, tasks.moveWork(it!.id, actor, body.to, String(body.comment ?? '')));
         if (b === 'cleanup' && m === 'POST') return send(res, 200, tasks.confirmCleanup(it!.id, actor, String(body.artifact ?? ''), String(body.note ?? '')));
         if (b === 'log' && m === 'POST') return send(res, 201, tasks.logWork(it!.id, actor, body.kind ?? 'note', String(body.text ?? ''), body.url ?? null, {session: body.session, artifact: body.artifact}));
       }

@@ -10,6 +10,7 @@ import {upcoming} from './recur.ts';
 import {InlineText, PeoplePicker, TypeBadge} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
+import {uiConfirm} from './dialogs.tsx';
 
 const PX = {day: 36, week: 16, month: 5} as const;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -331,7 +332,7 @@ export function GanttView({store, project, items, allItems, sprints, open, confi
             </defs>
             {arrows.map(a => (
               <g key={a.key}>
-                <path className="hit" d={a.path} onClick={() => confirm(`Remove dependency: "${a.to.title}" waits for "${a.from.title}"?`) && store.updateItem(a.to.id, {deps: a.to.deps.filter(d => d !== a.from.id)})}>
+                <path className="hit" d={a.path} onClick={async () => (await uiConfirm(`Remove dependency: "${a.to.title}" waits for "${a.from.title}"?`)) && store.updateItem(a.to.id, {deps: a.to.deps.filter(d => d !== a.from.id)})}>
                   <title>{`${a.to.title} waits for ${a.from.title}${a.bad ? ' (starts too early)' : ''}. Click to remove.`}</title>
                 </path>
                 <path d={a.path} className={a.bad ? 'bad' : ''} markerEnd={`url(#${a.bad ? 'arr-bad' : 'arr'})`} />

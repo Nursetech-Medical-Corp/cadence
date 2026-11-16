@@ -69,3 +69,42 @@ test('AI work and Approvals are one flow: asking for approval hands the work in,
   assert.ok(listProposals(t, {agent: a.id}).some(x => x.state === 'pending' && /Fix the two broken links/.test(x.summary)), 'follow-ups wait for the owner');
   assert.equal(listProposals(t, {itemId: two.id}).length, 1, 'kept with the task they came from, for its reviewer');
 });
+
+test('signing: password once per session, every time, or never; several at once; drag AI work between lanes', async () => {
+  const {migrateApprovals} = await import('../server/approvals.ts');
+  const {hashPassword} = await import('../server/auth.ts');
+  const {t, david} = setup();
+  migrateApprovals(t);
+  t.db.prepare('update people set password = ? where id = ?').run(hashPassword('pw-123456'), david.id);
+  const p = t.createProject({name: 'Ops', key: 'OPS'});
+  const ask = (title: string) => { const i = t.createItem({projectId: p.id, title}, david.id); return t.requestApproval(i.id, null, [david.id], 'approved', '')[0].id; };
+  const [a1, a2, a3, a4] = [ask('One'), ask('Two'), ask('Three'), ask('Four')];
+  assert.equal(t.signNeeds(david.id).mode, 'session', 'once per session by default');
+  assert.equal(t.signNeeds(david.id).password, true);
+  assert.throws(() => t.signApproval(a1, david.id, 'approved', ''), /needs your password/);
+  assert.throws(() => t.signApproval(a1, david.id, 'approved', '', 'wrong'), /wrong/);
+  const many = t.signApprovals([a1, a2], david.id, 'approved', '', 'pw-123456');
+  assert.equal(many.signed.length, 2, 'one password signs several');
+  assert.equal(many.signed[0].auth, 'password');
+  assert.equal(many.signed[1].auth, 'session');
+  assert.equal(t.signNeeds(david.id).password, false, 'no password for the rest of the session');
+  assert.equal(t.signApproval(a3, david.id, 'approved', '').auth, 'session');
+  saveWorkspace(t.db, {signPassword: 'every'});
+  assert.throws(() => t.signApproval(a4, david.id, 'approved', ''), /needs your password/, 'every time ignores the session');
+  saveWorkspace(t.db, {signPassword: 'never'});
+  assert.equal(t.signApproval(a4, david.id, 'approved', '').auth, 'none');
+
+  const a = addAgent(t, david.id, {name: 'Mover'});
+  const job = t.createItem({projectId: p.id, title: 'Draft', fields: {worker: 'ai'}}, david.id);
+  t.claimTask(job.id, a.id);
+  assert.throws(() => t.moveWork(job.id, a.id, 'done'), /Only a person/);
+  t.moveWork(job.id, david.id, 'working');
+  assert.equal((t.item(job.id).fields.review as {state: string}).state, 'accepted', 'dragging a claim to working accepts it');
+  t.moveWork(job.id, david.id, 'review');
+  assert.equal((t.item(job.id).fields.review as {state: string}).state, 'submitted');
+  t.moveWork(job.id, david.id, 'working');
+  assert.equal((t.item(job.id).fields.review as {state: string}).state, 'changes', 'back to working sends it back');
+  t.moveWork(job.id, david.id, 'done');
+  assert.equal((t.item(job.id).fields.review as {state: string}).state, 'approved', 'done hands it in and approves');
+  assert.throws(() => t.moveWork(job.id, david.id, 'review'), /cannot move/);
+});

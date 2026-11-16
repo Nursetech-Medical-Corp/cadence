@@ -8,6 +8,7 @@ import {Rocket, Briefcase, House, Heart, Star, Flag, Target, Megaphone, Shopping
 import type {Project} from './types.ts';
 import {api, wsId, type Store} from './store.ts';
 import {Popover} from './components.tsx';
+import {uiAlert, uiPrompt} from './dialogs.tsx';
 
 export const PROJECT_COLORS = ['#6d5dfc', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#ef4444', '#64748b', '#0f172a'];
 const ICON_SET: Record<string, LucideIcon> = {Rocket, Briefcase, House, Heart, Star, Flag, Target, Megaphone, ShoppingCart, Truck, Package, Wrench, Code, Cpu, Database, Shield, Stethoscope, HeartPulse, Pill, Syringe, FlaskConical, BookOpen, GraduationCap, Users, DollarSign, PiggyBank, Scale, Gavel, FileText, ClipboardList, Calendar, Camera, Music, Palette, Plane, Leaf, Lightbulb, Zap, Globe, Bot, Sparkles, Coffee};
@@ -148,7 +149,7 @@ function ProjectMenu({store, project}: {store: Store; project: Project}) {
   const [open, setOpen] = useState(false);
   const sub = async (kind: 'tasks' | 'pipeline' | 'contacts') => {
     setOpen(false);
-    const name = prompt(kind === 'pipeline' ? 'Name the pipeline (like Investors)' : kind === 'contacts' ? 'Name the list (like Distributors)' : 'Name the sub-space');
+    const name = (await uiPrompt(kind === 'pipeline' ? 'Name the pipeline (like Investors)' : kind === 'contacts' ? 'Name the list (like Distributors)' : 'Name the sub-space'));
     if (!name?.trim()) return;
     try { const p = await api<Project>(`/projects/${project.id}/subspaces`, {method: 'POST', body: {name: name.trim(), kind}}); location.hash = `/p/${p.id}/`; } catch (e) { store.fail(e); }
   };
@@ -157,7 +158,7 @@ function ProjectMenu({store, project}: {store: Store; project: Project}) {
     try {
       const t = await api<{id: string}>('/templates', {method: 'POST', body: {kind: 'project', projectId: project.id, name: `${project.name}${includeItems ? '' : ' setup'}`, includeItems}});
       location.hash = `/templates/${t.id}`;
-    } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { void uiAlert(e instanceof Error ? e.message : String(e)); }
   };
   return (
     <span className="picker" onClick={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>

@@ -7,6 +7,8 @@ import {Avatar, Empty, Popover, fmtHours, itemKey} from './components.tsx';
 import {VIEW_KINDS, stepCount} from './TemplateEditor.tsx';
 import {describeRecur, perWeek} from './recur.ts';
 import {useTemplates} from './SettingsExtras.tsx';
+import {uiAlert, uiConfirm, uiPrompt} from './dialogs.tsx';
+import {uiChoose} from './dialogs.tsx';
 
 const VIEW_LABEL: Record<string, string> = Object.fromEntries(VIEW_KINDS);
 type GalleryPack = {name: string; description: string; templates: {name: string; steps: number; repeats: boolean}[]; automations: number};
@@ -30,11 +32,13 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
   const saveProject = async (pid: string) => {
     const p = store.projects.find(x => x.id === pid);
     if (!p) return;
-    const withItems = confirm(`Include the items in ${p.name} as starting items?\n\nOK: setup and items. Cancel: setup only (levels, statuses, views).`);
+    const pick = await uiChoose(`Make a template pack from ${p.name}. Include its items as starting items?`, [['setup', 'Setup only (levels, statuses, views)'], ['items', 'Setup and items']]);
+    if (!pick) return;
+    const withItems = pick === 'items';
     try { edit(await api<Template>('/templates', {method: 'POST', body: {kind: 'project', projectId: pid, name: `${p.name} setup`, includeItems: withItems}})); } catch (e) { err(e); }
   };
   const exportPick = async () => {
-    const name = prompt('Pack name', 'Our templates');
+    const name = (await uiPrompt('Pack name', 'Our templates'));
     if (!name) return;
     const pack = await api('/packs/export', {method: 'POST', body: {ids: [...pick], name}});
     const a = document.createElement('a');
@@ -68,7 +72,7 @@ export function TemplatesPage({store, open}: {store: Store; open: (id: string) =
         <UseTemplate t={t} store={store} open={open} onError={err} />
         <button className="btn small" onClick={() => edit(t)}><Pencil size={12} /> Edit</button>
         <button className="icon" title="Duplicate" onClick={async () => { try { edit(await api<Template>(`/templates/${t.id}/duplicate`, {method: 'POST', body: {}})); } catch (e) { err(e); } }}><Copy size={14} /></button>
-        <button className="icon" title="Delete template" onClick={async () => { if (confirm(`Delete template "${t.name}"? Items made from it stay.`)) { try { await api(`/templates/${t.id}`, {method: 'DELETE'}); reload(); } catch (e) { err(e); } } }}><Trash2 size={14} /></button>
+        <button className="icon" title="Delete template" onClick={async () => { if ((await uiConfirm(`Delete template "${t.name}"? Items made from it stay.`))) { try { await api(`/templates/${t.id}`, {method: 'DELETE'}); reload(); } catch (e) { err(e); } } }}><Trash2 size={14} /></button>
         </span>
       </div>
     );
@@ -203,18 +207,18 @@ export function RoutinesPage({store, open}: {store: Store; open: (id: string) =>
   const [busy, setBusy] = useState(false);
   const repeatTemplates = templates.filter(t => t.kind === 'item' && (t.data as {recur?: unknown}).recur);
   const add = async (t: Template) => {
-    const due = prompt(`First due date for "${t.name}" (YYYY-MM-DD)`, store.today);
+    const due = (await uiPrompt(`First due date for "${t.name}" (YYYY-MM-DD)`, store.today));
     if (due === null) return;
     try { const it = await api<Item>(`/templates/${t.id}/use`, {method: 'POST', body: {projectId: project, due: due || undefined}}); open(it.id); } catch (e) { store.fail(e); }
   };
   const act = async (ids: string[], action: 'skip' | 'pause' | 'resume' | 'end') => {
     if (!ids.length) return;
-    if (action === 'end' && !confirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`)) return;
+    if (action === 'end' && !(await uiConfirm(ids.length === 1 ? 'Stop repeating this? The current copy stays as a normal task.' : `Stop repeating ${ids.length} routines? Their current copies stay as normal tasks.`))) return;
     setBusy(true);
     try {
       const r = await api<{errors?: string[]} | unknown[]>('/routines/act', {method: 'POST', body: {ids, action}});
-      if (Array.isArray(r)) alert('Held for approval on the AI work page.');
-      else if (r.errors?.length) alert(r.errors.join('\n'));
+      if (Array.isArray(r)) void uiAlert('Held for approval on the AI work page.');
+      else if (r.errors?.length) void uiAlert(r.errors.join('\n'));
     } catch (e) { store.fail(e); } finally { setBusy(false); }
   };
   const shown = routines.filter(i => mode === 'all' || (mode === 'paused' ? i.recur!.paused : modeOf(i) === mode && !i.recur!.paused));

@@ -10,6 +10,7 @@ import {itemKey} from './components.tsx';
 import type {Install, Manifest} from '../server/plugins.ts';
 import type {Item, ViewKind} from './types.ts';
 import './plugins.css';
+import {uiConfirm} from './dialogs.tsx';
 
 type Card = {id: string; name: string; description: string; publisher: string; icon?: string; tags: string[]; version: string; status: string; builtin: boolean; mine: boolean; note: string; installed: ('workspace' | 'me')[]; created: string; updated: string; shot: string | null};
 type Listing = {catalog: Card[]; installed: Install[]; reviewer: boolean};
@@ -112,7 +113,7 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
   };
   const applySetup = async () => {
     const s = c.setup!;
-    if (!confirm(`Apply "${m.name}"? It adds ${s.spaces?.length ?? 0} spaces with their views${s.appearance ? ', changes your appearance' : ''}${s.plugins?.length ? ` and installs ${s.plugins.length} plugins` : ''}. Nothing is deleted.`)) return;
+    if (!(await uiConfirm(`Apply "${m.name}"? It adds ${s.spaces?.length ?? 0} spaces with their views${s.appearance ? ', changes your appearance' : ''}${s.plugins?.length ? ` and installs ${s.plugins.length} plugins` : ''}. Nothing is deleted.`))) return;
     try {
       for (const sp of s.spaces ?? []) {
         const p = await api<{id: string}>('/projects', {method: 'POST', body: {name: sp.name, key: sp.key, statuses: sp.statuses, types: sp.types, noViews: !!sp.views?.length, personal: !admin}});
@@ -183,7 +184,7 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
           {info.mine && !info.builtin && <>
             <button className="btn" onClick={() => go(`/plugins/edit:${id}`)}>Edit</button>
             {info.status !== 'listed' && info.status !== 'pending' && <button className="btn" onClick={() => call('/submit', 'POST')}>Submit for everyone</button>}
-            <button className="btn" onClick={() => { if (confirm(`Remove ${m.name} from the store? Installs keep working until someone removes them.`)) void call('', 'DELETE').then(() => go('/plugins')); }}>Delete from store</button>
+            <button className="btn" onClick={async () => { if ((await uiConfirm(`Remove ${m.name} from the store? Installs keep working until someone removes them.`))) void call('', 'DELETE').then(() => go('/plugins')); }}>Delete from store</button>
           </>}
         </div>
       </aside>

@@ -12,6 +12,7 @@ import {between, type Store} from './store.ts';
 import {Avatars, PriorityIcon, StatusIcon, TypeBadge, EstimateText, itemKey, SpaceChip} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf, type SortRule} from './Sorting.tsx';
+import {uiPrompt} from './dialogs.tsx';
 
 type Group = {id: string; name: string; color: string; icon?: React.ReactNode; match: (i: Item) => boolean; patch: (i: Item) => ItemPatch};
 
@@ -99,7 +100,7 @@ export function Board({store, project, items, allItems, sprints, open, groupBy, 
                 const total = st ? items.filter(i => i.status === st.id).length : cards.length;
                 const over = st?.wip ? total > st.wip : false;
                 return <span className={over ? 'wip-over' : 'muted'} title={st ? (st.wip ? `Limit ${st.wip} in progress. Click to change` : 'Click to set a work-in-progress limit') : undefined}
-                  onClick={st ? e => { e.stopPropagation(); const v = prompt(`Most items allowed in "${st.name}" at once (empty for no limit)`, st.wip ? String(st.wip) : ''); if (v === null) return; const n = Number(v); store.updateProject(project.id, {statuses: project.statuses.map(x => x.id === st.id ? {...x, wip: v.trim() && n > 0 ? Math.floor(n) : null} : x)}); } : undefined}
+                  onClick={st ? async e => { e.stopPropagation(); const v = (await uiPrompt(`Most items allowed in "${st.name}" at once (empty for no limit)`, st.wip ? String(st.wip) : '')); if (v === null) return; const n = Number(v); store.updateProject(project.id, {statuses: project.statuses.map(x => x.id === st.id ? {...x, wip: v.trim() && n > 0 ? Math.floor(n) : null} : x)}); } : undefined}
                   style={st ? {cursor: 'pointer'} : undefined}>{cards.length}{st?.wip ? `/${st.wip}` : ''}{hours ? `, ${+hours.toFixed(1)}h` : ''}</span>;
               })()}</div>
             {cards.map(i => {

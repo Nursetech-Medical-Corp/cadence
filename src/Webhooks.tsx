@@ -4,6 +4,7 @@ import {useEffect, useState} from 'react';
 import {Plus, Send, Trash2} from 'lucide-react';
 import {HOOK_EVENTS, HOOK_GROUPS, type Hook, type HookDelivery} from './hooks.ts';
 import {api, type Store} from './store.ts';
+import {uiConfirm} from './dialogs.tsx';
 
 type Loaded = {webhooks: Hook[]; dueSoonDays?: number[]; deliveries: HookDelivery[]};
 
@@ -26,7 +27,7 @@ export function WebhooksEditor({scope, store}: {scope: string; store: Store}) {
             <input type="checkbox" checked={h.active} title={h.active ? 'On' : 'Off'} onChange={e => upd(h.id, {active: e.target.checked})} />
             <input className="inline" placeholder="Name" defaultValue={h.name} key={h.name} onBlur={e => e.target.value !== h.name && upd(h.id, {name: e.target.value})} />
             <button className="btn ghost small" title="Send a test event now" onClick={() => test(h.id)}><Send size={12} /> Send test event</button>
-            <button className="icon" title="Delete webhook" onClick={() => { if (confirm('Delete this webhook?')) put({webhooks: hooks.filter(x => x.id !== h.id)}); }}><Trash2 size={14} /></button>
+            <button className="icon" title="Delete webhook" onClick={async () => { if ((await uiConfirm('Delete this webhook?'))) put({webhooks: hooks.filter(x => x.id !== h.id)}); }}><Trash2 size={14} /></button>
           </div>
           <div className="rule-line"><b>URL</b>
             <input className="plain-select" style={{flex: 1, minWidth: 220}} defaultValue={h.url} key={h.url} onBlur={e => e.target.value !== h.url && upd(h.id, {url: e.target.value.trim()})} />

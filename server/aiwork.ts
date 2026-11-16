@@ -376,3 +376,40 @@ export function listFiles(tasks: Tasks, itemId: string) {
   return tasks.db.prepare('select id, name, mime, size, created, by from files where item_id = ? and removed is null order by created').all(itemId)
     .map(r => ({id: r.id as string, name: r.name as string, mime: r.mime as string, size: r.size as number, created: r.created as string, by: (r.by as string) ?? null, url: `/api/files/${r.id}`}));
 }
+
+export const LANES = ['working', 'review', 'done', 'discarded'] as const;
+export type Lane = typeof LANES[number];
+/**
+ * A person moves AI work to another lane of the AI work board (drag and drop): working (accept a claim, or send
+ * submitted work back), review (mark work in progress as handed in), done (approve; work in progress is handed in
+ * first) or discarded. Only the agent's owner, someone assigned or an admin. Every move is logged.
+ */
+export function moveWork(tasks: Tasks, itemId: string, reviewer: string | null, to: Lane, comment = '') {
+  if (personKind(tasks, reviewer) === 'ai') throw new Invalid('Only a person can move AI work');
+  if (!LANES.includes(to)) throw new Invalid(`to must be one of: ${LANES.join(', ')}`);
+  const i = tasks.item(itemId), r = review(i);
+  if (!r) throw new Invalid('This task has no AI work to move. Mark it AI and let an agent claim it.');
+  if (!mayReview(tasks, reviewer, i, r.agent)) throw notOwner(tasks, r.agent);
+  const working = ['accepted', 'changes', 'redo'].includes(r.state);
+  const handIn = () => { log(tasks, itemId, reviewer, 'review', 'Moved to review by hand'); return setReview(tasks, tasks.item(itemId), {...r, state: 'submitted', at: now()}, {}, reviewer); };
+  if (to === 'working') {
+    if (r.state === 'claimed') return decide(tasks, itemId, reviewer, true, comment);
+    if (r.state === 'submitted') return tasks.reviewWork(itemId, reviewer, 'changes', comment || 'Moved back to working');
+    if (working) return i;
+  }
+  if (to === 'review') {
+    if (r.state === 'submitted') return i;
+    if (working) return handIn();
+  }
+  if (to === 'done') {
+    if (r.state === 'approved') return i;
+    if (working) handIn();
+    if (working || r.state === 'submitted') return tasks.reviewWork(itemId, reviewer, 'approve', comment);
+  }
+  if (to === 'discarded') {
+    if (r.state === 'discarded') return i;
+    if (working || r.state === 'submitted') return tasks.reviewWork(itemId, reviewer, 'discard', comment);
+    if (r.state === 'claimed') return decide(tasks, itemId, reviewer, false, comment);
+  }
+  throw new Invalid(`Work that is ${r.state} cannot move to ${to}`);
+}

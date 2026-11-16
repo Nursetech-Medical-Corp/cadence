@@ -34,6 +34,7 @@ import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
 import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
 import {resumeConnect} from './ConnectedApps.tsx';
+import {DialogHost, uiAlert, uiConfirm, uiPrompt} from './dialogs.tsx';
 
 // Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
 const GanttView = lazy(() => import('./GanttView.tsx').then(m => ({default: m.GanttView})));
@@ -245,6 +246,7 @@ export function App() {
       <button className="side-toggle" onClick={toggleSide} title="Show sidebar"><PanelLeft size={16} /></button>
       <main className="main">
         <FocusHost store={store} open={open} />
+        <DialogHost />
         {route.page === 'project' && project && (
           <ProjectPage store={store} project={project} views={projectViews} view={view} settings={route.view === 'settings'} open={open} />
         )}
@@ -594,9 +596,9 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
         <button className="pop-row" onClick={async () => { setMenu(false); const v = await store.createView(project.id, view.name + ' copy', view.kind, view.config); if (v) go({page: 'project', id: project.id, view: v.id}); }}><Copy size={14} /> Duplicate</button>
         <button className="pop-row" onClick={async () => {
           setMenu(false);
-          const n = prompt('Template name', `${view.name} view`);
+          const n = (await uiPrompt('Template name', `${view.name} view`));
           if (n === null) return;
-          try { await api('/templates', {method: 'POST', body: {kind: 'view', viewId: view.id, projectId: project.id, name: n}}); alert(`Saved "${n || view.name}" as a view template. Add it to any space from + View.`); } catch (e) { store.fail(e); }
+          try { await api('/templates', {method: 'POST', body: {kind: 'view', viewId: view.id, projectId: project.id, name: n}}); void uiAlert(`Saved "${n || view.name}" as a view template. Add it to any space from + View.`); } catch (e) { store.fail(e); }
         }}><LayoutTemplate size={14} /> Save as template</button>
         {store.projects.length > 1 && <>
           <div className="pop-label">Copy to space</div>
@@ -608,7 +610,7 @@ function ViewTab({store, view, active, project}: {store: Store; view: View; acti
         <div className="pop-label">Change type</div>
         {VIEW_KINDS.filter(k => k.kind !== 'routines' || project.settings.rollup?.scope === 'routines').map(k => <button key={k.kind} className={'pop-row' + (k.kind === view.kind ? ' on' : '')} onClick={() => { setMenu(false); store.updateView(view.id, {kind: k.kind}); }}><k.icon size={14} /> {k.label}</button>)}
         <div className="pop-sep" />
-        <button className="pop-row" style={{color: 'var(--danger)'}} onClick={() => { setMenu(false); if (confirm(`Delete view "${view.name}"? Items are not affected.`)) { store.deleteView(view.id); go({page: 'project', id: project.id, view: ''}); } }}><Trash2 size={14} /> Delete view</button>
+        <button className="pop-row" style={{color: 'var(--danger)'}} onClick={async () => { setMenu(false); if ((await uiConfirm(`Delete view "${view.name}"? Items are not affected.`))) { store.deleteView(view.id); go({page: 'project', id: project.id, view: ''}); } }}><Trash2 size={14} /> Delete view</button>
       </Popover>
     </span>
   );
@@ -795,8 +797,8 @@ class ViewBoundary extends Component<{children: ReactNode}, {error: Error | null
 function BaselineMenu({store, project, config, setConfig}: {store: Store; project: Project; config: ViewConfig; setConfig: (p: Partial<ViewConfig>) => void}) {
   const [open, setOpen] = useState(false);
   const list = config.baselines ?? [];
-  const save = () => {
-    const name = prompt('Name this baseline', `Plan ${new Date().toLocaleDateString()}`);
+  const save = async () => {
+    const name = (await uiPrompt('Name this baseline', `Plan ${new Date().toLocaleDateString()}`));
     if (!name) return;
     const dates: Record<string, [string | null, string | null]> = {};
     for (const i of store.items.values()) if (i.projectId === project.id && (i.start || i.due)) dates[i.id] = [i.start, i.due];

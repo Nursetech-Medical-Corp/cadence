@@ -25,6 +25,14 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.
 
 ## AI agents
+- AI work: cards with a pending approval sit in Ready for review; people drag cards between working, review, approved and discarded (claims dragged to working are accepted). Bug found: approvals waiting showed under AI working and admins could not move them. (unit)
+- Several agents suggesting the same task: approving one makes it once and closes the others; the approver picks which agent (or a person) does it. (manual)
+- Connect Claude: the consent page asks who it works as, its own AI agent (default) or you; Team page can switch a connected app later. Bug found: Connect Claude always acted as the person. (manual)
+- Rules for AI agents (Team page, admins): base rules wording, workspace rules, onboarding guide; get_guide returns the guide; agent_inbox returns the base and workspace rules. (manual)
+- Signing: password once per 8 hours by default (or every time, or never, set on Approvals); Sign several at once; signatures show how identity was confirmed. Bug found: every signature asked for the password through a browser prompt. (unit)
+- No browser alert, confirm or prompt anywhere: in-app dialogs with Esc, X and Enter. (manual)
+- Tours: Esc, X, End tour or a click outside the highlight ends them; the tour sits above every page layer. Bug found: the AI agents tour darkened the screen with no way out. (manual)
+- Spacing: no two buttons, fields or chips closer than 3px on the main pages. (e2e spacing)
 - An AI is one team row: adding an agent with a name already on the team is refused with a hint; switching a person row to AI agent makes it owned, not admin, and stops its sign-ins.
 - Workspace AI rules (admins) and each agent's own rules are saved on blur and come back in agent_inbox.
 - Boards and lists show Claim, AI working, Review or Sent back on tasks with open AI work; the chip opens AI work.
