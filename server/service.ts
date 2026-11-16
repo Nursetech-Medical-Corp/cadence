@@ -923,6 +923,36 @@ export class Tasks {
     if (!minutes) this.emit({kind: 'time', itemId});
     return this.timesheet(person, monday(date));
   }
+  /**
+   * Fix a time entry: its start, end, minutes or note. A timed entry (start to end) takes a new start and end, or
+   * minutes (the end moves); minutes then come from the span, to the second. An entry added as minutes (no start and
+   * stop) takes a new day or time and minutes. A running timer takes a new start (not after now) and a note.
+   */
+  updateTime(entryId: string, patch: {start?: string; end?: string; minutes?: number; note?: string | null}) {
+    const cur = this.timeEntry(entryId);
+    const t = (v: unknown, what: string) => { const n = Date.parse(String(v)); if (!Number.isFinite(n)) throw new Invalid(`${what} must be a time`); return n; };
+    let s = Date.parse(cur.start), e = cur.end ? Date.parse(cur.end) : null, minutes = cur.minutes;
+    const byHand = cur.end !== null && cur.end === cur.start;
+    if (patch.start !== undefined) { const n = t(patch.start, 'start'); if (byHand) e = n; s = n; }
+    if (cur.end === null) {
+      if (patch.end !== undefined || patch.minutes !== undefined) throw new Invalid('Stop the timer first, then change its end or length');
+      if (s > Date.now()) throw new Invalid('A running timer cannot start in the future');
+    } else if (byHand) {
+      if (patch.end !== undefined) throw new Invalid('This entry was added as minutes. Change its minutes instead');
+      if (patch.minutes !== undefined) minutes = Number(patch.minutes);
+      if (!(Number(minutes) > 0 && Number(minutes) <= 1440)) throw new Invalid('Minutes must be more than 0 and at most a day');
+    } else {
+      if (patch.end !== undefined) e = t(patch.end, 'end');
+      else if (patch.minutes !== undefined) { const m = Number(patch.minutes); if (!(m > 0)) throw new Invalid('Minutes must be positive'); e = s + Math.round(m * 60) * 1000; }
+      if (e! <= s || e! - s > 86400_000) throw new Invalid('The end must be after the start, within a day');
+      minutes = Math.round((e! - s) / 1000) / 60;
+    }
+    const note = patch.note === undefined ? cur.note : patch.note == null || !String(patch.note).trim() ? null : String(patch.note).slice(0, 500);
+    const next: TimeEntry = {...cur, start: new Date(s).toISOString(), end: e === null ? null : new Date(e).toISOString(), minutes, note};
+    this.db.prepare('update time_entries set start = ?, end = ?, minutes = ?, note = ? where id = ?').run(next.start, next.end, next.minutes, next.note, entryId);
+    this.emit({kind: 'time', itemId: cur.itemId});
+    return next;
+  }
   deleteTime(entryId: string) {
     const r = this.db.prepare('select item_id from time_entries where id = ?').get(entryId) as Row | undefined;
     if (!r) throw new NotFound('Time entry not found');
@@ -1691,6 +1721,7 @@ export class Tasks {
   dayPlan(person: string, date: string, hintTz?: string) { return dayplan.getDayPlan(this, person, date, hintTz); }
   updateDayPlan(person: string, date: string, patch: dayplan.DayPatch) { return dayplan.updateDayPlan(this, person, date, patch); }
   autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
+  checkDayEntry(person: string, date: string, id: string, done?: boolean, actor: string | null = null) { return dayplan.checkDayEntry(this, person, date, id, done, actor); }
   fitDayToLogged(person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) { return dayplan.fitToLogged(this, person, date, opts); }
 
   // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----

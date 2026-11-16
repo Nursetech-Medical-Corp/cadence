@@ -23,7 +23,7 @@ import {QuickCapture, ShortcutsDialog, moveFocus, targetIds, useHotkeys, type Ac
 import {ItemPanel} from './ItemPanel.tsx';
 import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
-import {NotifySettings} from './NotifySettings.tsx';
+import {NotifyPrompt, NotifySettings} from './NotifySettings.tsx';
 import {setBadge} from './device.ts';
 import {AccessCard, AcceptInvite, EmailLinkSignIn, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
@@ -265,6 +265,7 @@ export function App() {
       <button className="side-toggle" onClick={toggleSide} title="Show sidebar"><PanelLeft size={16} /></button>
       <main className="main">
         <FocusHost store={store} open={open} />
+        {me && <NotifyPrompt />}
         <DialogHost />
         {route.page === 'project' && project && (
           <ProjectPage store={store} project={project} views={projectViews} view={view} settings={route.view === 'settings'} open={open} />

@@ -37,6 +37,8 @@ const browserTz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).toISOString();
 import {matchScore} from './match.ts';
+import {TimeEntryEdit} from './TimeTracker.tsx';
+import {checkEntries, entryDone, type TaskInfo} from './daycheck.ts';
 import {EventEditor, GCAL_COLORS, type CalEvent as FullEvent} from './Meetings.tsx';
 import {uiAlert, uiConfirm} from './dialogs.tsx';
 
@@ -68,6 +70,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const dragging = useRef<DragData | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [fitMenu, setFitMenu] = useState(false);
+  const [tsEdit, setTsEdit] = useState<string | null>(null);
   // The full calendar editor (Meet link, repeats, guests, color), for an event or a box that becomes one.
   const [evEdit, setEvEdit] = useState<{event?: FullEvent; draft?: Partial<FullEvent>; boxId?: string} | null>(null);
   const [fitInfo, setFitInfo] = useState<FitSummary | null>(null);
@@ -85,7 +88,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     if (linked) { store.flash(`Google Calendar connected: ${linked}`); window.history.replaceState(null, '', '#/day'); }
   }, []);
   // Undo for the planner: earlier plans, and tasks a step created (removed again on undo).
-  const history = useRef<{plan: Plan; created: string[]}[]>([]);
+  const history = useRef<{plan: Plan; created: string[]; status?: {id: string; status: string}}[]>([]);
+  // The key handler below is set up once; it reads the store through this so it sees tasks made since.
+  const storeRef = useRef(store); storeRef.current = store;
   const setDesign = (id: string) => { setDesignState(id); localStorage.setItem('day-design', id); };
   const pickDesign = (step: number) => { const i = DESIGNS.findIndex(x => x.id === design); setDesign(DESIGNS[(i + step + DESIGNS.length) % DESIGNS.length].id); };
   const pending = useRef<number | null>(null), latest = useRef<Plan | null>(null), dirty = useRef(false), version = useRef(0);
@@ -111,8 +116,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   }, [date, me, Math.floor(now.getTime() / 60_000), plan?.updated]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
 
-  const save = (next: Plan, created: string[] = []) => {
-    if (latest.current && latest.current.date === next.date) { history.current.push({plan: latest.current, created}); if (history.current.length > 100) history.current.shift(); }
+  const save = (next: Plan, created: string[] = [], status?: {id: string; status: string}) => {
+    if (latest.current && latest.current.date === next.date) { history.current.push({plan: latest.current, created, ...(status ? {status} : {})}); if (history.current.length > 100) history.current.shift(); }
     version.current++;
     setPlan(next); latest.current = next; dirty.current = true;
     if (pending.current) clearTimeout(pending.current);
@@ -133,6 +138,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       if (!last) return;
       e.preventDefault(); e.stopImmediatePropagation();
       for (const id of last.created) store.deleteItem(id, false);
+      // A check-off that completed or reopened a task puts the task back too.
+      const st = storeRef.current;
+      if (last.status && st.items.get(last.status.id)) st.updateItem(last.status.id, {status: last.status.status});
       setPlan(last.plan); latest.current = last.plan; dirty.current = true;
       if (pending.current) clearTimeout(pending.current);
       pending.current = window.setTimeout(async () => { const p = latest.current!; try { await api(`/day/${p.date}?person=${me}&tz=${encodeURIComponent(browserTz())}`, {method: 'PUT', body: {top: p.top, dump: p.dump, blocks: p.blocks, dayStart: p.dayStart, dayEnd: p.dayEnd, slot: p.slot, tz: p.tz}}); } catch (err) { store.fail(err); } dirty.current = false; }, 300);
@@ -170,13 +178,27 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const tz = plan.tz || browserTz();
   const today = inZone(now, tz).day, nowMin = inZone(now, tz).m;
   const item = (e: Entry) => e.itemId ? store.items.get(e.itemId) : undefined;
-  const isDone = (e: Entry) => { const it = item(e); return it ? !!it.completed : !!e.done; };
+  const tinfo: TaskInfo = id => { const it = store.items.get(id); return it ? {title: it.title, completed: !!it.completed} : undefined; };
+  // Done once per line: a task line (or a plain line with the same text as a task on the page) follows the task.
+  const doneIds = new Set([...plan.top, ...plan.dump, ...plan.blocks].filter(e => entryDone(plan, e, tinfo)).map(e => e.id));
+  const isDone = (e: Entry) => doneIds.has(e.id);
   const boxedIds = new Set(plan.blocks.map(b => b.itemId).filter(Boolean)), boxedText = new Set(plan.blocks.map(b => b.text.toLowerCase()));
   const boxed = (e: Entry) => e.itemId ? boxedIds.has(e.itemId) : boxedText.has(e.text.toLowerCase());
-  const toggleEntry = (list: 'top' | 'dump' | 'blocks', e: Entry) => {
-    const it = item(e);
-    if (it) { const p = store.projects.find(x => x.id === it.projectId)!; const doneS = p.statuses.find(s => s.category === 'done')?.id, todoS = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id; store.updateItem(it.id, {status: it.completed ? todoS : doneS ?? todoS}); return; }
-    update(p => ({...p, [list]: (p[list] as Entry[]).map(x => x.id === e.id ? {...x, done: !x.done} : x)}));
+  /** Check a line off (or back on) everywhere it shows: top 3, brain dump and boxes with the same task or text, and the task itself. */
+  const toggleEntry = (e: Entry) => {
+    const want = !isDone(e);
+    const r = checkEntries(latest.current!, e.id, want, tinfo);
+    if (!r) return;
+    const it = r.itemId ? store.items.get(r.itemId) : undefined;
+    let before: {id: string; status: string} | undefined;
+    if (it && !!it.completed !== want) {
+      const p = store.projects.find(x => x.id === it.projectId)!;
+      const doneS = p.statuses.find(s => s.category === 'done')?.id, todoS = p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
+      before = {id: it.id, status: it.status};
+      store.updateItem(it.id, {status: want ? doneS ?? todoS : todoS});
+    }
+    // Saved (with undo) even when only the task changed, so Ctrl+Z can reopen it.
+    if (before || JSON.stringify(r.plan) !== JSON.stringify(latest.current)) save(r.plan, [], before);
   };
   const listSpaces = new Set(store.projects.filter(p => p.settings.records).map(p => p.id));
   const mine = [...store.items.values()].filter(i => !listSpaces.has(i.projectId) && i.assignees.includes(me) && !i.completed && i.due && i.due <= date && !i.recur?.paused && !i.recur?.waiting && !(i.fields as {archived?: unknown}).archived)
@@ -350,7 +372,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '') + (sc ? ' spaced' : '') + mark} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
       onDragOver={ev => listOver(ev, list, e.id)} onDrop={ev => dropOnList(ev, list)}>
       <GripVertical size={12} className="dp-grip" />
-      <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(list, e)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
+      <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(e)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
       {editText === e.id ? <input className="plain-input dp-text" autoFocus defaultValue={it?.title ?? e.text} onBlur={ev => renameEntry(list, e, ev.target.value)} onKeyDown={ev => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); if (ev.key === 'Escape') setEditText(null); }} />
         : it ? <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Click the key to open the task; double-click to rename"><button className="dp-key link" onClick={() => open(it.id)}>{itemKey(it, store.projects)}</button> {it.title}</span>
         : <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Double-click to edit">{e.text}</span>}
@@ -563,7 +585,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
           onClick={e => { if ((e.target as HTMLElement).closest('button, a, .dp-btitle-link')) return; if (it) open(it.id); else setEditing(b.id); }}
           title={it ? 'Click to open the task (notes, status, people). The clock opens this time slot' : 'Click to edit this time slot'}>
           <div className="dp-brow">
-            <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry('blocks', b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
+            <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(b)}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
             <span className="dp-btitle">{it ? <button className="dp-btitle-link" title="Open the task" onClick={() => open(it.id)}><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</button> : (b.text || <span className="muted">(untitled)</span>)}</span>
             <span className="dp-btime">{label(mins(b.start))} to {label(mins(b.start) + b.minutes)}</span>
             {b.eventId && <span title="On your calendar"><CalendarClock size={11} className="muted" /></span>}
@@ -586,7 +608,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     <span className="muted small">{curB ? 'Now' : 'Nothing boxed right now'}</span>
     {curB && <><div className="dp-nowtitle">{item(curB)?.title ?? curB.text}</div>
       <div className="muted">{label(mins(curB.start))} to {label(mins(curB.start) + curB.minutes)} · {Math.max(0, mins(curB.start) + curB.minutes - (nowM ?? 0))} min left</div>
-      <div className="row"><button className="btn small" onClick={() => toggleEntry('blocks', curB)}><CheckIcon size={12} /> {isDone(curB) ? 'Not done' : 'Done'}</button>
+      <div className="row"><button className="btn small" onClick={() => toggleEntry(curB)}><CheckIcon size={12} /> {isDone(curB) ? 'Not done' : 'Done'}</button>
         {item(curB) && <button className="btn small" onClick={() => store.startTimer(item(curB)!.id)}><Play size={12} /> Start timer</button>}</div></>}
     {nextB && <div className="dp-next small">Next at {label(mins(nextB.start))}: <b>{item(nextB)?.title ?? nextB.text}</b></div>}
   </div>;
@@ -599,10 +621,12 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     <h4>Timesheet for the day <span className="count">{fmtM(loggedBy.reduce((a, x) => a + x[1], 0))}</span></h4>
     {!dayEntries.length ? <p className="muted small">No time logged yet. Press play on a box to start a timer.</p> : <>
       {dayEntries.map(t => { const it = store.items.get(t.itemId), s = inZone(t.start, tz).m, timed = !!t.end && t.end !== t.start;
-        return <div key={t.id} className={'dp-tsrow' + (!t.end ? ' running' : '')}>
+        if (tsEdit === t.id) return <TimeEntryEdit key={t.id} entry={t} onDone={saved => { setTsEdit(null); if (saved) api<TimeEntry[]>(`/time?person=${me}&tz=${encodeURIComponent(browserTz())}`).then(setTime).catch(() => {}); }} />;
+        return <div key={t.id} className={'dp-tsrow' + (!t.end ? ' running' : '')} onDoubleClick={() => setTsEdit(t.id)}>
           <span className="dp-tstime" title={timed || !t.end ? '' : 'Added as minutes, with no start and stop time'}>{!t.end ? `${label(s)} to now` : timed ? `${label(s)} to ${label(inZone(t.end, tz).m)}` : 'added by hand'}</span>
           <button className="dp-text link" onClick={() => open(t.itemId)}>{it ? <><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</> : 'A task'}</button>
           <span className="muted small">{fmtM(entryMin(t))}</span>
+          <button className="icon" title={t.end ? 'Edit this entry: day, start, end, notes' : 'Edit when this timer started'} onClick={() => setTsEdit(t.id)}><Pencil size={11} /></button>
         </div>; })}
       {loggedBy.length > 1 && <div className="dp-tstotals small muted">{loggedBy.map(([iid, m]) => { const it = store.items.get(iid); return <span key={iid}>{it ? itemKey(it, store.projects) : 'Task'} {fmtM(m)}</span>; })}</div>}
     </>}

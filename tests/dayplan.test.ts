@@ -8,6 +8,7 @@ import {migrate} from '../server/auth.ts';
 import {dayPlanReminders} from '../server/dayplan.ts';
 import {createMcpServer} from '../server/mcp.ts';
 import {guarded} from '../server/tokens.ts';
+import {entryDone} from '../src/daycheck.ts';
 
 function setup() {
   const t = new Tasks(openDb(':memory:'), () => '2026-11-14');
@@ -149,4 +150,75 @@ test('day planner: a reminder minutes before the start, once; changing the lead 
   assert.match(t.listNotifications(david.id)[0].text, /^In 5 min/);
   t.updateDayPlan(david.id, '2026-11-14', {blocks: [{id: 'r', text: 'Board call', start: '09:00', minutes: 60, remind: false, remindBefore: 30}]});
   assert.equal(t.dayPlan(david.id, '2026-11-14').blocks[0].remindBefore, undefined, 'no lead time without a reminder');
+});
+
+test('day planner: checking a line off marks it done everywhere it shows, and its task', () => {
+  const {t, david, p} = setup();
+  const d = '2026-11-14';
+  const tim = t.createItem({projectId: p.id, title: 'Call Tim', assignees: [david.id]}, david.id);
+  t.updateDayPlan(david.id, d, {
+    top: [{id: 't1', text: 'Call Tim'}, {id: 't2', text: 'Lunch'}],
+    dump: [{id: 'd1', text: '  call   tim '}, {id: 'd2', text: 'laundry'}],
+    blocks: [{id: 'b1', text: '', itemId: tim.id, start: '10:00', minutes: 30}, {id: 'b2', text: 'lunch', start: '12:00', minutes: 60}]});
+  // The bug: checking the box off left the same line in the top 3 and the brain dump open.
+  let plan = t.checkDayEntry(david.id, d, 'b1');
+  assert.ok(t.item(tim.id).completed, 'the task the box stands for is done');
+  assert.deepEqual([plan.top[0].done, plan.dump[0].done, plan.dump[1].done, plan.top[1].done], [true, true, undefined, undefined], 'same text in the top 3 and the dump, nothing else');
+  // Back on, from the top 3 line (plain text that matches the task): the task reopens and the flags clear.
+  plan = t.checkDayEntry(david.id, d, 't1', false);
+  assert.ok(!t.item(tim.id).completed, 'unchecking a matching line reopens the task');
+  assert.deepEqual([plan.top[0].done, plan.dump[0].done], [undefined, undefined]);
+  // Plain lines only: a box and a priority with the same text, no task touched.
+  plan = t.checkDayEntry(david.id, d, 'b2');
+  assert.deepEqual([plan.blocks[1].done, plan.top[1].done], [true, true]);
+  assert.ok(!t.item(tim.id).completed);
+  // Flip without done: checks it back on.
+  assert.equal(t.checkDayEntry(david.id, d, 't2').blocks[1].done, undefined);
+  // A task finished elsewhere (the task panel) shows done on the plain lines with its text.
+  t.updateItem(tim.id, {status: p.statuses.find(s => s.category === 'done')!.id}, david.id);
+  const shown = t.dayPlan(david.id, d), info = (id: string) => { const it = t.item(id); return {title: it.title, completed: !!it.completed}; };
+  assert.ok(entryDone(shown, shown.top[0], info) && entryDone(shown, shown.dump[0], info), 'plain lines follow the task with their text');
+  assert.ok(!entryDone(shown, shown.dump[1], info));
+  assert.throws(() => t.checkDayEntry(david.id, d, 'nope'), /No line/);
+});
+
+test('day planner: a check never completes the wrong task, and agent rules still apply', () => {
+  const {t, david, p} = setup();
+  const d = '2026-11-14';
+  const a = t.createItem({projectId: p.id, title: 'Email'}, david.id), b = t.createItem({projectId: p.id, title: 'Email'}, david.id);
+  t.updateDayPlan(david.id, d, {dump: [{id: 'x', text: 'email'}], blocks: [{id: 'ba', text: '', itemId: a.id, start: '09:00', minutes: 30}, {id: 'bb', text: '', itemId: b.id, start: '10:00', minutes: 30}]});
+  const plan = t.checkDayEntry(david.id, d, 'x');
+  assert.ok(!t.item(a.id).completed && !t.item(b.id).completed, 'a line matching two tasks completes neither');
+  assert.equal(plan.dump[0].done, true);
+  assert.ok(!t.item(b.id).completed && t.checkDayEntry(david.id, d, 'ba') && t.item(a.id).completed && !t.item(b.id).completed, 'a task box completes only its own task');
+  // An agent planning its own day still cannot mark work done.
+  const bot = t.createPerson({name: 'helper-bot'});
+  t.db.prepare("update people set kind = 'ai' where id = ?").run(bot.id);
+  const job = t.createItem({projectId: p.id, title: 'Draft notes'}, david.id);
+  t.updateDayPlan(bot.id, d, {top: [{id: 'j', text: '', itemId: job.id}]});
+  assert.throws(() => t.checkDayEntry(bot.id, d, 'j', true, bot.id), /cannot mark work done/);
+  assert.ok(!t.item(job.id).completed);
+  assert.equal(t.dayPlan(bot.id, d).top[0].done, undefined, 'nothing changes when the task refuses');
+});
+
+test('day planner: check_day_entry over MCP, and a token needs edit on the task', async () => {
+  const {t, david, sam, p} = setup();
+  const tim = t.createItem({projectId: p.id, title: 'Call Tim'}, david.id);
+  const server = createMcpServer(guarded(t, david.id), david.id);
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({name: 'test', version: '1'});
+  await Promise.all([server.connect(a), client.connect(b)]);
+  const call = async (name: string, args: Record<string, unknown>) => { const r = await client.callTool({name, arguments: args}); const text = (r.content as {text: string}[])[0].text; if (r.isError) throw new Error(text); return JSON.parse(text); };
+  await call('update_day_plan', {top: [{id: 'p1', text: 'Call Tim'}], blocks: [{id: 'k', item: tim.id, start: '09:00', minutes: 30}]});
+  const plan = await call('check_day_entry', {id: 'p1'});
+  assert.equal(plan.top[0].done, true);
+  assert.ok(t.item(tim.id).completed, 'the task is completed through MCP too');
+  assert.throws(() => guarded(t, david.id).checkDayEntry(sam.id, '2026-11-14', 'p1'), /own/);
+  // Sam can only view the space: checking off a line tied to its task is refused.
+  const fin = t.createProject({name: 'Fin', key: 'FIN'});
+  t.updateProject(fin.id, {settings: {...t.project(fin.id).settings, access: {default: 'none', members: {[sam.id]: 'viewer'}}}});
+  const report = t.createItem({projectId: fin.id, title: 'Read report'}, david.id);
+  t.updateDayPlan(sam.id, '2026-11-14', {top: [{id: 'r', text: 'Read report'}], blocks: [{id: 'rb', text: '', itemId: report.id, start: '09:00', minutes: 30}]});
+  assert.throws(() => guarded(t, sam.id).checkDayEntry(sam.id, '2026-11-14', 'r'), /edit/);
+  assert.ok(!t.item(report.id).completed);
 });

@@ -111,6 +111,42 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     await call(a, '/time/stop', 'POST', {});
     await b.waitForTimeout(2500);
     check('and its stop too', !(await b.locator('.timer-chip').count()));
+    // Alerts on this computer: a bar asks (like Slack) until they are on; Not now hides it for a week.
+    // Bug: alerts were only reachable from Inbox, Settings, so nobody was ever asked.
+    // Pushes go to a person's email, so these run as the demo person who has one.
+    const withEmail = (await call(a, '/team')).people.find(p => p.kind !== 'ai');
+    if (!withEmail.email) await call(a, `/team/${withEmail.id}`, 'PATCH', {email: 'alerts-test@example.com'});
+    const asHim = async ctx => { await ctx.addInitScript(id => { localStorage.setItem('me', id); localStorage.setItem('me:main', id); }, withEmail.id); return ctx.newPage(); };
+    // Headless Chrome starts with notifications blocked: the bar says how to allow them.
+    const fresh = await browser.newContext({viewport: {width: 1400, height: 900}});
+    const c = await asHim(fresh);
+    c.on('pageerror', e => errors.push(e.message));
+    await c.goto(`${BASE}/#/mywork`); await c.waitForTimeout(2000);
+    const blockedText = await c.locator('.notify-prompt').innerText().catch(() => '');
+    check('alerts: blocked in the browser, the bar says how to allow them', /blocked/i.test(blockedText) && /Allow/.test(blockedText), blockedText.slice(0, 120));
+    await c.locator('.notify-prompt').getByRole('button', {name: 'Not now'}).click();
+    check('alerts: Not now hides the bar', !(await c.locator('.notify-prompt').count()));
+    await c.reload(); await c.waitForTimeout(1500);
+    check('alerts: Not now holds after a reload', !(await c.locator('.notify-prompt').count()));
+    await fresh.close();
+    // A browser that has not been asked yet (real Chrome's default; headless Chrome cannot grant notifications, so the
+    // permission is simulated as not asked, and the click as Allow). The bar offers Turn on alerts.
+    const granted = await browser.newContext({viewport: {width: 1400, height: 900}});
+    await granted.addInitScript(() => {
+      let perm = 'default';
+      Object.defineProperty(Notification, 'permission', {get: () => perm});
+      Notification.requestPermission = async () => { perm = 'granted'; return perm; };
+    });
+    const g = await asHim(granted);
+    g.on('pageerror', e => errors.push(e.message));
+    await g.goto(`${BASE}/#/mywork`); await g.waitForTimeout(2000);
+    check('alerts: a fresh device is asked to turn on alerts', await g.locator('.notify-prompt', {hasText: 'Turn on alerts for this computer'}).isVisible());
+    await g.locator('.notify-prompt').getByRole('button', {name: 'Turn on alerts'}).click(); await g.waitForTimeout(3000);
+    const res = await g.locator('.notify-prompt').innerText().catch(() => 'gone');
+    // Headless Chrome has no push service, so signing up may fail here; either way the bar must answer.
+    check('alerts: Turn on answers (on, or why not)', /Alerts are on|push|service|error|failed|abort/i.test(res) || res === 'gone', res.slice(0, 160));
+    await granted.close();
+
     check('no page errors', !errors.length, errors.join('; '));
   } catch (e) {
     check('scenario run finished', false, e.message);

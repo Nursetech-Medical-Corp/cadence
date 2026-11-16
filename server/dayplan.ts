@@ -3,8 +3,9 @@
 // real tasks. Time boxes can carry a reminder that goes to the person's phone and desktop at its start.
 import {randomBytes} from 'node:crypto';
 import type {Tasks} from './service.ts';
-import {Invalid} from './errors.ts';
+import {Invalid, NotFound} from './errors.ts';
 import type {Item} from '../src/types.ts';
+import {checkEntries, entryDone, sameEntries, type TaskInfo} from '../src/daycheck.ts';
 import {calendarSettings, listEvents, localDay, localTime, validTz, zoned} from './events.ts';
 
 /** A line of the plan: plain text, or a task (itemId). done is only used for plain text; tasks are done when completed. */
@@ -109,6 +110,35 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
   return {...next, blocks: next.blocks.map(b => ({...b, at: momentOf(b.start)})), updated};
 }
 
+const taskInfo = (tasks: Tasks): TaskInfo => id => { try { const it = tasks.item(id); return {title: it.title, completed: !!it.completed}; } catch { return undefined; } };
+/** The task a check-off of entry id would complete or reopen (the same task, or a task with the same text on the page), or null. */
+export function dayEntryTask(tasks: Tasks, person: string, date: string, id: string): string | null {
+  const plan = getDayPlan(tasks, person, date);
+  return sameEntries(plan, id, taskInfo(tasks))?.itemId ?? null;
+}
+/**
+ * Check a line of the day off (or back on, with done false) everywhere it shows: the top 3, the brain dump and the
+ * time boxes (same task, or the same text). A line that is a task also completes or reopens the task.
+ * Leave done out to flip it. The task changes as actor, so its rules apply (AI agents cannot complete work).
+ */
+export function checkDayEntry(tasks: Tasks, person: string, date: string, id: string, done?: boolean, actor: string | null = null): DayPlan {
+  const plan = getDayPlan(tasks, person, date), info = taskInfo(tasks);
+  const e = [...plan.top, ...plan.dump, ...plan.blocks].find(x => x.id === id);
+  if (!e) throw new NotFound(`No line ${id} on ${date}`);
+  const want = done ?? !entryDone(plan, e, info);
+  const r = checkEntries(plan, id, want, info)!;
+  if (r.itemId) {
+    const it = tasks.item(r.itemId);
+    if (!!it.completed !== want) {
+      const p = tasks.project(it.projectId);
+      const status = want ? p.statuses.find(s => s.category === 'done')?.id : p.statuses.find(s => s.category === 'todo')?.id ?? p.statuses[0].id;
+      if (!status) throw new Invalid(`${p.name} has no Done status`);
+      tasks.updateItem(it.id, {status}, actor);
+    }
+  }
+  return updateDayPlan(tasks, person, date, {top: r.plan.top, dump: r.plan.dump, blocks: r.plan.blocks});
+}
+
 /**
  * Fill the day from a time on: top 3 first, then tasks due today and overdue, then the brain dump, each in the
  * next free gap. Uses each task's estimate (30 minutes when it has none). Things already boxed or done are skipped.
@@ -121,7 +151,7 @@ export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {
   const from = opts.from && TIME.test(opts.from) ? mins(opts.from) : localDay(new Date(), plan.tz) === date ? nowHere.minutes : plan.dayStart * 60;
   const start = Math.max(plan.dayStart * 60, Math.ceil(from / plan.slot) * plan.slot), end = plan.dayEnd * 60;
   const include = new Set(opts.include ?? ['top', 'due', 'dump']);
-  const isDone = (e: Entry) => { if (e.itemId) { try { return !!tasks.item(e.itemId).completed; } catch { return true; } } return !!e.done; };
+  const isDone = (e: Entry) => { if (e.itemId) { try { return !!tasks.item(e.itemId).completed; } catch { return true; } } return entryDone(plan, e, taskInfo(tasks)); };
   const boxed = new Set(plan.blocks.flatMap(b => b.itemId ? [b.itemId, b.text.toLowerCase()] : [b.text.toLowerCase()]));
   const want: Entry[] = [];
   const addIf = (e: Entry) => { if (isDone(e) || (e.itemId ? boxed.has(e.itemId) : boxed.has(e.text.toLowerCase())) || want.some(w => (e.itemId && w.itemId === e.itemId) || w.text.toLowerCase() === e.text.toLowerCase())) return; want.push(e); };

@@ -116,7 +116,7 @@ export const WRITE_OPS = new Set(['mergePeople', 'routine', 'archiveItem', 'rest
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
   'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes', 'triggerHook', 'setWebhooks',
-  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard', 'requestBoardChange',
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'checkDayEntry', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard', 'requestBoardChange',
   'savePlugin', 'submitPlugin', 'deletePlugin', 'installPlugin', 'uninstallPlugin', 'setPlugin']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {
@@ -158,6 +158,7 @@ function describe(tasks: Tasks, op: string, args: unknown[]) {
       const name = (() => { try { return tasks.board(String(a0)).name; } catch { return String(a0); } })();
       return `${({updateBoard: 'Change', deleteBoard: 'Delete', runBoard: 'Run', boardToTasks: 'Create tasks from'} as Record<string, string>)[op]} whiteboard "${name}"`;
     }
+    case 'checkDayEntry': return `${args[3] === false ? 'Uncheck' : 'Check off'} a line on the day plan for ${String(args[1] ?? '')}`;
     case 'boardRunAction': return `${String(args[1] ?? '')} a whiteboard run`;
     default: return op.replace(/([A-Z])/g, ' $1').toLowerCase();
   }

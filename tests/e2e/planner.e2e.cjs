@@ -222,6 +222,67 @@ const jiggle = async (page, x, y) => { for (let i = 0; i < 4; i++) { await page.
     check('its color carries into the calendar editor', (await page.locator('.ev-editor .ev-color.on[title="Tomato"]').count()) === 1);
     await page.keyboard.press('Escape'); await wait(200);
 
+    // 17. Checking a line off marks it done everywhere it shows (top 3, brain dump, boxes) and completes its task.
+    // Bug: checking off a box left the same line open in the top 3 and the brain dump.
+    // Close what scenario 16 left open (calendar editor, then the box editor).
+    if (await page.locator('.ev-editor').count()) { await page.locator('.ev-editor .ev-head button[title="Close"]').click(); await wait(300); }
+    if (await page.locator('.dp-editor').count()) { await page.locator('.dp-editor button[title="Close"]').click(); await wait(300); }
+    if (await page.locator('aside.panel').count()) await page.keyboard.press('Escape');
+    const t17 = new Date(today.getTime() + 86400_000), date17 = `${t17.getFullYear()}-${String(t17.getMonth() + 1).padStart(2, '0')}-${String(t17.getDate()).padStart(2, '0')}`;
+    const report = await api('/items', {method: 'POST', body: {projectId: space, title: 'Send the report', assignees: [me]}}, me);
+    await api(`/day/${date17}`, {method: 'PUT', body: {top: [{id: 'c17t', text: 'Send the report'}], dump: [{id: 'c17d', text: 'send the report'}, {id: 'c17w', text: 'water plants'}],
+      blocks: [{id: 'c17b', text: '', itemId: report.id, start: '10:00', minutes: 30}, {id: 'c17p', text: 'Water plants', start: '11:00', minutes: 30}]}}, me);
+    await page.locator('.dp-daynav button').last().click();
+    await page.waitForSelector('.dp-block:has-text("Send the report")');
+    const plan17 = () => api(`/day/${date17}`, {}, me);
+    const item17 = async () => (await api('/bootstrap', {}, me)).items.find(i => i.id === report.id);
+    await page.locator('.dp-block', {hasText: 'Send the report'}).locator('.check').click(); await wait(900);
+    check('checking off a box marks the same line done in the top 3', (await page.locator('.dp-top .dp-entry.done', {hasText: 'Send the report'}).count()) === 1);
+    check('checking off a box marks the same line done in the brain dump', (await page.locator('.dp-dumpsec .dp-entry.done', {hasText: /send the report/i}).count()) === 1);
+    check('checking off a task box completes the task', !!(await item17())?.completed);
+    const p17 = await plan17();
+    check('the plain copies are saved as done', p17.top[0].done === true && p17.dump[0].done === true && !p17.dump[1].done, JSON.stringify(p17.dump));
+    await page.locator('.dp-dumpsec .dp-entry', {hasText: 'water plants'}).locator('.check').click(); await wait(900);
+    check('checking off a brain dump line marks its box done', (await page.locator('.dp-block.done', {hasText: 'Water plants'}).count()) === 1 && (await plan17()).blocks.find(b => b.id === 'c17p')?.done === true);
+    await page.locator('.dp-dumpsec .dp-entry', {hasText: /send the report/i}).locator('.dp-text').click({position: {x: 2, y: 2}}).catch(() => {});
+    await page.locator('body').click({position: {x: 5, y: 900}}); await page.keyboard.press('Control+z'); await wait(900);
+    check('Ctrl+Z after a check-off puts the line and its box back', !(await page.locator('.dp-block.done', {hasText: 'Water plants'}).count()) && (await plan17()).blocks.find(b => b.id === 'c17p')?.done !== true);
+    await page.keyboard.press('Control+z'); await wait(900);
+    check('Ctrl+Z again reopens the task the check-off completed', !(await item17())?.completed);
+    await page.locator('.dp-block', {hasText: 'Send the report'}).locator('.check').click(); await wait(900);
+    await page.locator('.dp-top .dp-entry', {hasText: 'Send the report'}).locator('.check').click(); await wait(900);
+    check('unchecking a top 3 line reopens the task and every copy', !(await item17())?.completed && !(await page.locator('.dp-block.done', {hasText: 'Send the report'}).count()) && !(await page.locator('.dp-dumpsec .dp-entry.done', {hasText: /send the report/i}).count()));
+    await page.locator('.dp-daynav button', {hasText: 'Today'}).click(); await wait(500);
+
+    // 18. Time entries are editable: in the day's timesheet and in a task's time box. Short runs show seconds the right way.
+    const at18 = (h, m) => { const d = new Date(today); d.setHours(h, m, 0, 0); return d.toISOString(); };
+    const te = await api('/time', {method: 'POST', body: {itemId: survey.id, start: at18(6, 0), end: at18(6, 30)}}, me);
+    await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);
+    const row18 = page.locator('.dp-tsrow', {hasText: '6am to 6:30am'});
+    check('the timesheet row has an edit button', (await row18.locator('button[title^="Edit this entry"]').count()) === 1);
+    await row18.locator('button[title^="Edit this entry"]').click();
+    await page.locator('.dp-timesheet .time-edit input[title="End"]').fill('06:45');
+    await page.locator('.dp-timesheet .time-edit').getByRole('button', {name: 'Save'}).click(); await wait(700);
+    const te2 = (await api(`/time?itemId=${survey.id}`, {}, me)).find(x => x.id === te.id);
+    check('editing a timesheet entry saves the new end', te2?.minutes === 45, JSON.stringify(te2));
+    check('the timesheet shows the new time', (await page.locator('.dp-tsrow', {hasText: '6am to 6:45am'}).count()) === 1);
+    // A short timer run (seconds) and the task's time box.
+    const s18 = new Date(at18(5, 0)), e18 = new Date(s18.getTime() + 51_000);
+    await api('/time', {method: 'POST', body: {itemId: survey.id, start: s18.toISOString(), end: new Date(s18.getTime() + 60_000).toISOString()}}, me);
+    await page.locator('.dp-tsrow', {hasText: '6am to 6:45am'}).locator('.dp-text').click();
+    await page.waitForSelector('aside.panel .time-entry');
+    const texts = await page.locator('aside.panel .time-entry').allInnerTexts();
+    check('time entry times never read like 12:51 AM:57', !texts.some(x => /[AP]M:\d/.test(x)), texts.join(' | '));
+    const entry18 = page.locator('aside.panel .time-entry', {hasText: '6:45'}).first();
+    await entry18.locator('button[title^="Edit this entry"]').click();
+    await page.locator('aside.panel .time-edit .time-note').fill('fixed by hand');
+    await page.locator('aside.panel .time-edit').getByRole('button', {name: 'Save'}).click(); await wait(700);
+    const te3 = (await api(`/time?itemId=${survey.id}`, {}, me)).find(x => x.id === te.id);
+    check('editing in the task time box saves', te3?.note === 'fixed by hand' && te3?.minutes === 45, JSON.stringify(te3));
+    check('the task time box shows the edit', (await page.locator('aside.panel .time-entry', {hasText: 'fixed by hand'}).count()) === 1);
+    void e18;
+    await page.keyboard.press('Escape'); await wait(300);
+
     // 14. Each view keeps the week row, Today and the day arrows (they stay put while the hours scroll).
     for (const view of ['columns', 'horizontal', 'focus']) {
       await page.evaluate(v => localStorage.setItem('day-design', v), view); await page.reload(); await page.waitForSelector('.dp-grid'); await wait(600);

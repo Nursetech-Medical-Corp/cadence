@@ -11,6 +11,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - New things land where you can see them and never on top of each other.
 - Drag and drop always shows where the drop will land before you let go.
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
+- Alerts: until this device is signed up for alerts, a bar at the top asks to turn them on (browser permission, like Slack), offers Install app where the browser can, Not now hides it for a week (kept after reload), and when the browser blocks alerts it says how to allow them. Bug found: alerts were only reachable from Inbox, Settings, so nobody was asked. (e2e timers)
 
 ## Focus mode and timer
 - Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.
@@ -18,6 +19,8 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Starting a timer adds its task to the focus bar at the top of every page; several tasks can be in focus, one timer runs; each has play or stop, Done, open and remove.
 - Pop out opens a small always-on-top timer (Chrome, Edge); a blocked pop-up says so.
 - Starting a timer opens the focus view, the pop-out, or both, only if the person turned them on (bar gear, focus view gear, or Team page, Focus and timer).
+- A task's time entries can be edited (pencil or double-click): a timed entry by day, start and end; one added as minutes by day and length; a running timer by its start. Unchanged times keep their seconds. Your own entries, or anyone's for an admin. (unit service, auth; e2e)
+- Short timer entries read like Mon, Nov 16, 12:51:57 AM to 12:52:48 AM. Bug found: the seconds were stuck after AM (12:51 AM:57). (e2e)
 
 ## Routines
 - Skip moves the routine to its next date and keeps a closed record of the skipped cycle, shown as ✕ Skipped, with the routine keeping its id.
@@ -94,6 +97,8 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Each day is planned in one time zone (a new day takes the computer's); box times are wall-clock times there; reminders follow; a note offers to switch when the computer is elsewhere. (e2e)
 - Plan my day: today starts now; another day starts at the planning start (working hours from calendar settings), never 6am by default; meetings stay free.
 - Task boxes show status, priority, due, estimate, space, SOP and people; done boxes turn green and struck through.
+- Checking a line off (a box, a top 3 priority, a brain dump line, or Done on the Now card) marks it done everywhere it shows: the same task, or the same text, in the top 3, the dump and the boxes; a line that is a task completes the task (unchecking reopens it). A task completed elsewhere shows done on plain lines with its text. A line matching two tasks completes neither. Ctrl+Z after a check-off puts the lines back and reopens the task. Bug found: checking off a box left the same line open in the top 3 and the dump; Ctrl+Z missed tasks made after the page opened. (unit dayplan; e2e)
+- Timesheet for the day: the pencil (or double-click) on an entry edits its day, start, end and notes. (e2e)
 - The day runs midnight to midnight; 12am to 6am folds open; a red line marks now. (e2e)
 - Plan my day from now: top 3, then due and overdue, then the dump; lines with a time ("2PM meeting") go at that time.
 - Calendar events show on the day in their color; clicking one opens the full calendar editor (guests, Meet link, repeats, color, visibility, Open in Google Calendar); + makes one a box to tie tasks to. (e2e)

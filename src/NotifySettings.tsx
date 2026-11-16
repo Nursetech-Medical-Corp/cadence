@@ -1,6 +1,6 @@
 // Inbox settings: notifications on this device (phone or desktop), which kinds, quiet hours, and pause.
 import {useEffect, useState} from 'react';
-import {BellOff, BellRing, Download, Moon} from 'lucide-react';
+import {BellOff, BellRing, Download, Moon, X} from 'lucide-react';
 import {api} from './store.ts';
 import {NOTIFY_KINDS} from './types.ts';
 import {canInstall, deviceOn, disableDevice, enableDevice, install, installed, isIos, pushSupported} from './device.ts';
@@ -66,4 +66,53 @@ export function NotifySettings() {
       <div className="muted small">{info.devices ? `${info.devices} device${info.devices > 1 ? 's' : ''} signed up.` : 'No devices signed up yet.'} Email notifications are on the Team page.</div>
     </div>
   );
+}
+
+const LATER = 'notify-ask-later';
+/**
+ * The bar across the top that asks for alerts on this computer or phone, like Slack does, until they are on.
+ * Turn on asks the browser for permission (it must come from a click) and signs this device up for pop-ups that
+ * show even with Cadence closed. Not now hides it for a week. Blocked in the browser: says how to allow it.
+ */
+export function NotifyPrompt() {
+  const [state, setState] = useState<'hidden' | 'ask' | 'blocked' | 'busy' | 'done'>('hidden');
+  const [msg, setMsg] = useState('');
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    if (!pushSupported() || !isSecureContext || Number(localStorage.getItem(LATER) ?? 0) > Date.now()) return;
+    // Only when this person can get pushes here (the server knows their email) and this device is not signed up yet.
+    Promise.all([api<{key: string}>('/push'), deviceOn()]).then(([, on]) => { if (!on) setState(Notification.permission === 'denied' ? 'blocked' : 'ask'); }).catch(() => {});
+    const f = () => rerender(n => n + 1);
+    addEventListener('beforeinstallprompt', f);
+    return () => removeEventListener('beforeinstallprompt', f);
+  }, []);
+  if (state === 'hidden') return null;
+  const later = () => { localStorage.setItem(LATER, String(Date.now() + 7 * 86400_000)); setState('hidden'); };
+  const turnOn = async () => {
+    setState('busy'); setMsg('');
+    try {
+      const {key} = await api<{key: string}>('/push');
+      await enableDevice(key);
+      localStorage.removeItem(LATER);
+      const r = await api<{sent: number}>('/push/test', {method: 'POST', body: {}}).catch(() => ({sent: 0}));
+      setMsg(r.sent ? 'Alerts are on. A test alert is on its way.' : 'Alerts are on for this device.');
+      setState('done'); setTimeout(() => setState('hidden'), 6000);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+      setState(Notification.permission === 'denied' ? 'blocked' : 'ask');
+    }
+  };
+  return <div className={'notify-prompt' + (state === 'blocked' ? ' blocked' : '')} role="region" aria-label="Alerts on this device">
+    <BellRing size={16} />
+    <span className="grow">
+      {state === 'done' ? msg
+        : state === 'blocked' ? <>Alerts are blocked for Cadence in this browser. Click the lock (or tune) icon left of the address, set <b>Notifications</b> to Allow, then reload.</>
+        : <><b>Turn on alerts for this computer.</b> Get a pop-up when a task is assigned to you, someone mentions you, an AI agent asks for you, a reminder starts, and more, even with Cadence closed. You pick which kinds in Inbox, Settings.</>}
+      {state !== 'done' && msg && <span className="muted small"> {msg}</span>}
+    </span>
+    {(state === 'ask' || state === 'busy') && <button className="btn primary" disabled={state === 'busy'} onClick={turnOn}>{state === 'busy' ? 'Asking...' : 'Turn on alerts'}</button>}
+    {canInstall() && !installed() && state !== 'done' && <button className="btn" onClick={() => install().then(() => rerender(n => n + 1))} title="Its own window and icon, like a desktop app"><Download size={13} /> Install app</button>}
+    {state !== 'done' && <button className="btn ghost" onClick={later}>Not now</button>}
+    <button className="icon" title="Close" onClick={later}><X size={14} /></button>
+  </div>;
 }
