@@ -131,6 +131,7 @@ export function useStore(me: string) {
   };
   projectsRef.current = projects;
 
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
   const load = useCallback(async () => {
     const b = await api<Boot>('/bootstrap');
     setPeople(b.people); setProjects(b.projects); setToday(b.today); setSprints(b.sprints); setViews(b.views); setTimeTotals(new Map(Object.entries(b.time ?? {})));
@@ -138,6 +139,7 @@ export function useStore(me: string) {
     setItems(new Map(b.items.map(i => [i.id, i])));
     setReady(true);
   }, []);
+  loadRef.current = load;
   const loadSprints = useCallback(() => api<Sprint[]>('/sprints').then(setSprints), []);
   const loadViews = useCallback(async () => {
     const ps = await api<Project[]>('/projects');
@@ -188,12 +190,14 @@ export function useStore(me: string) {
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
     const ch = new BroadcastChannel(`cadence-time-${wsId()}`);
-    ch.onmessage = m => refreshTime((m.data as {items?: string[]}).items ?? []);
+    ch.onmessage = m => { const d = m.data as {items?: string[]; prefs?: boolean}; if (d.prefs) loadRef.current?.().catch(() => {}); else refreshTime(d.items ?? []); };
     timeChannel.current = ch;
     const vis = () => { if (document.visibilityState === 'visible') refreshTime([]); };
     document.addEventListener('visibilitychange', vis);
     return () => { ch.close(); timeChannel.current = null; document.removeEventListener('visibilitychange', vis); };
   }, [refreshTime]);
+  /** Tell this browser's other tabs and the pop-out window that the focus list changed. */
+  const toldPrefs = () => timeChannel.current?.postMessage({prefs: true});
   const told = (items: (string | undefined | null)[]) => { refreshTime(items); timeChannel.current?.postMessage({items: items.filter(Boolean)}); };
 
   const fail = useCallback((e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setTimeout(() => setError(null), 4000); }, []);
@@ -316,12 +320,12 @@ export function useStore(me: string) {
     /** Tasks in focus (the bar at the top): kept in your prefs so they follow you. open: show the full-screen focus view too. */
     focusAdd(id: string, open = false) {
       const list = (prefsRef.current.focusList as string[] | undefined) ?? [];
-      if (!list.includes(id)) { const next = [...list, id].slice(-8); setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).catch(fail); }
+      if (!list.includes(id)) { const next = [...list, id].slice(-8); setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).then(toldPrefs).catch(fail); }
       if (open) setFocusId(id);
     },
     focusRemove(id: string) {
       const next = ((prefsRef.current.focusList as string[] | undefined) ?? []).filter(x => x !== id);
-      setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).catch(fail);
+      setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).then(toldPrefs).catch(fail);
       setFocusId(f => f === id ? null : f);
     },
     async reloadPlugins() { try { setPlugins((await api<{installed: Install[]}>('/plugins')).installed); } catch (e) { fail(e); } },

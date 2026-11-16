@@ -36,6 +36,7 @@ import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
 import {resumeConnect} from './ConnectedApps.tsx';
 import {deviceOn} from './device.ts';
+import {PopoutPage} from './Focus.tsx';
 import {DialogHost, uiAlert, uiConfirm, uiPrompt} from './dialogs.tsx';
 
 // Pages and views beyond the everyday ones load on first use, so the first screen stays small and fast.
@@ -66,6 +67,7 @@ type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {p
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
   if (page === 'p' && id) return {page: 'project', id, view: view ?? ''};
+  if (page === 'popout') return {page: 'popout'} as unknown as Route;
   if (page === 'inbox') return {page: 'inbox'};
   if (page === 'data') return {page: 'data'};
   if (page === 'history') return {page: 'history'};
@@ -248,6 +250,8 @@ export function App() {
   if (route.page === 'signin-link') return <EmailLinkSignIn token={route.id} />;
   if (auth?.required && !auth.person) return auth.setup ? <SetupServer /> : auth.account ? <NoAccess me={auth} /> : <SignIn google={!!auth.signInGoogle} emailLink={!!auth.signInLink} signup={auth.signup} />;
   if (!store.ready) return <div className="loading">{store.error ?? 'Loading...'}</div>;
+  // The pop-out timer window: only the focus list, its clocks and notes.
+  if ((rawRoute.page as string) === 'popout') return <StoreContext.Provider value={store}><PopoutPage store={store} /><DialogHost /></StoreContext.Provider>;
 
   return (
     <StoreContext.Provider value={store}>

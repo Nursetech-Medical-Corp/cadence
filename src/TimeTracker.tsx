@@ -42,6 +42,23 @@ export function TaskClock({store, itemId, className, total = 'beside'}: {store: 
   </span>;
 }
 
+/** Time on the task against its estimate, as a bar: accent while under 80%, amber from 80%, red once past the estimate
+ *  (the overrun is shown). The same component in the focus view and the pop-out. */
+export function TimeProgress({store, itemId, compact}: {store: Store; itemId: string; compact?: boolean}) {
+  const item = store.items.get(itemId);
+  const run = store.running?.itemId === itemId ? store.running : null;
+  const now = useSharedNow(!!run, run?.start);
+  const est = (item?.estimate ?? 0) * 60;
+  if (!est) return compact ? null : <div className="tp none"><div className="tp-bar"><span style={{width: 0}} /></div><span className="tp-label">No estimate. Set one on the task to see progress.</span></div>;
+  const logged = (store.timeTotals.get(itemId) ?? 0) + (run ? Math.max(0, now - Date.parse(run.start)) / 60000 : 0);
+  const ratio = logged / est, level = ratio > 1 ? 'over' : ratio >= 0.8 ? 'near' : 'ok';
+  const left = est - logged;
+  return <div className={'tp ' + level + (compact ? ' compact' : '')} title={`${fmtMinutes(Math.round(logged))} of the ${fmtMinutes(est)} estimate (${Math.round(ratio * 100)}%)`}>
+    <div className="tp-bar"><span style={{width: `${Math.min(100, ratio * 100)}%`}} /></div>
+    <span className="tp-label">{left >= 0 ? `${fmtMinutes(Math.round(left))} left of ${fmtMinutes(est)}` : `${fmtMinutes(Math.round(-left))} over ${fmtMinutes(est)}`}</span>
+  </div>;
+}
+
 /** Table and list cell: play or stop, then the total (or the running clock). Click the total for the full box. */
 /** compact: with no time yet, only a play button that shows on hover (board cards, list rows). */
 export function TimeCell({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
