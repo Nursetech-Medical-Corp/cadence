@@ -1,5 +1,6 @@
 // Client state: everything loads once, edits apply instantly, server confirms, SSE keeps every tab in sync.
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useSyncExternalStore} from 'react';
 import {defaultTokens} from './QuickAssist.tsx';
 import {rollupTarget} from './rollup.ts';
 export {rollupTarget, rollupSpaces} from './rollup.ts';
@@ -83,6 +84,10 @@ export function useStore(me: string) {
   const [tick, setTick] = useState(0); // bumps on any server event so panels refetch comments/time
   const [calTick, setCalTick] = useState(0); // bumps when meetings or calendar events change
   const [running, setRunning] = useState<TimeEntry | null>(null);
+  const runningRef = useRef<TimeEntry | null>(null);
+  runningRef.current = running;
+  const meRef = useRef(me);
+  meRef.current = me;
   // null: the server did not say (an older server or the demo), so built-in modules stay on.
   const [plugins, setPlugins] = useState<Install[] | null>(null);
   // The task open in focus mode (Focus.tsx), if any.
@@ -162,6 +167,9 @@ export function useStore(me: string) {
       setTick(t => t + 1);
     };
     es.onerror = () => {}; // EventSource reconnects on its own
+    // After a dropped connection, events may have been missed: reload once it is back.
+    let opened = false;
+    es.onopen = () => { if (opened) { load().catch(() => {}); setTick(t => t + 1); } opened = true; };
     return () => es.close();
   }, [load, loadSprints, loadViews]);
 
@@ -169,6 +177,24 @@ export function useStore(me: string) {
     if (!me) { setRunning(null); return; }
     api<TimeEntry | null>(`/time/running?person=${me}`).then(setRunning).catch(() => {});
   }, [me, tick]);
+
+  // Timers across tabs of this browser: a start or stop in one tab updates every other tab at once (no wait for the
+  // server's event stream), and a tab coming back into view checks again.
+  const timeChannel = useRef<BroadcastChannel | null>(null);
+  const refreshTime = useCallback((itemIds: (string | undefined | null)[]) => {
+    if (meRef.current) api<TimeEntry | null>(`/time/running?person=${meRef.current}`).then(setRunning).catch(() => {});
+    for (const id of new Set(itemIds.filter((x): x is string => !!x))) api<number>(`/time/totals?itemId=${id}`).then(m => setTimeTotals(prev => new Map(prev).set(id, m))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel(`cadence-time-${wsId()}`);
+    ch.onmessage = m => refreshTime((m.data as {items?: string[]}).items ?? []);
+    timeChannel.current = ch;
+    const vis = () => { if (document.visibilityState === 'visible') refreshTime([]); };
+    document.addEventListener('visibilitychange', vis);
+    return () => { ch.close(); timeChannel.current = null; document.removeEventListener('visibilitychange', vis); };
+  }, [refreshTime]);
+  const told = (items: (string | undefined | null)[]) => { refreshTime(items); timeChannel.current?.postMessage({items: items.filter(Boolean)}); };
 
   const fail = useCallback((e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setTimeout(() => setError(null), 4000); }, []);
 
@@ -278,10 +304,12 @@ export function useStore(me: string) {
     async startTimer(itemId: string, kind: 'work' | 'review' = 'work') {
       // Said before the request, while the click still counts as a user action (a pop-out window needs one).
       window.dispatchEvent(new CustomEvent('cadence:timer-start', {detail: {itemId}}));
-      try { setRunning(await api<TimeEntry>('/time/start', {method: 'POST', body: {itemId, kind}})); } catch (e) { fail(e); }
+      const before = runningRef.current?.itemId;
+      try { setRunning(await api<TimeEntry>('/time/start', {method: 'POST', body: {itemId, kind}})); told([before, itemId]); } catch (e) { fail(e); }
     },
     async stopTimer() {
-      try { await api('/time/stop', {method: 'POST', body: {}}); setRunning(null); } catch (e) { fail(e); }
+      const before = runningRef.current?.itemId;
+      try { await api('/time/stop', {method: 'POST', body: {}}); setRunning(null); told([before]); } catch (e) { fail(e); }
     },
     fail,
     setPlugins, setFocusId,
@@ -360,6 +388,21 @@ export function between(a: number | undefined, b: number | undefined) {
   if (b === undefined) return a + 1;
   return (a + b) / 2;
 }
+
+/** One clock for the whole app (and its pop-out window): every running timer reads the same moment, so two clocks for the
+ *  same task never show different seconds. Ticks four times a second while anything listens. */
+let sharedNow = Date.now();
+const nowListeners = new Set<() => void>();
+let nowTimer: ReturnType<typeof setInterval> | null = null;
+function subscribeNow(fn: () => void) {
+  nowListeners.add(fn);
+  if (!nowTimer) nowTimer = setInterval(() => { sharedNow = Date.now(); nowListeners.forEach(l => l()); }, 250);
+  return () => { nowListeners.delete(fn); if (!nowListeners.size && nowTimer) { clearInterval(nowTimer); nowTimer = null; } };
+}
+export function useSharedNow(active: boolean) {
+  return useSyncExternalStore(active ? subscribeNow : noSubscribe, () => active ? sharedNow : 0);
+}
+const noSubscribe = () => () => {};
 
 /** Re-renders every `ms` so running timers count up on screen. */
 export function useNow(active: boolean, ms = 1000) {

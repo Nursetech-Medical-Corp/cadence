@@ -57,3 +57,9 @@
 .pip-row.on { background: var(--accent-soft); border-color: var(--accent-line); }
 .pip-row .fx-clock { font-size: 1.2em; padding: 0 4px; }
 .pip-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.fv-backdrop.full { padding: 0; }
+.fv-backdrop.full .fv { width: 100%; min-height: 100vh; border-radius: 0; border: none; box-shadow: none; }
+.fv-backdrop.full .fv-body { grid-template-columns: minmax(0, 1fr) 360px; min-height: calc(100vh - 56px); }
+.fv-backdrop.full .fv-main { max-width: 980px; margin: 0 auto; width: 100%; padding-top: 40px; }
+.fv-backdrop.full .fv-clock { font-size: 3.4em; }
+.pip-full { display: inline-flex; align-items: center; gap: 4px; width: auto !important; padding: 0 8px !important; font-size: 12px; white-space: nowrap; }
