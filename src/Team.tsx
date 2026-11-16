@@ -290,6 +290,12 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
             <label className="small" title="Email me notifications"><input type="checkbox" checked={p.notifyEmail} disabled={!isAdmin && p.id !== me.person?.id} onChange={e => patch(p.id, {notifyEmail: e.target.checked})} /> Email</label>
             <SetPassword has={p.hasPassword} self={p.id === me.person?.id && me.required} disabled={!isAdmin && p.id !== me.person?.id} onSet={(pw, cur) => patch(p.id, {password: pw, currentPassword: cur})} />
             <label className="small" title="Inactive people cannot sign in"><input type="checkbox" checked={p.active} disabled={!isAdmin || p.id === me.person?.id} onChange={e => patch(p.id, {active: e.target.checked})} /> Active</label>
+            {isAdmin && p.active && p.id !== me.person?.id && people.some(o => o.id !== p.id && o.active && o.name.trim().toLowerCase() === p.name.trim().toLowerCase()) && <button className="btn small" title="The same person or AI is on the team twice: merge this row into the other one" onClick={async () => {
+              const others = people.filter(o => o.id !== p.id && o.active && o.name.trim().toLowerCase() === p.name.trim().toLowerCase());
+              const into = others.length === 1 ? others[0] : null;
+              if (!into || !(await uiConfirm(`Merge this ${p.name} (${p.kind === 'ai' ? 'AI agent' : 'person'}${p.email ? `, ${p.email}` : ''}) into the other ${into.name} (${into.kind === 'ai' ? 'AI agent' : 'person'}${into.email ? `, ${into.email}` : ''})?\n\nIts tasks, comments, time, approvals, keys and the agents it owns move to the other row. This row is deactivated, not deleted.`, {ok: 'Merge'}))) return;
+              try { await api(`/team/${p.id}/merge`, {method: 'POST', body: {into: into.id}}); load(); setMsg(`Merged into ${into.name}.`); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
+            }}>Merge duplicate</button>}
           </div>
         ))}
         {isAdmin && <div className="set-add"><Plus size={14} className="muted" /><input className="inline" placeholder="Add a person, Enter" value={newName} onChange={e => setNewName(e.target.value)}

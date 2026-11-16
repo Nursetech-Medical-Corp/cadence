@@ -235,10 +235,10 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
   const r = (i: Item) => reviewOf(i);
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
   const cols: {id: string; title: string; hint: string; list: Item[]}[] = [
-    {id: 'open', title: 'Ready for AI', hint: 'Marked for AI, nobody on it yet', list: items.filter(i => !i.completed && i.fields.worker === 'ai' && (!r(i) || ['declined', 'discarded'].includes(r(i)!.state)) && !i.assignees.some(a => ais.has(a)))},
+    {id: 'open', title: 'Ready for AI', hint: 'Marked for AI, nobody on it yet', list: items.filter(i => !i.completed && !waiting.has(i.id) && i.fields.worker === 'ai' && (!r(i) || ['declined', 'discarded'].includes(r(i)!.state)) && !i.assignees.some(a => ais.has(a)))},
     {id: 'claimed', title: 'Claims to approve', hint: 'An agent asked to take these', list: items.filter(i => r(i)?.state === 'claimed')},
     {id: 'working', title: 'AI working', hint: 'Accepted, sent back with changes, or starting over', list: items.filter(i => !i.completed && !waiting.has(i.id) && (['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '') || (!r(i) && i.assignees.some(a => ais.has(a)))))},
-    {id: 'review', title: 'Ready for review', hint: 'Check the report: approve, send back, redo or discard', list: items.filter(i => r(i)?.state === 'submitted' || (!i.completed && waiting.has(i.id) && ['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '')))},
+    {id: 'review', title: 'Ready for review', hint: 'Check the report: approve, send back, redo or discard', list: items.filter(i => r(i)?.state === 'submitted' || (!i.completed && waiting.has(i.id) && (!r(i) || ['accepted', 'changes', 'redo'].includes(r(i)!.state))))},
     {id: 'done', title: 'Approved this week', hint: '', list: items.filter(i => r(i)?.state === 'approved' && r(i)!.at > weekAgo)},
     {id: 'discarded', title: 'Discarded this week', hint: 'Rejected work. Open one to see what is left to clean up.', list: items.filter(i => r(i)?.state === 'discarded' && r(i)!.at > weekAgo)},
   ];
@@ -275,7 +275,7 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
               const rv = r(i), agent = store.people.find(p => p.id === (rv?.agent ?? i.assignees.find(a => ais.has(a))));
               const last = lastLog[i.id];
               return (
-                <div key={i.id} className={'card' + (dragging === i.id ? ' dragging' : '')} onClick={() => open(i.id)} draggable={!!rv} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragging(i.id); }} onDragEnd={() => { setDragging(null); setOver(null); }}
+                <div key={i.id} className={'card' + (dragging === i.id ? ' dragging' : '')} onClick={() => open(i.id)} draggable={!!rv || !!agent} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragging(i.id); }} onDragEnd={() => { setDragging(null); setOver(null); }}
                   title={rv ? 'Drag to another column to move it: working, review, approved or discarded' : undefined}>
                   <div className="card-top"><span className="muted small">{itemKey(i, store.projects)}</span><span className="spacer" />{agent && <><Avatar person={agent} size={18} /><span className="small muted">{agent.name}</span></>}</div>
                   <div className="card-title">{i.title}</div>
