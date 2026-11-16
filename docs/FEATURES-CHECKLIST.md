@@ -25,7 +25,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.
 
 ## AI agents
-- AI work: cards with a pending approval sit in Ready for review; people drag cards between working, review, approved and discarded (claims dragged to working are accepted). Bug found: approvals waiting showed under AI working and admins could not move them. (unit)
+- AI work: cards with a pending approval sit in Ready for review (also work an agent did by assignment, without a claim); people drag cards between working, review, approved and discarded (claims dragged to working are accepted). Bug found: approvals waiting showed under AI working and admins could not move them. (unit)
 - Several agents suggesting the same task: approving one makes it once and closes the others; the approver picks which agent (or a person) does it. (manual)
 - Connect Claude: the consent page asks who it works as, its own AI agent (default) or you; Team page can switch a connected app later. Bug found: Connect Claude always acted as the person. (manual)
 - Rules for AI agents (Team page, admins): base rules wording, workspace rules, onboarding guide; get_guide returns the guide; agent_inbox returns the base and workspace rules. (manual)
@@ -43,6 +43,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - An agent's time is recorded from its first step, comment or file to hand-in; with no timer, from acceptance to hand-in.
 
 ## Team page
+- Merge duplicate: two active rows with the same name show Merge duplicate; tasks, comments, time, approvals, keys and owned agents move; the old row is deactivated. Bug found: Joey was a person row and an agent row owned by that person. (unit)
 - Email alerts: My account, Email me notifications, then Email me about (assigned, comments, approvals, completed, reminders, automations, other). Only picked groups are emailed; the email has the task key, title and an open link; SMTP first, else the Gmail sender. Bug found: emails went only through Gmail and had no link. (unit)
 - Job roles table: the name column is readable and stays put while scrolling sideways; every column resizes by dragging its header edge, double-click resets.
 

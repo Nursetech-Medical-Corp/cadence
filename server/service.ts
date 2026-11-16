@@ -1,6 +1,7 @@
 // All reads and writes go through here: the HTTP API, MCP server and tests share it,
 // so anything a person can do in the UI an agent can do too.
 import * as alerts from './alerts.ts';
+import {mergePeople} from './merge.ts';
 import {syncHours} from '../src/hours.ts';
 import {exportAll} from './backup.ts';
 import {getWorkspace} from './auth.ts';
@@ -1695,6 +1696,8 @@ export class Tasks {
   /** A task (person or AI) to change a board, with a sticky note on the board where the change is wanted. */
   requestBoardChange(ref: string, text: string, actor: string | null = null, opts: {node?: string | null; worker?: 'human' | 'ai' | 'either'; assignees?: string[]; projectId?: string | null} = {}) { return boards.requestBoardChange(this, ref, text, actor, opts); }
   /** The drawing rules for SOP flows: this workspace's own, or the built-in ones. */
+  /** Merge a duplicate team member row into another (admins). */
+  mergePeople(from: string, into: string, actor: string | null = null) { return mergePeople(this, from, into, actor); }
   /** Which notifications a person also gets by email (Team page, My account). */
   emailAlerts(person: string) { return alerts.getEmailAlerts(this.db, person); }
   setEmailAlerts(person: string, patch: {on?: boolean; kinds?: unknown}) { return alerts.setEmailAlerts(this.db, person, patch); }

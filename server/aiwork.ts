@@ -387,8 +387,16 @@ export type Lane = typeof LANES[number];
 export function moveWork(tasks: Tasks, itemId: string, reviewer: string | null, to: Lane, comment = '') {
   if (personKind(tasks, reviewer) === 'ai') throw new Invalid('Only a person can move AI work');
   if (!LANES.includes(to)) throw new Invalid(`to must be one of: ${LANES.join(', ')}`);
-  const i = tasks.item(itemId), r = review(i);
-  if (!r) throw new Invalid('This task has no AI work to move. Mark it AI and let an agent claim it.');
+  let i = tasks.item(itemId), r = review(i);
+  if (!r) {
+    // Assigned to an agent with no claim (it just did the work): hand it in for that agent first.
+    const agent = i.assignees.find(a => personKind(tasks, a) === 'ai');
+    if (!agent) throw new Invalid('This task has no AI work to move. Mark it AI and let an agent claim it, or assign it to an agent.');
+    if (!mayReview(tasks, reviewer, i, agent)) throw notOwner(tasks, agent);
+    if (to === 'working') return i;
+    submit(tasks, itemId, agent, `Handed in by hand (moved to ${to} on the AI work board).`);
+    i = tasks.item(itemId); r = review(i)!;
+  }
   if (!mayReview(tasks, reviewer, i, r.agent)) throw notOwner(tasks, r.agent);
   const working = ['accepted', 'changes', 'redo'].includes(r.state);
   const handIn = () => { log(tasks, itemId, reviewer, 'review', 'Moved to review by hand'); return setReview(tasks, tasks.item(itemId), {...r, state: 'submitted', at: now()}, {}, reviewer); };

@@ -93,6 +93,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     listNotifications: (person) => self(person, 'read notifications'),
     markRead: (person) => self(person, 'read notifications'),
     emailAlerts: (person) => self(person, 'read email alerts'),
+    mergePeople: () => { if (!isAdmin()) throw new Forbidden('Only admins merge team members'); },
     setEmailAlerts: (person) => self(person, 'change email alerts'),
     updateView: (vid, patch) => { need(tasks.view(vid).projectId, 'views'); if (patch?.config && areaLocked(tasks.db, 'viewSettings') && settingsChanged(tasks.view(vid).config, patch.config) && !isAdmin()) throw new Forbidden('Only admins change view settings here'); if (patch?.config?.privateTo && patch.config.privateTo !== actor) throw new Forbidden('A view can only be made private to yourself'); },
     deleteView: (vid) => need(tasks.view(vid).projectId, 'views'),

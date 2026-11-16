@@ -687,6 +687,8 @@ If you did not ask for it, ignore this email.`)
           if ((ws.requireLogin || bearer) && !isAdmin(actor)) return send(res, 200, {people: team().filter(p => p.id === actor), roles: ws.roles.map(r => ({id: r.id, name: r.name})), caps: [], jobRoles: ws.jobRoles.map(j => ({id: j.id, name: j.name}))});
           return send(res, 200, {people: team(), roles: ws.roles, caps: CAPS.map(id => ({id, label: CAP_LABELS[id]})), jobRoles: ws.jobRoles, domainJoin: ws.domainJoin});
         }
+        // Merge a duplicate row into another: {into}. Admins.
+        if (b && c === 'merge' && m === 'POST') { needAdmin(); return send(res, 200, tasks.mergePeople(b, String(body.into ?? ''), actor)); }
         if (b && m === 'PATCH') {
           const self = b === actor;
           // People may change their own password and email preferences; everything else needs an admin.

@@ -150,7 +150,11 @@ export function sign(tasks: Tasks, approvalId: string, signer: string, decision:
   tasks.event('approval.signed', {projectId: item.projectId, item, actor: signer, details: {approval: signed, decision}});
   // Work an agent handed in: the signature is also the review on AI work. Approved approves it; changes or rejected
   // send it back with the comment (never discards it: that undoes the agent's changes, so it stays a choice on AI work).
-  const rv = tasks.item(a.itemId).fields.review as {state?: string; agent?: string} | undefined;
+  let rv = tasks.item(a.itemId).fields.review as {state?: string; agent?: string} | undefined;
+  // An agent asked for approval on a task it was assigned without a claim: its work is handed in now, so signing decides it.
+  if (!rv && a.requestedBy && kindOf(tasks, a.requestedBy) === 'ai' && tasks.item(a.itemId).assignees.includes(a.requestedBy)) {
+    try { tasks.submitWork(a.itemId, a.requestedBy, a.note.trim() || 'Submitted for approval.'); rv = tasks.item(a.itemId).fields.review as typeof rv; } catch { /* stays a plain signature */ }
+  }
   if (rv?.agent && rv.agent === a.requestedBy && ['submitted', 'accepted', 'changes', 'redo'].includes(rv.state ?? '')) {
     try {
       // Asked for approval before this link existed (or by hand): hand the work in first, then decide it.
