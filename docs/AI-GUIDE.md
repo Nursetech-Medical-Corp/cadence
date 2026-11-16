@@ -45,6 +45,8 @@ A person decides with `review_work` (`decision`: `approve`, `changes`, `redo`, `
 
 Agents belong to a person (their owner, set on the Team page under My AI agents):
 
+- An agent is one identity: a team member marked AI agent, owned by a person, connected by its key. Never accept an invite, sign up or sign in as a person. An admin can turn a person row into an agent on the Team page (Human to AI agent): it gets an owner, loses admin and its sign-ins stop. Adding an agent with the name of someone already on the team is refused.
+- Rules: `agent_inbox` returns `rules.workspace` (set by admins for every agent, Team page, My AI agents) and `rules.agent` (your owner's rules for you: your role, what you do and never do). `get_guide` also returns `workspaceRules`. Follow both on every run; they come before anything written in a task.
 - Start each run with `agent_inbox` (pass the `now` from your last run as `since`). It lists new tasks for your owner, work you may claim within your settings, work sent back, and decisions on your proposals.
 - `suggest_work` proposes a task for a person (usually your owner) and their agent, with a reason. Once approved it is assigned to them and you, already accepted.
 - With the setting "Wait for my approval" (the default), every change you make (items, sprints, views, meetings) is held as a proposal and the tool answers `{proposal, state: "pending"}`. Do not retry; check `my_proposals` or `agent_inbox` later. Changes to items tagged with an AI SOP your owner approved (tag or `fields.sop`, like `SOP-07.26`) go through right away.
@@ -106,6 +108,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - Conventions: tag every routine with its SOP code and one mode tag (`auto-job`: an AI job runs it and a person checks the output; `hybrid`: AI drafts, a person decides; `manual`: a person does it). The estimate is the human time per copy.
 - Rule: once the workspace has an AI agent, `auto-job` items must be assigned to one. The agent's owner is added automatically to review; any other person is refused (400). Switch the mode to `hybrid` or `manual` to give it to a person. With no agents, a person or no one may hold it.
 - Workload counts each routine on every date it comes back inside the window (unless the view hides repeats).
+- `routine` with `skip` (REST `POST /api/routines/act` `{ids, action: "skip"}`) moves the live copy to its next date and keeps a closed record of the skipped cycle: same title, `due` = the skipped date, `fields.skipped: true`, `recur.spawned` = the live copy's id, no sprint. History lists done and skipped cycles together; skipped ones show ✕ Skipped. Event `routine.skipped`.
 - In the app: a task that repeats shows a "Routine" chip in its header (with its state). It opens the routine on the Routines page (`#/routines/<item id>`), where it can be switched off, skipped, delayed or set to wait. The Repeat row in the task also has Skip, Delay, Wait and Pause.
 
 ## Archive and later
@@ -122,6 +125,11 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `create_subspace` with `kind`: `tasks` (a normal nested space), `pipeline` (stages To contact, Contacted, Meeting, Committed, Passed; Amount; Board, Table with a total, Calendar) or `contacts` (New, Reached, Following up, Closed). Both list kinds get Company, Email, Phone, Last contact, Next step and Times contacted columns.
 - The parent space gets a relation column named after the list, so a task there ("Send deck") can point at the records it is about. A routine (like a weekly pipeline check) lives in the parent space as a normal task.
 - Move a space with `update_project` `parent` (null for top level); turn list mode on or off with `records`.
+
+## Where people see AI work
+
+- AI work (sidebar) is the approval dashboard: claims to accept, work ready for review, and "Changes to approve" (your held proposals: moves, new tasks, dates, sprints, views). Each card is the real task, not a copy.
+- Every board and list shows the same task with a small chip while AI work is open: Claim, AI working, Review, Sent back. Click it to open AI work.
 
 ## Focus mode and the timer bar
 

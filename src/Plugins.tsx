@@ -9,6 +9,7 @@ import {safeMode, pluginPages} from './pluginsClient.ts';
 import {itemKey} from './components.tsx';
 import type {Install, Manifest} from '../server/plugins.ts';
 import type {Item, ViewKind} from './types.ts';
+import './plugins.css';
 
 type Card = {id: string; name: string; description: string; publisher: string; icon?: string; tags: string[]; version: string; status: string; builtin: boolean; mine: boolean; note: string; installed: ('workspace' | 'me')[]};
 type Listing = {catalog: Card[]; installed: Install[]; reviewer: boolean};
@@ -39,35 +40,46 @@ function PluginBrowse({store}: {store: Store}) {
     try { const m = JSON.parse(await f.text()); const e = await api<{id: string}>('/plugins', {method: 'POST', body: {manifest: m}}); store.flash(`Imported ${m.name}. Install it for yourself to try it.`); go(`/plugins/${e.id}`); }
     catch (e) { store.fail(e); }
   };
+  const tabs = ([['all', 'Store'], ['installed', 'Installed'], ['mine', 'Made by me'], ...(data?.reviewer ? [['review', 'To review']] : [])] as [typeof tab, string][]);
+  const count = (k: typeof tab) => (data?.catalog ?? []).filter(c => k === 'all' ? c.status === 'listed' || c.mine : k === 'installed' ? c.installed.length > 0 : k === 'mine' ? c.mine : c.status === 'pending').length;
   return <div className="pl-page">
-    <div className="pl-head">
-      <h1><Puzzle size={20} /> Plugins</h1>
-      <span className="spacer" />
-      <label className="pop-row" title="Turns every plugin off in this browser until you switch it back. Adding ?safe to the address does the same.">
+    <header className="pl-hero">
+      <div className="pl-hero-text">
+        <h1><Puzzle size={22} /> Plugins</h1>
+        <p>Themes, extra pages, view sets and full setups for Cadence. Plugins are data only: they run no code and cannot read or change your work by themselves.</p>
+      </div>
+      <div className="pl-hero-actions">
+        <button className="btn" onClick={() => file.current?.click()}><Upload size={14} /> Import file</button>
+        <input ref={file} type="file" accept=".json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ''; }} />
+        <button className="btn primary" onClick={() => go('/plugins/new')}>Make a plugin</button>
+      </div>
+    </header>
+    <div className="pl-bar">
+      <label className="pl-search"><Search size={16} /><input placeholder="Search by name, maker or tag" value={q} onChange={e => setQ(e.target.value)} autoFocus /></label>
+      <nav className="pl-tabs">{tabs.map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l} <span className="pl-count-pill">{count(k)}</span></button>)}</nav>
+      <label className="pl-safe-toggle" title="Turns every plugin off in this browser until you switch it back. Adding ?safe to the address does the same.">
         <input type="checkbox" checked={safe} onChange={e => { localStorage.setItem('plugins-safe', e.target.checked ? '1' : '0'); setSafe(e.target.checked); location.reload(); }} /> <ShieldCheck size={14} /> Safe mode
       </label>
-      <button className="btn" onClick={() => file.current?.click()}><Upload size={14} /> Import file</button>
-      <input ref={file} type="file" accept=".json,application/json" hidden onChange={e => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ''; }} />
-      <button className="btn primary" onClick={() => go('/plugins/new')}>Make a plugin</button>
     </div>
-    <p className="muted">Themes, extra pages, view sets and full setups. Plugins are data only: they run no code and cannot read or change your work by themselves. Install one for yourself to try it, turn it off any time without removing it.</p>
-    <div className="pl-bar">
-      <span className="search-wrap grow"><Search size={14} /><input className="search" placeholder="Search plugins" value={q} onChange={e => setQ(e.target.value)} autoFocus /></span>
-      <div className="seg">{([['all', 'Store'], ['installed', 'Installed'], ['mine', 'Made by me'], ...(data?.reviewer ? [['review', 'To review']] : [])] as [typeof tab, string][]).map(([k, l]) =>
-        <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}{k === 'review' && data ? ` (${data.catalog.filter(c => c.status === 'pending').length})` : ''}</button>)}</div>
-    </div>
-    {safe && <div className="pl-safe">Safe mode is on: plugins are installed but not applied in this browser.</div>}
+    {safe && <div className="pl-safe">Safe mode is on: plugins stay installed but are not applied in this browser.</div>}
     <div className="pl-grid">
       {list.map(c => <button key={c.id} className="pl-card" onClick={() => go(`/plugins/${c.id}`)}>
-        <PluginIcon icon={c.icon} />
-        <span className="pl-card-body">
-          <b>{c.name}</b>
-          <span className="muted small">{c.publisher}{c.builtin ? ' (built in)' : ''} · v{c.version}</span>
-          <span className="small">{c.description}</span>
-          <span className="pl-tags">{c.installed.map(s => <span key={s} className="tag on">{s === 'me' ? 'Installed for me' : 'Installed for workspace'}</span>)}{c.status !== 'listed' && <span className="tag">{STATUS[c.status]}</span>}{c.tags.map(t => <span key={t} className="tag">{t}</span>)}</span>
-        </span>
+        <div className="pl-card-top">
+          <PluginIcon icon={c.icon} size={48} />
+          <div className="pl-card-title">
+            <b>{c.name}</b>
+            <span className="pl-maker">by {c.publisher}{c.builtin && <span className="pl-verified" title="Made by Cadence"><ShieldCheck size={12} /> Cadence</span>}</span>
+          </div>
+        </div>
+        <p className="pl-card-desc">{c.description}</p>
+        <div className="pl-card-foot">
+          {c.installed.length ? <span className="pl-installed">✓ {c.installed.includes('workspace') ? 'Installed for everyone' : 'Installed for me'}</span>
+            : c.status !== 'listed' ? <span className={'pl-status ' + c.status}>{STATUS[c.status]}</span> : <span className="muted">v{c.version}</span>}
+          <span className="spacer" />
+          {c.tags.slice(0, 3).map(t => <span key={t} className="pl-tag">{t}</span>)}
+        </div>
       </button>)}
-      {data && !list.length && <div className="muted">Nothing here yet.</div>}
+      {data && !list.length && <div className="pl-empty">{tab === 'mine' ? 'You have not made a plugin yet. Make a plugin starts you from a working example.' : 'Nothing here yet.'}</div>}
     </div>
   </div>;
 }
@@ -109,42 +121,107 @@ function PluginDetail({store, id}: {store: Store; id: string}) {
       location.reload();
     } catch (e) { store.fail(e); }
   };
+  const maker = m.publisher ?? info.owner;
   return <div className="pl-page">
-    <button className="link small" onClick={() => go('/plugins')}>All plugins</button>
-    <div className="pl-detail-head">
-      <PluginIcon icon={m.icon} size={64} />
-      <div className="grow">
+    <button className="pl-back" onClick={() => go('/plugins')}>← All plugins</button>
+    <header className="pl-detail-head">
+      <PluginIcon icon={m.icon} size={88} />
+      <div className="pl-detail-title">
         <h1>{m.name}</h1>
-        <div className="muted">{m.publisher ?? info.owner}{info.builtin ? ' (built in)' : ''} · v{m.version} · <span className={'pl-status ' + info.status}>{STATUS[info.status]}</span>{info.note && ` · ${info.note}`}</div>
-        <p>{m.description}</p>
+        <div className="pl-maker big">by <b>{maker}</b>{info.builtin && <span className="pl-verified"><ShieldCheck size={13} /> Made by Cadence</span>}</div>
+        <p className="pl-lede">{m.description}</p>
         <div className="pl-actions">
           {!inst('me') ? <button className="btn primary" onClick={() => call('/install', 'POST', {scope: 'me'})}>Install for me</button>
             : <button className="btn" onClick={() => call('/install?scope=me', 'DELETE')}>Remove for me</button>}
           {admin && info.status === 'listed' && (!inst('workspace') ? <button className="btn" onClick={() => call('/install', 'POST', {scope: 'workspace'})}>Install for everyone</button>
             : <button className="btn" onClick={() => call('/install?scope=workspace', 'DELETE')}>Remove for everyone</button>)}
+        </div>
+      </div>
+    </header>
+    {info.status === 'pending' && !info.builtin && <ReviewBox show={info.reviewer} note={note} setNote={setNote} review={approve => call('/review', 'POST', {approve, note})} />}
+    <div className="pl-detail">
+      <main className="pl-detail-main">
+        <section className="pl-section">
+          <h2>{m.screenshots?.length ? 'Screenshots' : 'Preview'}</h2>
+          {m.screenshots?.length ? <div className="pl-shots">{m.screenshots.map((s, n) => <a key={n} href={s} target="_blank" rel="noreferrer"><img src={s} alt={`Screenshot ${n + 1}`} /></a>)}</div>
+            : <PluginPreview m={m} />}
+        </section>
+        {m.readme && <section className="pl-section"><h2>About</h2><div className="pl-readme">{m.readme}</div></section>}
+        <section className="pl-section"><h2>What it changes</h2><ul className="pl-effects">{info.effects.map(e => <li key={e}>{e}</li>)}</ul></section>
+        {c.views?.length ? <section className="pl-section"><h2>View presets</h2>
+          <div className="pl-chips">{c.views.map(v => <span key={v.name} className="pl-tag">{v.name} · {v.kind}</span>)}</div>
+          <div className="pl-actions"><select className="plain-select" value={space} onChange={e => setSpace(e.target.value)}><option value="">Pick a space</option>{spaces.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <button className="btn" disabled={!space} onClick={addViews}>Add these views</button></div>
+        </section> : null}
+        {c.setup && <section className="pl-section"><h2>Setup</h2>
+          <p>{[c.setup.spaces?.length && `${c.setup.spaces.length} spaces (${c.setup.spaces.map(s => s.name).join(', ')})`, c.setup.appearance && 'appearance', c.setup.plugins?.length && `plugins: ${c.setup.plugins.join(', ')}`].filter(Boolean).join('; ')}</p>
+          <div className="pl-actions"><button className="btn" onClick={applySetup}>Apply setup</button><span className="muted small">{admin ? 'Spaces are made as shared spaces.' : 'Spaces are made as your personal spaces.'} Uses your permissions. Nothing is deleted.</span></div>
+        </section>}
+      </main>
+      <aside className="pl-side">
+        {info.installed.length > 0 && <div className="pl-side-card"><h3>Installed</h3>
+          {info.installed.map(i => <InstallRow key={i.scope} store={store} install={i} admin={admin} reload={async () => { await store.reloadPlugins(); await load(); }} />)}</div>}
+        <div className="pl-side-card"><h3>Details</h3>
+          <dl className="pl-facts">
+            <dt>Made by</dt><dd>{maker}</dd>
+            <dt>Version</dt><dd>{m.version}</dd>
+            <dt>Status</dt><dd className={'pl-status ' + info.status}>{STATUS[info.status]}{info.note && ` (${info.note})`}</dd>
+            <dt>Plugin id</dt><dd><code>{m.id}</code></dd>
+            {m.tags?.length ? <><dt>Tags</dt><dd className="pl-chips">{m.tags.map(t => <span key={t} className="pl-tag">{t}</span>)}</dd></> : null}
+          </dl>
+        </div>
+        <div className="pl-side-card pl-side-actions">
+          <button className="btn" onClick={() => download(m)}><Download size={14} /> Download file</button>
           {info.mine && !info.builtin && <>
             <button className="btn" onClick={() => go(`/plugins/edit:${id}`)}>Edit</button>
             {info.status !== 'listed' && info.status !== 'pending' && <button className="btn" onClick={() => call('/submit', 'POST')}>Submit for everyone</button>}
-            <button className="btn" onClick={() => { if (confirm(`Remove ${m.name} from the store? Installs keep working until someone removes them.`)) void call('', 'DELETE').then(() => go('/plugins')); }}>Delete</button>
+            <button className="btn" onClick={() => { if (confirm(`Remove ${m.name} from the store? Installs keep working until someone removes them.`)) void call('', 'DELETE').then(() => go('/plugins')); }}>Delete from store</button>
           </>}
-          <button className="btn" onClick={() => download(m)}><Download size={14} /> Download</button>
         </div>
-      </div>
+      </aside>
     </div>
-    {info.status === 'pending' && !info.builtin && <ReviewBox show={info.reviewer} note={note} setNote={setNote} review={approve => call('/review', 'POST', {approve, note})} />}
-    {info.installed.map(i => <InstallRow key={i.scope} store={store} install={i} admin={admin} reload={async () => { await store.reloadPlugins(); await load(); }} />)}
-    <h3>What it changes</h3>
-    <ul className="pl-effects">{info.effects.map(e => <li key={e}>{e}</li>)}</ul>
-    {c.views?.length ? <div className="pl-box">
-      <b>View presets:</b> {c.views.map(v => v.name).join(', ')}
-      <div className="pl-actions"><select className="plain-select" value={space} onChange={e => setSpace(e.target.value)}><option value="">Pick a space</option>{spaces.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <button className="btn" disabled={!space} onClick={addViews}>Add views to this space</button></div>
-    </div> : null}
-    {c.setup && <div className="pl-box"><b>Setup:</b> {[c.setup.spaces?.length && `${c.setup.spaces.length} spaces (${c.setup.spaces.map(s => s.name).join(', ')})`, c.setup.appearance && 'appearance', c.setup.plugins?.length && `plugins: ${c.setup.plugins.join(', ')}`].filter(Boolean).join('; ')}
-      <div className="pl-actions"><button className="btn" onClick={applySetup}>Apply setup</button><span className="muted small">{admin ? 'Spaces are shared spaces.' : 'Spaces are made as your personal spaces.'} Uses your permissions.</span></div></div>}
-    {m.screenshots?.length ? <><h3>Screenshots</h3><div className="pl-shots">{m.screenshots.map((s, n) => <img key={n} src={s} alt={`Screenshot ${n + 1}`} />)}</div></> : null}
-    {m.readme && <><h3>About</h3><div className="pl-readme">{m.readme}</div></>}
   </div>;
+}
+
+/** A picture of what a plugin adds, drawn from its manifest, for plugins without screenshots. */
+function PluginPreview({m}: {m: Manifest}) {
+  const c = m.contributes;
+  const frames: React.ReactNode[] = [];
+  for (const mode of ['light', 'dark'] as const) {
+    const t = c.theme?.[mode];
+    if (!t) continue;
+    const base = mode === 'light' ? {bg: '#ffffff', bg2: '#f7f7f8', side: '#f7f7f8', line: '#e8e8ec', text: '#1b1b1f', muted: '#8b8b96', card: '#ffffff', accent: '#6d5dfc'}
+      : {bg: '#16161a', bg2: '#1c1c21', side: '#131316', line: '#2c2c34', text: '#ececf1', muted: '#7c7c88', card: '#1f1f25', accent: '#6d5dfc'};
+    const v = {...base, ...t} as Record<string, string>;
+    frames.push(<figure key={mode} className="pl-frame"><div className="pl-mock" style={{background: v.bg, color: v.text, borderColor: v.line}}>
+      <div className="pl-mock-side" style={{background: v.side, borderColor: v.line}}>{[70, 55, 62, 48].map((w, n) => <i key={n} style={{width: `${w}%`, background: n === 0 ? v.accent : v.muted, opacity: n === 0 ? 1 : .35}} />)}</div>
+      <div className="pl-mock-main">
+        <div className="pl-mock-bar" style={{borderColor: v.line}}><i style={{width: 90, background: v.text, opacity: .8}} /><span style={{background: v.accent}} /></div>
+        {[0, 1, 2].map(n => <div key={n} className="pl-mock-card" style={{background: v.card, borderColor: v.line}}><b style={{borderColor: n === 0 ? v.accent : v.line, background: n === 0 ? v.accent : 'transparent'}} /><i style={{width: `${70 - n * 12}%`, background: v.text, opacity: .55}} /></div>)}
+      </div>
+    </div><figcaption>{mode === 'light' ? 'Light mode' : 'Dark mode'}</figcaption></figure>);
+  }
+  if (c.features?.includes('dayPlanner')) frames.push(<figure key="dp" className="pl-frame"><div className="pl-mock pl-mock-plain">
+    <div className="pl-mock-day">{['9', '10', '11', '12', '1', '2'].map(h => <div key={h}><span>{h}</span><em /></div>)}
+      <b style={{top: '6%', height: '28%'}}>Top 3: proposal</b><b style={{top: '40%', height: '18%', background: 'color-mix(in srgb, var(--ok) 22%, transparent)', borderColor: 'var(--ok)'}}>Calls</b><b style={{top: '66%', height: '24%'}}>Deep work</b></div>
+  </div><figcaption>Time boxes for today</figcaption></figure>);
+  if (c.features?.includes('whiteboards')) frames.push(<figure key="wb" className="pl-frame"><div className="pl-mock pl-mock-plain">
+    <svg viewBox="0 0 300 150" className="pl-mock-svg"><defs><marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor" /></marker></defs>
+      <rect x="14" y="55" width="70" height="38" rx="8" className="n1" /><rect x="118" y="20" width="70" height="38" rx="8" className="n2" /><rect x="118" y="92" width="70" height="38" rx="8" className="n2" /><rect x="222" y="55" width="66" height="38" rx="19" className="n3" />
+      <path d="M84 70 L118 40" markerEnd="url(#pa)" /><path d="M84 80 L118 110" markerEnd="url(#pa)" /><path d="M188 40 L222 68" markerEnd="url(#pa)" /><path d="M188 110 L222 82" markerEnd="url(#pa)" /></svg>
+  </div><figcaption>Map and run a workflow</figcaption></figure>);
+  for (const p of c.pages ?? []) frames.push(<figure key={p.id} className="pl-frame"><div className="pl-mock pl-mock-plain pl-mock-page">
+    <strong>{p.title}</strong>
+    {p.blocks.slice(0, 5).map((b, n) => b.type === 'text' ? <i key={n} className="pl-line" />
+      : b.type === 'count' ? <div key={n} className="pl-mock-count"><b>12</b> {b.label}</div>
+      : <div key={n} className="pl-mock-list"><em>{b.title ?? 'Tasks'}</em>{[0, 1, 2].map(r => <i key={r} className="pl-line" style={{width: `${85 - r * 15}%`}} />)}</div>)}
+  </div><figcaption>New page: {p.title}</figcaption></figure>);
+  if (c.views?.length) frames.push(<figure key="views" className="pl-frame"><div className="pl-mock pl-mock-plain pl-mock-page">
+    <div className="pl-mock-tabs">{c.views.map(v => <span key={v.name}>{v.name}</span>)}</div>
+    <div className="pl-mock-cols">{[0, 1, 2].map(col => <div key={col}>{[0, 1, 2 - col].filter(x => x >= 0).map(r => <i key={r} className="pl-mock-tile" />)}</div>)}</div>
+  </div><figcaption>{c.views.length} views for any space</figcaption></figure>);
+  if (!frames.length) return <div className="pl-empty">No preview. The maker can add screenshots.</div>;
+  return <div className="pl-previews">{frames}</div>;
 }
 
 function ReviewBox({show, note, setNote, review}: {show: boolean; note: string; setNote: (s: string) => void; review: (approve: boolean) => void}) {

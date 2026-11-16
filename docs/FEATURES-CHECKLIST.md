@@ -19,6 +19,17 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Pop out opens a small always-on-top timer (Chrome, Edge); a blocked pop-up says so.
 - Starting a timer opens focus mode or the pop-out only if the person turned that on.
 
+## Routines
+- Skip moves the routine to its next date and keeps a closed record of the skipped cycle, shown as ✕ Skipped, with the routine keeping its id.
+
+## AI agents
+- An AI is one team row: adding an agent with a name already on the team is refused with a hint; switching a person row to AI agent makes it owned, not admin, and stops its sign-ins.
+- Workspace AI rules (admins) and each agent's own rules are saved on blur and come back in agent_inbox.
+- Boards and lists show Claim, AI working, Review or Sent back on tasks with open AI work; the chip opens AI work.
+
+## Team page
+- Job roles table: the name column is readable and stays put while scrolling sideways; every column resizes by dragging its header edge, double-click resets.
+
 ## Plugins
 - The store lists built-in and approved plugins; search matches name, description, publisher and tags.
 - Install for me changes only my view; install for everyone is admin only and approved plugins only.

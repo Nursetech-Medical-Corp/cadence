@@ -721,6 +721,15 @@ export class Tasks {
     if (r.until && due > r.until) throw new Invalid('That was the last one. End the routine instead.');
     if (r.count != null && r.count <= 1) throw new Invalid('That was the last one. End the routine instead.');
     const {slot: _sl, ...kept} = r; void _sl;
+    // Keep a closed record of this cycle marked skipped (not done), linked to the routine like a finished copy,
+    // so history shows which cycles were done and which were skipped. The live copy keeps its id and moves on.
+    const proj = this.project(it.projectId), doneId = proj.statuses.find(s => s.category === 'done')?.id;
+    if (doneId) {
+      const rec = this.createItem({projectId: it.projectId, parentId: it.parentId, type: it.type, title: it.title, priority: it.priority, assignees: it.assignees,
+        tags: it.tags, estimate: it.estimate, due: anchor, start: it.start && it.due ? shift(anchor) : null, status: doneId, fields: {...cleanFields(it.fields), skipped: true}}, actor, {system: true});
+      this.db.prepare('update items set recur = ? where id = ?').run(JSON.stringify({...r, spawned: it.id}), rec.id);
+      this.emit({kind: 'item', item: this.item(rec.id)});
+    }
     return tell('routine.skipped', this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...kept, count: r.count - 1} : kept}, actor), {from: anchor, to: due});
   }
   /** When work finishes, start the routines that were waiting only on it. Their first date is the next one from today. */

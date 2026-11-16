@@ -9,15 +9,18 @@ import {randomBytes} from 'node:crypto';
 import type {Tasks} from './service.ts';
 import type {Item} from '../src/types.ts';
 import {Invalid, NotFound} from './errors.ts';
+import {getWorkspace} from './auth.ts';
 import {aiQueue, agentOwner, claim, decide, pendingCleanup} from './aiwork.ts';
 import {createEvent, deleteEvent, updateEvent, type EventInput} from './events.ts';
 
 export type AgentSettings = {
   provider: 'claude' | 'chatgpt' | 'meta' | 'other'; spaces: string[] | null; workTypes: 'ai' | 'ai+either'; watchAssignments: boolean;
   checkFrequency: string; maxClaims: number; writePolicy: 'review' | 'direct'; autoApprove: string[]; canCreate: boolean; canInviteOutside: boolean; webhook: string | null;
+  /** The owner's rules for this agent: its role on the team, what to do and not do. Sent with every agent_inbox. */
+  instructions: string;
 };
 export const DEFAULT_AGENT: AgentSettings = {provider: 'claude', spaces: null, workTypes: 'ai+either', watchAssignments: true, checkFrequency: 'Hourly, 8:00 to 18:00 on weekdays',
-  maxClaims: 5, writePolicy: 'review', autoApprove: [], canCreate: true, canInviteOutside: false, webhook: null};
+  maxClaims: 5, writePolicy: 'review', autoApprove: [], canCreate: true, canInviteOutside: false, webhook: null, instructions: ''};
 export type Proposal = {id: string; agent: string; owner: string | null; op: string; args: unknown[]; summary: string; reason: string; itemId: string | null; projectId: string | null;
   created: string; state: 'pending' | 'approved' | 'rejected' | 'failed'; decidedBy: string | null; decidedAt: string | null; note: string | null; result: unknown};
 
@@ -47,9 +50,23 @@ export function listAgents(tasks: Tasks) {
   return (tasks.db.prepare("select id, name, owner, email from people where kind = 'ai' order by name").all() as {id: string; name: string; owner: string | null; email: string | null}[])
     .map(a => ({...a, ownerName: a.owner ? nameOf(tasks, a.owner) : null, settings: agentSettings(tasks, a.id)}));
 }
+/** Turn an existing person into an AI agent (Team page, Human to AI agent): owned by the admin who switched it
+ *  unless it already has an owner, never admin, default agent settings, and it works through its key, not a sign-in. */
+export function makeAgent(tasks: Tasks, person: string, actor: string | null) {
+  if (person === actor) throw new Invalid('You cannot make yourself an AI agent');
+  const r = tasks.db.prepare('select owner, agent from people where id = ?').get(person) as {owner?: string | null; agent?: string | null} | undefined;
+  if (!r) throw new NotFound('No such person');
+  tasks.db.prepare("update people set kind = 'ai', admin = 0, owner = ?, agent = ? where id = ?").run(r.owner ?? actor, r.agent ?? JSON.stringify(DEFAULT_AGENT), person);
+}
+
 /** Anyone signed in can add an agent of their own. It gets its owner's role, never admin. */
 export function addAgent(tasks: Tasks, owner: string, input: {name: string; provider?: AgentSettings['provider']}) {
   if (isAgent(tasks, owner)) throw new Invalid('AI agents cannot add agents');
+  // One identity per agent: an AI that already joined as a person is switched to an agent, not added twice.
+  const wanted = String(input.name ?? '').trim().toLowerCase();
+  const same = wanted ? tasks.db.prepare("select name, kind from people where lower(name) = ? and coalesce(active, 1) = 1").get(wanted) as {name: string; kind: string | null} | undefined : undefined;
+  if (same) throw new Invalid(same.kind === 'ai' ? `${same.name} is already an AI agent. Get a new key for it instead of adding it again.`
+    : `${same.name} is already on the team as a person. If ${same.name} is an AI, switch Human to AI agent on that row instead of adding a second one.`);
   const p = tasks.createPerson({name: String(input.name ?? '').trim() || `${nameOf(tasks, owner).split(' ')[0]}'s Claude`});
   const cols = tasks.db.prepare('pragma table_info(people)').all().map(r => r.name as string);
   const role = cols.includes('role') ? (tasks.db.prepare('select role from people where id = ?').get(owner) as {role?: string} | undefined)?.role : undefined;
@@ -75,6 +92,7 @@ export function saveAgentSettings(tasks: Tasks, agent: string, patch: Partial<Ag
   if (next.spaces !== null && (!Array.isArray(next.spaces) || next.spaces.some(s => !tasks.listProjects().some(p => p.id === s)))) throw new Invalid('spaces must be space ids, or null for all');
   if (next.webhook && !/^https?:\/\//.test(next.webhook)) throw new Invalid('webhook must be an http(s) URL');
   if (typeof next.checkFrequency !== 'string' || next.checkFrequency.length > 120) throw new Invalid('checkFrequency is a short note');
+  if (typeof next.instructions !== 'string' || next.instructions.length > 8000) throw new Invalid('instructions are text up to 8000 characters');
   tasks.db.prepare('update people set agent = ? where id = ?').run(JSON.stringify(next), agent);
   if (patch.owner !== undefined) {
     if (!isAdmin(tasks, actor) && actor) throw new Invalid('Only an admin moves an agent to another owner');
@@ -250,6 +268,8 @@ export function agentInbox(tasks: Tasks, agent: string, since?: string) {
   const mine = queue.filter(x => x.review?.agent === agent && ['claimed', 'accepted', 'changes', 'redo'].includes(x.review.state));
   return {
     now: now(), owner: owner ? {id: owner, name: nameOf(tasks, owner)} : null, settings: s,
+    // Follow these every run: the workspace's rules for all agents, then the owner's rules for this agent.
+    rules: {workspace: getWorkspace(tasks.db).aiRules, agent: s.instructions},
     openClaims: mine.length, canClaimMore: Math.max(0, s.maxClaims - mine.length),
     newForOwner: assigned.map(brief),
     available: queue.filter(x => !x.review || x.review.state === 'declined' || x.review.state === 'discarded').map(x => brief(x.item)),

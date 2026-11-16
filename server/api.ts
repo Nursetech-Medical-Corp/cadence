@@ -25,7 +25,7 @@ import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEm
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
 import {googleUrl, allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
-import {addAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
+import {addAgent, makeAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
 import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
 import {Forbidden, createToken, deleteToken, guarded, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
@@ -686,7 +686,12 @@ If you did not ask for it, ignore this email.`)
           if (body.active !== undefined) tasks.db.prepare('update people set active = ? where id = ?').run(body.active ? 1 : 0, b);
           // Apps they connected by signing in stop working once they are deactivated (or, above, their email changes).
           if (body.active === false) revokePerson(accounts.db, info.id, b);
-          if (body.kind !== undefined) { needAdmin(); tasks.db.prepare('update people set kind = ? where id = ?').run(body.kind === 'ai' ? 'ai' : 'human', b); }
+          if (body.kind !== undefined) {
+            needAdmin();
+            // An AI agent is one identity: owned, never admin, connected by its key. Its old sign-ins stop working.
+            if (body.kind === 'ai') { makeAgent(tasks, b, actor); revokePerson(accounts.db, info.id, b); }
+            else tasks.db.prepare("update people set kind = 'human' where id = ?").run(b);
+          }
           if (body.notifyEmail !== undefined) tasks.db.prepare('update people set notify_email = ? where id = ?').run(body.notifyEmail ? 1 : 0, b);
           if (body.password) {
             // Passwords belong to accounts, which can be used in other workspaces. An existing account's password
@@ -722,6 +727,7 @@ If you did not ask for it, ignore this email.`)
           if (body.domainJoin !== undefined) patch.domainJoin = body.domainJoin;
           if (body.custom) patch.custom = body.custom;
           if (body.features) patch.features = body.features;
+          if (body.aiRules !== undefined) patch.aiRules = body.aiRules;
           if (body.google) patch.google = {...ws.google, clientId: body.google.clientId ?? ws.google.clientId, ...(body.google.clientSecret ? {clientSecret: body.google.clientSecret} : {})};
           try { saveWorkspace(tasks.db, patch); } catch (e) { throw new Invalid(e instanceof Error ? e.message : 'Bad settings'); }
           return send(res, 200, {ok: true});

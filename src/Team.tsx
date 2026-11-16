@@ -696,13 +696,15 @@ function MyDataCard() {
 }
 
 type AgentSettings = {provider: string; spaces: string[] | null; workTypes: 'ai' | 'ai+either'; watchAssignments: boolean; checkFrequency: string; maxClaims: number;
-  writePolicy: 'review' | 'direct'; autoApprove: string[]; canCreate: boolean; canInviteOutside: boolean; webhook: string | null};
+  writePolicy: 'review' | 'direct'; autoApprove: string[]; canCreate: boolean; canInviteOutside: boolean; webhook: string | null; instructions?: string};
 type AgentRow = {id: string; name: string; owner: string | null; settings: AgentSettings};
 const RUN_PROMPT = (name: string) => `You are ${name}, an AI agent in Cadence (the team's project manager). Each run:
 1. Call agent_inbox (pass the "now" from your last run as since).
 2. For each new task for your owner and each available task: decide if you can do it well with your tools. If yes, claim_task (existing work) or suggest_work (new work) with a short plan. If not, skip it.
 3. For work you are accepted on or that was sent back: do it, log_step as you go (links, screenshots), then submit_work with a report and what you missed.
-4. Never mark work done and never invite people outside the workspace. Your changes wait for your owner unless they follow an approved AI SOP.`;
+4. Never mark work done and never invite people outside the workspace. Your changes wait for your owner unless they follow an approved AI SOP.
+5. Follow the rules agent_inbox returns (rules.workspace for every agent, rules.agent for you) on every run.
+6. You are an AI agent, not a person: never accept an invite, sign up or sign in. You act only through your key.`;
 
 /** Where to paste the key, per AI app. Kept short; the Learn page has the full walk-through. */
 function ConnectSteps({provider, url, prompt}: {provider: string; url: string; prompt: string}) {
@@ -737,8 +739,10 @@ function AgentsCard() {
   const [provider, setProvider] = useState('claude');
   const [key, setKey] = useState<{agent: string; url: string; token: string} | null>(null);
   const [msg, setMsg] = useState('');
+  // Rules for every agent in the workspace: admins only (null when this person cannot change them).
+  const [rules, setRules] = useState<string | null>(null);
   const load = () => api<AgentRow[]>('/agents').then(setList).catch(e => setMsg(String(e instanceof Error ? e.message : e)));
-  useEffect(() => { load(); api<Project[]>('/projects').then(ps => setProjects(ps.filter(p => !p.settings.rollup))).catch(() => {}); }, []);
+  useEffect(() => { load(); api<Project[]>('/projects').then(ps => setProjects(ps.filter(p => !p.settings.rollup))).catch(() => {}); api<{aiRules?: string}>('/workspace').then(w => setRules(w.aiRules ?? '')).catch(() => setRules(null)); }, []);
   const save = async (a: AgentRow, patch: Partial<AgentSettings>) => {
     try { const r = await api<{settings: AgentSettings}>(`/agents/${a.id}`, {method: 'PATCH', body: patch}); setList(list.map(x => x.id === a.id ? {...x, settings: r.settings} : x)); setMsg('Saved.'); }
     catch (e) { setMsg(String(e instanceof Error ? e.message : e)); }
@@ -752,6 +756,9 @@ function AgentsCard() {
         <select className="plain-select" value={provider} onChange={e => setProvider(e.target.value)}><option value="claude">Claude</option><option value="chatgpt">ChatGPT</option><option value="meta">Muse (Meta AI)</option><option value="other">Other</option></select>
         <button className="btn primary" disabled={!name.trim()} onClick={async () => { try { await api('/agents', {method: 'POST', body: {name, provider}}); setName(''); load(); } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); } }}><Plus size={13} /> Add agent</button>
       </div>
+      {rules !== null && <label className="agent-rules small">Rules for every AI agent in this workspace (admins). Agents get them each time they check for work.
+        <textarea className="plain-input" rows={4} placeholder="Like: Never email customers. Draft only. Follow the SOP linked in the task. Ask in a comment when unsure." defaultValue={rules}
+          onBlur={async e => { try { await api('/workspace', {method: 'PUT', body: {aiRules: e.target.value}}); setMsg('Saved the rules for all agents.'); } catch (x) { setMsg(String(x instanceof Error ? x.message : x)); } }} /></label>}
       {list.map(a => (
         <div key={a.id} className="agent-card">
           <div className="time-row"><b className="grow">{a.name}</b><span className="tag">{a.settings.provider}</span>
@@ -763,6 +770,8 @@ function AgentsCard() {
             <div className="muted">Run it {a.settings.checkFrequency}. Lost the key? Get a new one; revoke old ones under Tokens.</div>
           </div>}
           <div className="agent-grid small">
+            <label className="agent-rules">Its role and rules (what it does, what it never does). Sent to it every run.
+              <textarea className="plain-input" rows={3} placeholder="Like: You are the project manager for Marketing. Organize and date tasks, never delete. Draft emails, never send." defaultValue={a.settings.instructions ?? ''} onBlur={e => save(a, {instructions: e.target.value})} /></label>
             <label>Changes it makes <select className="plain-select" value={a.settings.writePolicy} onChange={e => save(a, {writePolicy: e.target.value as AgentSettings['writePolicy']})}><option value="review">Wait for my approval</option><option value="direct">Apply right away</option></select></label>
             <label>Work it may take <select className="plain-select" value={a.settings.workTypes} onChange={e => save(a, {workTypes: e.target.value as AgentSettings['workTypes']})}><option value="ai+either">Marked AI or Either</option><option value="ai">Marked AI only</option></select></label>
             <label><input type="checkbox" checked={a.settings.watchAssignments} onChange={e => save(a, {watchAssignments: e.target.checked})} /> Tell it when I get new tasks</label>

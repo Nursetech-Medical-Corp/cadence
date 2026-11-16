@@ -79,7 +79,7 @@ export function RoutineSummary({items}: {items: Item[]}) {
       <div title="Estimate times how often each comes back, for routines that are on"><b>{fmtHours(hoursWeek(all))}</b><span>per week</span></div>
       {MODES.map(m => <div key={m} title={MODE_TIP[m]}><b>{fmtHours(hoursWeek(all.filter(i => modeOf(i) === m)))}</b><span>{MODE_LABEL[m].toLowerCase()} / wk</span></div>)}
     </div>
-    <p className="muted small">Every repeating task from every space. Each has one live copy; finish it and the next appears. <b>Skip</b> closes this cycle. <b>Delay</b> moves only this copy. <b>Wait</b> holds it until other work is done. <b>Switch off</b> pauses it everywhere. Auto jobs go to AI agents only (once the workspace has one).</p>
+    <p className="muted small">Every repeating task from every space. Each has one live copy; finish it and the next appears. <b>Skip</b> closes this cycle as skipped and keeps a record of it in history, marked ✕ Skipped. <b>Delay</b> moves only this copy. <b>Wait</b> holds it until other work is done. <b>Switch off</b> pauses it everywhere. Auto jobs go to AI agents only (once the workspace has one).</p>
   </div>;
 }
 

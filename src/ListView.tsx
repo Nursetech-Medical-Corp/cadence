@@ -4,6 +4,7 @@ import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {ChevronDown, ChevronRight, GripVertical, Plus, Maximize2} from 'lucide-react';
 import {RoutineMark} from './RoutineControls.tsx';
+import {AIStateChip} from './AIWork.tsx';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
 import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move, SpaceChip} from './components.tsx';
@@ -115,6 +116,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
               onTab={shift => shift ? outdent(i) : indent(i)} />
             {children.length > 0 && <Progress done={children.filter(c => c.completed).length} total={children.length} />}
             <RoutineMark item={i} />
+            <AIStateChip item={i} />
             <TagEditor tags={i.tags} onChange={tags => store.updateItem(i.id, {tags})} />
             <span className="spacer" />
             <span className="row-meta">
