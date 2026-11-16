@@ -163,6 +163,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     i => tasks.timesheet(i.person ? personId(i.person) : me(), monday(i.week)));
   tool('set_day_time', 'Set the hours logged on one task for one day (replaces that day\'s entries; 0 clears).', {item: z.string(), date: z.string(), hours: z.number().min(0).max(24), person: z.string().optional()}, false,
     i => tasks.setDayMinutes(i.person ? personId(i.person) : me(), tasks.findItem(i.item).id, i.date, i.hours * 60));
+  tool('update_time_entry', 'Fix a time entry by id (from list_time): a timed entry takes a new start and end (ISO times) or minutes (the end moves); an entry added as minutes takes new minutes or a new start; a running timer takes a new start. Note too.',
+    {id: z.string(), start: z.string().optional(), end: z.string().optional(), minutes: z.number().positive().optional(), note: z.string().nullable().optional()}, false,
+    i => { const {id, ...patch} = i; return tasks.updateTime(id, patch); });
   tool('delete_time_entry', 'Delete a time entry by id.', {id: z.string()}, false, i => { tasks.deleteTime(i.id); return {ok: true}; });
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
     i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : me(), minutes: i.minutes, note: i.note, date: i.date}));
@@ -245,6 +248,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
      blocks: z.array(entry.extend({start: z.string(), minutes: z.number(), at: z.string().nullable().optional(), remind: z.boolean().optional(), remindBefore: z.number().optional().describe('With remind: minutes before the start the reminder comes (0 at the start)'), links: z.array(z.string()).optional().describe('Tasks (ids or keys) done in or to discuss in this box, like a meeting'), eventId: z.string().nullable().optional().describe('Calendar event this box stands for'), note: z.string().optional()})).optional(),
      dayStart: z.number().optional(), dayEnd: z.number().optional(), slot: z.number().optional().describe('15, 30 or 60'), tz: z.string().optional().describe('Time zone the day is planned in, like America/Denver')}, false,
     i => { const {date, top, dump, blocks, ...rest} = i; return tasks.updateDayPlan(me(), date ?? tasks.today(), {...rest, ...(top ? {top: top.map(toEntry)} : {}), ...(dump ? {dump: dump.map(toEntry)} : {}), ...(blocks ? {blocks: blocks.map(toEntry)} : {})} as any); });
+  tool('check_day_entry', 'Check a line of your day plan off everywhere it shows: the same thing in the top 3, the brain dump and the time boxes (same task, or the same text). A line that is a task completes the task too. done false puts it back; leave done out to flip it.',
+    {date: z.string().optional(), id: z.string().describe('Id of a top 3, brain dump or time box entry (from get_day_plan)'), done: z.boolean().optional()}, false,
+    i => tasks.checkDayEntry(me(), i.date ?? tasks.today(), i.id, i.done, actor));
   tool('fit_day_to_time', 'Fit your day plan to the time you logged with timers: each task box moves to when you worked on it (separate sessions become separate boxes), work logged with no box gets one, and the planned time is kept on each box. upTo (an ISO time, like now) fits only the part of the day so far. Returns planned vs logged minutes.',
     {date: z.string().optional(), upTo: z.string().optional().describe('ISO time; leave out for the whole day'), offsetMinutes: z.number().optional().describe('Your offset from UTC in minutes')}, false,
     i => tasks.fitDayToLogged(me(), i.date ?? tasks.today(), {upTo: i.upTo ?? null, offsetMinutes: i.offsetMinutes}));

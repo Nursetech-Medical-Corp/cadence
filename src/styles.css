@@ -1104,6 +1104,12 @@ tr:hover .fc-add, .props .fc-add { opacity: 1; }
 .time-entries { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow: auto; }
 .time-person { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 0; background: none; font: inherit; padding: 4px 2px; cursor: pointer; color: var(--text); }
 .time-entry { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px; margin-left: 20px; border: 1px solid var(--line); border-radius: 6px; }
+.time-entry .icon { opacity: .55; }
+.time-entry:hover .icon { opacity: 1; }
+.time-edit { display: flex; flex-direction: column; gap: 6px; font-size: 12px; padding: 6px 8px; margin-left: 20px; border: 1px solid var(--accent); border-radius: 6px; }
+.time-edit .time-when { flex-wrap: wrap; }
+.time-edit .time-dur-in { width: 90px; }
+.time-actions { gap: 6px; }
 
 .time-cell.idle .time-play { opacity: 0; }
 .card:hover .time-cell.idle .time-play, .row:hover .time-cell.idle .time-play { opacity: 1; }

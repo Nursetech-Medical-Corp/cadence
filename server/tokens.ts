@@ -5,6 +5,7 @@ import type {Db} from './db.ts';
 import type {Tasks} from './service.ts';
 import {settingsChanged, areaLocked, capsFor, type Access, type Cap} from './auth.ts';
 import {WRITE_OPS, approvedSop, needsReview, propose} from './agents.ts';
+import {dayEntryTask} from './dayplan.ts';
 
 export function migrateTokens(db: Db) {
   db.exec('create table if not exists tokens (id text primary key, person text not null, name text not null, hash text not null unique, created text not null, last_used text)');
@@ -61,6 +62,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     dayPlan: (person) => self(person, 'read day plans'),
     updateDayPlan: (person) => self(person, 'plan days'),
     autoSchedule: (person) => self(person, 'plan days'),
+    checkDayEntry: (person, date, id) => { self(person, 'plan days'); const t = dayEntryTask(tasks, person, date, id); if (t) need(projOfItem(t), 'edit'); },
     fitDayToLogged: (person) => self(person, 'plan days'),
     createSubspace: (pid) => need(pid, 'settings'),
     boardsBySop: (o) => { if (o) o.visible = tasks.listProjects().filter(p => sees(p.id) && caps(p.id).has('edit')).map(p => p.id); else throw new Forbidden('Pass options'); },
@@ -90,6 +92,7 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     stopTimer: (person) => self(person, 'stop timers'),
     timesheet: (person) => selfOrAdmin(person, 'see timesheets'),
     deleteTime: (eid) => { const e = tasks.timeEntry(eid); need(projOfItem(e.itemId), 'edit'); selfOrAdmin(e.person, 'delete time'); },
+    updateTime: (eid) => { const e = tasks.timeEntry(eid); need(projOfItem(e.itemId), 'edit'); selfOrAdmin(e.person, 'change time'); },
     listNotifications: (person) => self(person, 'read notifications'),
     markRead: (person) => self(person, 'read notifications'),
     emailAlerts: (person) => self(person, 'read email alerts'),

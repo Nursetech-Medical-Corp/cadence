@@ -1,7 +1,7 @@
 // Time tracking on any task: a play/stop button with a live clock in a "Time tracked" column, and a box to
 // log time by duration ("3h 20m") or by start and end, with the entries grouped by person.
 import {useEffect, useMemo, useState} from 'react';
-import {ChevronDown, ChevronRight, Play, Square, Trash2} from 'lucide-react';
+import {ChevronDown, ChevronRight, Pencil, Play, Square, Trash2} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
 import {api, fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {parseDuration} from './dates.ts';
@@ -18,7 +18,52 @@ const nowHHMM = () => { const d = new Date(); return toHHMM(Math.floor((d.getHou
 /** Short spans show seconds (timers record them); totals elsewhere round down to minutes. */
 const shortSpan = (min: number) => min < 1 ? `${Math.round(min * 60)}s` : fmtMinutes(min);
 const clockOf = (iso: string, secs: boolean) => new Date(iso).toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit', ...(secs ? {second: '2-digit'} : {})});
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+const when = (iso: string, secs = false) => new Date(iso).toLocaleString(undefined, {weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(secs ? {second: '2-digit'} : {})});
+const dayOnly = (iso: string) => new Date(iso).toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
+/** An entry added as minutes has no start and stop time (its end is its start). */
+export const addedAsMinutes = (e: TimeEntry) => !!e.end && e.end === e.start;
+/** How an entry reads in a list: day and times (seconds for short timer runs), or the day for one added as minutes. */
+export const entryWhen = (e: TimeEntry) => {
+  if (addedAsMinutes(e)) return `${dayOnly(e.start)}, added as time`;
+  const secs = !!e.end && (e.minutes ?? 0) < 10;
+  return `${when(e.start, secs)}${e.end ? ` to ${clockOf(e.end, secs)}` : ''}`;
+};
+const localParts = (iso: string) => { const d = new Date(iso); return {date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}`}; };
+
+/**
+ * Edit one time entry in place: a timed entry by day, start and end; an entry added as minutes by day and length;
+ * a running timer by its start. A time left as it was keeps the seconds the timer recorded.
+ */
+export function TimeEntryEdit({entry, onDone}: {entry: TimeEntry; onDone: (saved: boolean) => void}) {
+  const byHand = addedAsMinutes(entry), running = !entry.end;
+  const s0 = localParts(entry.start), e0 = entry.end ? localParts(entry.end) : null;
+  const [date, setDate] = useState(s0.date), [from, setFrom] = useState(s0.time), [to, setTo] = useState(e0?.time ?? '');
+  const [dur, setDur] = useState(byHand ? fmtMinutes(entry.minutes ?? 0) : ''), [note, setNote] = useState(entry.note ?? ''), [err, setErr] = useState('');
+  const startIso = date === s0.date && from === s0.time ? entry.start : new Date(`${date}T${from}:00`).toISOString();
+  // The end is on the start's day, or the next day when it is earlier than the start (past midnight).
+  const endIso = running || byHand || !to ? null : date === s0.date && to === e0?.time && from === s0.time ? entry.end! : (() => {
+    const e = new Date(`${date}T${to}:00`); if (e.getTime() <= Date.parse(startIso)) e.setDate(e.getDate() + 1); return e.toISOString(); })();
+  const span = endIso ? (Date.parse(endIso) - Date.parse(startIso)) / 60000 : byHand ? parseDuration(dur) : 0;
+  const save = async () => {
+    const body: Record<string, unknown> = {start: startIso, note: note.trim() || null};
+    if (byHand) { const m = parseDuration(dur); if (!(m > 0 && m <= 1440)) { setErr('Enter a time like 1h 20m'); return; } body.minutes = m; }
+    else if (!running) { if (!endIso) { setErr('Pick an end time'); return; } body.end = endIso; }
+    try { await api(`/time/${entry.id}`, {method: 'PATCH', body}); onDone(true); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  };
+  const keys = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); void save(); } if (e.key === 'Escape') { e.stopPropagation(); onDone(false); } };
+  return <div className="time-edit" onKeyDown={keys}>
+    <div className="time-when">
+      <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} title="Day" />
+      <input type="time" value={from} onChange={e => e.target.value && setFrom(e.target.value)} title="Start" />
+      {!running && !byHand && <><span className="muted">to</span><input type="time" value={to} onChange={e => setTo(e.target.value)} title="End" /></>}
+      {byHand && <input className="time-dur-in" value={dur} onChange={e => setDur(e.target.value)} placeholder="1h 20m" title="How long" />}
+      {running ? <span className="muted small">running</span> : span > 0 && !byHand ? <span className="muted small">{shortSpan(span)}</span> : null}
+    </div>
+    <input className="time-note" placeholder="Notes" value={note} onChange={e => setNote(e.target.value)} />
+    {err && <div className="small" style={{color: 'var(--danger)'}}>{err}</div>}
+    <div className="time-actions"><button className="btn ghost small" onClick={() => onDone(false)}>Cancel</button><button className="btn primary small" onClick={save}>Save</button></div>
+  </div>;
+}
 
 /** Time since start, counting up every second. Only this re-renders while a timer runs. */
 export function Elapsed({start, className}: {start: string; className?: string}) {
@@ -119,6 +164,7 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
     return [...m.entries()];
   }, [entries]);
   const [closed, setClosed] = useState<string[]>([]);
+  const [editing, setEditing] = useState<string | null>(null);
   const times = (keep: string) => QUARTERS.includes(keep) ? QUARTERS : [...QUARTERS, keep].sort();
 
   return (
@@ -154,10 +200,11 @@ export function TimeBox({item, store}: {item: Item; store: Store}) {
               {shut ? <ChevronRight size={13} /> : <ChevronDown size={13} />}<Avatar person={p} size={18} /><span className="grow">{p?.name ?? 'Someone'}</span>
               <b>{fmtMinutes(list.reduce((a, e) => a + (e.minutes ?? 0), 0))}</b>
             </button>
-            {!shut && list.map(e => (
-              <div key={e.id} className="time-entry">
-                <span className="grow">{e.kind === 'review' && <span className="tag review-tag">review</span>} {when(e.start)}{(e.minutes ?? 0) < 10 ? `:${new Date(e.start).getSeconds().toString().padStart(2, '0')}` : ''}{e.end ? ` to ${clockOf(e.end, (e.minutes ?? 0) < 10)}` : ''}{e.note && <span className="muted"> · {e.note}</span>}</span>
+            {!shut && list.map(e => editing === e.id ? <TimeEntryEdit key={e.id} entry={e} onDone={saved => { setEditing(null); if (saved) load(); }} /> : (
+              <div key={e.id} className="time-entry" onDoubleClick={() => setEditing(e.id)} title="Double-click to edit">
+                <span className="grow">{e.kind === 'review' && <span className="tag review-tag">review</span>} {entryWhen(e)}{e.note && <span className="muted"> · {e.note}</span>}</span>
                 <b>{e.end ? shortSpan(e.minutes ?? 0) : <span className="time-live">running</span>}</b>
+                <button className="icon" title={e.end ? 'Edit this entry: day, start, end, notes' : 'Edit when this timer started'} onClick={() => setEditing(e.id)}><Pencil size={13} /></button>
                 {e.end && <button className="icon" title="Delete this entry" onClick={() => remove(e.id)}><Trash2 size={13} /></button>}
               </div>
             ))}

@@ -640,6 +640,59 @@ test('time: log by start and end, totals per item for the column, bad ranges ref
   assert.throws(() => t.logTime({itemId: i.id, person: dave.id, minutes: 0}), /positive/);
 });
 
+test('time: entries can be fixed (start, end, minutes, note); bad changes refused', () => {
+  const {t, dave, p} = setup();
+  const i = t.createItem({projectId: p.id, title: 'Timed'}, dave.id);
+  const e = t.logTime({itemId: i.id, person: dave.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:30:00.000Z'});
+  let x = t.updateTime(e.id, {start: '2026-11-10T15:30:00.000Z'});
+  assert.deepEqual([x.end, x.minutes], ['2026-11-10T16:30:00.000Z', 60], 'a new start keeps the end; minutes follow');
+  x = t.updateTime(e.id, {end: '2026-11-10T16:45:30.000Z', note: 'call notes'});
+  assert.deepEqual([x.minutes, x.note], [75.5, 'call notes'], 'seconds are kept');
+  x = t.updateTime(e.id, {minutes: 20});
+  assert.equal(x.end, '2026-11-10T15:50:00.000Z', 'minutes move the end');
+  assert.equal(t.updateTime(e.id, {note: '  '}).note, null, 'an empty note clears it');
+  assert.equal(t.timeTotals(i.id)[i.id], 20, 'totals follow the edit');
+  assert.throws(() => t.updateTime(e.id, {end: '2026-11-10T15:00:00.000Z'}), /after the start/);
+  assert.throws(() => t.updateTime(e.id, {start: 'soon'}), /must be a time/);
+  // Added as minutes: change the minutes or the day, not an end.
+  const m = t.logTime({itemId: i.id, person: dave.id, minutes: 30, date: '2026-11-11'});
+  x = t.updateTime(m.id, {minutes: 45, start: '2026-11-12T16:00:00.000Z'});
+  assert.deepEqual([x.minutes, x.start, x.end], [45, '2026-11-12T16:00:00.000Z', '2026-11-12T16:00:00.000Z']);
+  assert.throws(() => t.updateTime(m.id, {end: '2026-11-12T18:00:00.000Z'}), /added as minutes/);
+  assert.throws(() => t.updateTime(m.id, {minutes: 0}), /more than 0/);
+  // A running timer: only its start (not in the future) and note.
+  const run = t.startTimer(i.id, dave.id);
+  const earlier = new Date(Date.now() - 20 * 60_000).toISOString();
+  assert.equal(t.updateTime(run.id, {start: earlier}).start, earlier, 'forgot to start the timer: move its start back');
+  assert.equal(t.runningTimer(dave.id)!.start, earlier);
+  assert.throws(() => t.updateTime(run.id, {end: new Date().toISOString()}), /Stop the timer first/);
+  assert.throws(() => t.updateTime(run.id, {start: new Date(Date.now() + 3600_000).toISOString()}), /future/);
+  assert.throws(() => t.updateTime('missing', {note: 'x'}), /not found/);
+});
+
+test('time: a token fixes only its own entries (or an admin), update_time_entry over MCP', async () => {
+  const {guarded} = await import('../server/tokens.ts');
+  const {createMcpServer} = await import('../server/mcp.ts');
+  const {Client} = await import('@modelcontextprotocol/sdk/client/index.js');
+  const {InMemoryTransport} = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const {migrate} = await import('../server/auth.ts');
+  const {t, dave, p} = setup();
+  migrate(t.db);
+  const kim = t.createPerson({name: 'Kim'});
+  t.db.prepare('update people set admin = 0 where id = ?').run(kim.id);
+  const i = t.createItem({projectId: p.id, title: 'Timed'}, dave.id);
+  const mine = t.logTime({itemId: i.id, person: kim.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:00:00.000Z'});
+  const daves = t.logTime({itemId: i.id, person: dave.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:00:00.000Z'});
+  assert.throws(() => guarded(t, kim.id).updateTime(daves.id, {note: 'x'}), /others/);
+  const server = createMcpServer(guarded(t, kim.id), kim.id);
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  const client = new Client({name: 'test', version: '1'});
+  await Promise.all([server.connect(a), client.connect(b)]);
+  const r = await client.callTool({name: 'update_time_entry', arguments: {id: mine.id, end: '2026-11-10T15:45:00.000Z', note: 'fixed'}});
+  assert.ok(!r.isError, (r.content as {text: string}[])[0].text);
+  assert.deepEqual([t.timeEntry(mine.id).minutes, t.timeEntry(mine.id).note], [45, 'fixed']);
+});
+
 test('timing: AI work is timed from its first step to submit, reviews are timed, seconds are kept', async () => {
   const {migrateAiWork} = await import('../server/aiwork.ts');
   const {t, dave, p} = setup();

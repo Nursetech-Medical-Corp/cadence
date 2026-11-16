@@ -71,6 +71,18 @@ test('sign in, roles and per-project access are enforced by the API', async () =
     assert.ok(!Object.values(mw2).flat().some((i: any) => i.projectId === other.id), 'my-work hides no-access projects');
     tasks.logTime({itemId: hidden.id, person: admin.id, minutes: 30});
     assert.ok(!(await call('/time', {cookie: v})).json.some((t: any) => t.itemId === hidden.id), 'time hides no-access projects');
+    // Fixing time entries: someone else's needs an admin; your own is yours to fix.
+    const adminsEntry = tasks.logTime({itemId: it3.id, person: admin.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:00:00.000Z'});
+    const viewersEntry = tasks.logTime({itemId: it3.id, person: viewer.id, start: '2026-11-10T15:00:00.000Z', end: '2026-11-10T16:00:00.000Z'});
+    assert.equal((await call(`/time/${adminsEntry.id}`, {method: 'PATCH', body: {note: 'x'}, cookie: v})).status, 403, "a viewer cannot fix someone else's time");
+    const fixed = await call(`/time/${viewersEntry.id}`, {method: 'PATCH', body: {end: '2026-11-10T15:30:00.000Z', note: 'short'}, cookie: v});
+    assert.deepEqual([fixed.status, fixed.json.minutes, fixed.json.note], [200, 30, 'short'], 'your own entry');
+    assert.equal((await call(`/time/${adminsEntry.id}`, {method: 'PATCH', body: {minutes: 45}, cookie: a})).json.minutes, 45, 'an admin fixes anyone');
+    // Checking off a day plan line tied to a task needs edit in its space (the viewer only comments in this one).
+    await call(`/day/2026-11-10`, {method: 'PUT', body: {top: [{id: 'v1', text: '', itemId: it3.id}], dump: [{id: 'v2', text: 'plain line'}]}, cookie: v});
+    assert.equal((await call(`/day/2026-11-10/check`, {method: 'POST', body: {id: 'v1'}, cookie: v})).status, 403, 'a viewer cannot complete a task by checking it off');
+    assert.ok(!tasks.item(it3.id).completed);
+    assert.equal((await call(`/day/2026-11-10/check`, {method: 'POST', body: {id: 'v2'}, cookie: v})).json.dump[0].done, true, 'a plain line is checked off');
     const ics = await (await fetch(base + `/calendar.ics?person=${viewer.id}`, {headers: {cookie: v}})).text();
     assert.ok(!ics.includes(hidden.title), 'calendar hides no-access projects');
     assert.equal((await call(`/items/${it3.id}`, {method: 'PATCH', body: {deps: [hidden.id]}, cookie: a})).status, 200, 'admin may link');

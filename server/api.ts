@@ -5,7 +5,7 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {listSopLinks, migrateSops, setSopLinks} from './sops.ts';
 import {boardByKey, migrateBoards, startBoards} from './boards.ts';
-import {dayPlanReminders, migrateDayPlans} from './dayplan.ts';
+import {dayEntryTask, dayPlanReminders, migrateDayPlans} from './dayplan.ts';
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
@@ -1003,6 +1003,12 @@ If you did not ask for it, ignore this email.`)
         if (b === 'running' && m === 'GET') return send(res, 200, person ? tasks.runningTimer(person) : null);
         if (b === 'start' && m === 'POST') { need(tasks.findItem(body.itemId).projectId, 'edit'); return send(res, 201, tasks.startTimer(body.itemId, ws.requireLogin ? actor! : body.person ?? person, body.kind === 'review' ? 'review' : 'work')); }
         if (b === 'stop' && m === 'POST') return send(res, 200, tasks.stopTimer(ws.requireLogin ? actor! : body.person ?? person, body.note));
+        if (b && m === 'PATCH') {
+          const e = tasks.timeEntry(b);
+          if (e.person !== actor) { need(tasks.item(e.itemId).projectId, 'edit'); needAdmin(); }
+          const patch = Object.fromEntries(['start', 'end', 'minutes', 'note'].filter(k => body[k] !== undefined).map(k => [k, body[k]]));
+          return send(res, 200, tasks.updateTime(b, patch));
+        }
         if (b && m === 'DELETE') {
           const e = tasks.timeEntry(b);
           if (e.person !== actor) { need(tasks.item(e.itemId).projectId, 'edit'); needAdmin(); }
@@ -1221,6 +1227,15 @@ If you did not ask for it, ignore this email.`)
           for (const e of [...(patch.top ?? []), ...(patch.dump ?? []), ...(patch.blocks ?? [])] as {itemId?: string}[]) if (e.itemId && !seesItem(tasks.findItem(e.itemId).id)) throw new NotFound('Task not found');
           if (held('updateDayPlan', [person, date, patch])) return send(res, 202, propose(tasks, actor!, 'updateDayPlan', [person, date, patch]));
           return send(res, 200, tasks.updateDayPlan(person, date, patch));
+        }
+        // Check a line off (or back on) everywhere it shows on the day, and its task.
+        if (b && c === 'check' && m === 'POST') {
+          const id = String(body.id ?? ''), done = typeof body.done === 'boolean' ? body.done : undefined;
+          if (!id) throw new Invalid('Send the id of the line to check off');
+          const t = dayEntryTask(tasks, person, date, id);
+          if (t) need(tasks.item(t).projectId, 'edit');
+          if (held('checkDayEntry', [person, date, id, done, actor])) return send(res, 202, propose(tasks, actor!, 'checkDayEntry', [person, date, id, done, actor]));
+          return send(res, 200, tasks.checkDayEntry(person, date, id, done, actor));
         }
         // Fit the boxes to time logged with timers, up to a moment (now) or the whole day.
         if (b && c === 'fit' && m === 'POST') {

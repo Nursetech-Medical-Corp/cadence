@@ -72,7 +72,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Write | `create_item`, `quick_add`, `update_item`, `complete_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
 | Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
-| Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `update_time_entry` (fix start, end, minutes or note), `delete_time_entry` |
 | Team | `merge_people` (admins: merge a duplicate team member row into another) |
 | Inbox | `my_notifications`, `mark_notifications_read`, `email_alerts` (read or set which notifications also come by email) |
 | Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations`, `trigger_automation` |
@@ -85,7 +85,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
 | SOP links | `list_sop_links`, `set_sop_links` (admins) |
 | Sub-spaces | `create_subspace` (tasks, pipeline or contact list under a space); `update_project` takes `parent` and `records` |
-| Day planner | `get_day_plan`, `update_day_plan` (top 3, brain dump, time boxes with reminders), `schedule_day` (fill the day from a time), `fit_day_to_time` (boxes to logged time, up to now or all day) |
+| Day planner | `get_day_plan`, `update_day_plan` (top 3, brain dump, time boxes with reminders), `check_day_entry` (check a line off everywhere it shows, and its task), `schedule_day` (fill the day from a time), `fit_day_to_time` (boxes to logged time, up to now or all day) |
 | Whiteboards | `list_boards`, `get_board`, `create_board`, `update_board` (add, change, remove nodes and connections), `delete_board`, `board_from_items` (routines by SOP, a tag, a parent, items), `boards_by_sop` (one board per SOP; `ai_draw` adds a task for an agent to draw each flow), `board_conventions` (drawing rules), `request_board_change` (a task linked to a board plus a sticky note), `import_board` (from Claude Whiteboards), `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` (cancel, retry, skip) |
 | Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |
 | Agents | `agent_inbox`, `suggest_work`, `my_proposals` |
