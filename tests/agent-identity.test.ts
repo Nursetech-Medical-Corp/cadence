@@ -108,3 +108,28 @@ test('signing: password once per session, every time, or never; several at once;
   assert.equal((t.item(job.id).fields.review as {state: string}).state, 'approved', 'done hands it in and approves');
   assert.throws(() => t.moveWork(job.id, david.id, 'review'), /cannot move/);
 });
+
+test('merge a duplicate row: an AI that joined as a person and was added again as an agent', async () => {
+  const {migrateApprovals} = await import('../server/approvals.ts');
+  const {t, david} = setup();
+  migrateApprovals(t);
+  const joeyPerson = t.createPerson({name: 'Joey', email: 'joey@muse.test'});
+  const joeyAgent = addAgent(t, joeyPerson.id === david.id ? david.id : joeyPerson.id, {name: 'Joey bot'});
+  const p = t.createProject({name: 'Ops', key: 'OPS'});
+  const job = t.createItem({projectId: p.id, title: 'Sweep', assignees: [david.id, joeyAgent.id, joeyPerson.id], fields: {worker: 'ai'}}, david.id);
+  t.addComment(job.id, joeyAgent.id, 'Working on it');
+  makeAgent(t, joeyPerson.id, david.id);
+  const r = t.mergePeople(joeyAgent.id, joeyPerson.id, david.id);
+  assert.equal(r.kept, joeyPerson.id);
+  assert.deepEqual(t.item(job.id).assignees, [david.id, joeyPerson.id], 'assignees merged, no duplicate');
+  const row = t.db.prepare('select kind, owner, active from people where id = ?').get(joeyPerson.id) as {kind: string; owner: string; active: number};
+  assert.deepEqual({...row}, {kind: 'ai', owner: david.id, active: 1});
+  assert.equal((t.db.prepare('select active from people where id = ?').get(joeyAgent.id) as {active: number}).active, 0, 'the merged row is deactivated, not deleted');
+  assert.equal((t.db.prepare('select count(*) as n from comments where author = ?').get(joeyPerson.id) as {n: number}).n, 1, 'comments move');
+  assert.throws(() => t.mergePeople(david.id, david.id, david.id), /different/);
+
+  // Work an agent did by assignment (no claim): asking for approval hands it in; dragging works too.
+  const done = t.createItem({projectId: p.id, title: 'Report', assignees: [joeyPerson.id], fields: {worker: 'ai'}}, david.id);
+  t.moveWork(done.id, david.id, 'review');
+  assert.equal((t.item(done.id).fields.review as {state: string}).state, 'submitted', 'an assigned agent\'s work can be moved to review');
+});

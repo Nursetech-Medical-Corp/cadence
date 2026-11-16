@@ -76,6 +76,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   tool('get_guide', 'Read the guide for AI agents: concepts, field meanings, quick-add syntax, recipes for common jobs. Read this first.', {}, true,
     () => { const w = getWorkspace(tasks.db); return {guide: readGuide(), agentGuide: w.agentGuide.trim() || DEFAULT_AGENT_GUIDE, ...(w.aiRules ? {workspaceRules: w.aiRules} : {})}; });
   server.registerResource('guide', 'tasks://guide', {mimeType: 'text/markdown', description: 'How to use this task app as an AI agent'}, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: readGuide()}]}));
+  tool('merge_people', 'Admins: merge a duplicate team member row into another (the same AI or person added twice). Tasks, comments, time, approvals, keys and owned agents move to the kept row; the other is deactivated, never deleted.',
+    {from: z.string().describe('Row to merge away (name or id)'), into: z.string().describe('Row to keep (name or id)')}, false,
+    i => tasks.mergePeople(personId(i.from), personId(i.into), me()));
   tool('get_workspace', 'List projects (with statuses, types, custom fields) and people.', {}, true,
     () => ({projects: tasks.listProjects(), people: people(), today: tasks.today(), actingAs: actor}));
   tool('list_job_roles', 'Job roles (company roles like Sales rep or R&D engineer), the spaces each one opens and at which permission level, the permission levels, and who holds which job roles. Read only: an admin changes access on the Team page.', {}, true,

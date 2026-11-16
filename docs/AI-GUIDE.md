@@ -82,7 +82,7 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Automations | Space settings, Automations | `set_automations`, `trigger_automation` |
 | Inbound webhooks | `POST /api/hooks/in/<tool name>` with a Bearer token runs any tool; `trigger` runs rules waiting for a key | every tool, plus `complete_item` |
 | Approvals | Approvals page | `request_approval`, `list_approvals` |
-| Job roles and access | Team page: Job roles matrix (company roles by space; drag to reorder), People (job roles shown and set per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
+| Job roles and access | Team page: Job roles matrix (company roles by space; drag to reorder), People (job roles shown and set per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only), `merge_people` |
 | Personal workspaces | Workspace switcher: New workspace (any signed-in member, unless the server owner turns it off) | none (app only) |
 
 UI-only settings (no tool, by design): sign-in, permission levels, job roles and who has them, company domain, access rules and tokens; each person's own layout and new-item defaults; feature switches.
@@ -135,6 +135,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - Signing approvals: the workspace chooses how often a password is asked (`signPassword`: `session` once per 8 hours, the default; `every`; `never`). Sign several at once on the Approvals page (REST `POST /api/approvals/sign-many` `{ids, decision, comment?, password?}`, `GET /api/approvals/needs`). Each signature records how identity was confirmed (`auth`: password, session, none). Tokens and agents never sign.
 - Agent rules, all editable by admins on the Team page (Rules for AI agents): base rules (sent every run, `agentBaseRules`; enforcement stays in code), workspace rules (`aiRules`, every run), the onboarding guide (`agentGuide`, returned by `get_guide` as `agentGuide`, read once), each agent's own rules, and drawing rules. Keep run-time rules short: they are read every run.
 - Scanning without rescanning: full scan once, then `agent_inbox(since)` and `changes_since(since)` each run; stop when both are empty; keep a ledger per task; reconcile counts weekly. The onboarding guide has the details.
+- Duplicate rows (the same AI joined by invite and was added again as an agent): admins press Merge duplicate on the Team page, or `merge_people` (REST `POST /api/team/:id/merge` `{into}`). Tasks, comments, time, approvals, keys and owned agents move to the kept row; the other is deactivated. Agents never own agents.
 - Connect Claude (OAuth): on the consent page the person picks who Claude works as: its own AI agent they own (default; existing or new) or themselves. A connected app can be switched later on the Team page (REST `POST /api/auth/apps/:client/as` `{workspace, agent: id | 'new' | 'me', name?}`). Each card is the real task, not a copy.
 - Every board and list shows the same task with a small chip while AI work is open: Claim, AI working, Review, Sent back. Click it to open AI work.
 
