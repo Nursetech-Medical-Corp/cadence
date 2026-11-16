@@ -1,4 +1,5 @@
 // Shared by server, MCP and UI.
+import type {Hook} from './hooks.ts';
 
 export type StatusCategory = 'todo' | 'doing' | 'done';
 export type Status = {id: string; name: string; category: StatusCategory; color: string; wip?: number | null};
@@ -46,7 +47,8 @@ export type ProjectSettings = {
   cover?: Cover | null;
   inherit: InheritKey[];
   automations: Rule[];
-  webhooks: {id: string; url: string; events: string[]}[];
+  /** Endpoints that receive this space's events (src/hooks.ts). Older ones are {id, url, events} only. */
+  webhooks: (Partial<Hook> & {id: string; url: string; events: string[]})[];
   autoRollover: boolean;           // move unfinished work when a sprint ends
   /** Who can do what here: a default role for everyone (or 'inherit' their workspace role, or 'none'), plus per-person roles. */
   access?: {default: string; members: Record<string, string>; private?: boolean};
@@ -62,6 +64,11 @@ export type ProjectSettings = {
    *  scope makes it a built-in space that is always there: 'routines' (every repeating item, paused and waiting ones too)
    *  or 'parked' (archived and snoozed items). Built-in spaces cannot be deleted. */
   rollup?: {include: string[] | null; scope?: 'routines' | 'parked'};
+  /** Sub-space: shown under this parent space in the sidebar. */
+  parent?: string | null;
+  /** A list space (a pipeline of investors, a contact list): its entries are records, not tasks, so they stay out of
+   *  All spaces and other rollups (unless a rollup picks the space by name), My work, the day planner and due reminders. */
+  records?: boolean;
 };
 
 export type TypeRule = {
@@ -77,7 +84,16 @@ export type Trigger =
   | {kind: 'status'; to: string}            // status changes to
   | {kind: 'assigned'}                      // someone is added as assignee
   | {kind: 'completed'}
-  | {kind: 'due-passed'};                   // checked hourly
+  | {kind: 'due-passed'}                    // checked hourly, once per due date
+  | {kind: 'due-soon'; days: number}        // due within this many days (hourly, once per due date)
+  | {kind: 'due-today'}
+  | {kind: 'overdue-by'; days: number}      // this many days past due
+  | {kind: 'start-reached'}                 // start date is today or earlier
+  | {kind: 'unassigned'}                    // someone is removed as assignee
+  | {kind: 'comment-added'}
+  | {kind: 'review'; to: string}            // AI review state reached: claimed, accepted, submitted, changes, redo, approved, declined, discarded
+  | {kind: 'routine-resumed'}               // a waiting or paused routine starts again
+  | {kind: 'webhook-received'; key: string}; // POST /api/hooks/in/trigger with this key
 export type Condition = {field: 'type' | 'priority' | 'tag' | 'assignee' | 'parent-type'; value: string};
 export type Action =
   | {kind: 'status'; value: string}
@@ -88,7 +104,9 @@ export type Action =
   | {kind: 'due'; value: number}            // days from today
   | {kind: 'notify'; value: string}         // person id, or "assignees" / "creator"
   | {kind: 'template'; value: string}       // add subitems from an item template
-  | {kind: 'parent-status'; value: string}; // set the parent's status (e.g. close story when all tasks close)
+  | {kind: 'parent-status'; value: string}  // set the parent's status (e.g. close story when all tasks close)
+  | {kind: 'webhook'; value: string; secret?: string; hasSecret?: boolean} // POST the item to a URL (signed when a secret is set)
+  | {kind: 'routine-resume'};               // start a waiting or paused routine now
 export type Rule = {id: string; name: string; enabled: boolean; trigger: Trigger; conditions: Condition[]; actions: Action[]; allChildrenDone?: boolean};
 
 export type Template = {id: string; kind: 'item' | 'project' | 'view'; name: string; projectId: string | null; data: unknown; created: string};
@@ -123,6 +141,7 @@ export const NOTIFY_KINDS = [
   {kind: 'overdue', label: 'Overdue'},
   {kind: 'timer', label: 'Timer left running'},
   {kind: 'automation', label: 'Automations'},
+  {kind: 'reminder', label: 'Day planner reminders'},
 ] as const;
 
 export type ItemPatch = Partial<Pick<Item,
@@ -144,6 +163,8 @@ export type ChangeEvent =
   | {kind: 'events'}
   | {kind: 'proposals'}
   | {kind: 'sops'}
+  | {kind: 'boards'}
+  | {kind: 'dayplan'; person: string}
   | {kind: 'refresh'};
 
 export type Sprint = {
@@ -152,7 +173,7 @@ export type Sprint = {
   created: string;
 };
 
-export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines';
+export type ViewKind = 'list' | 'table' | 'board' | 'gantt' | 'backlog' | 'sprint' | 'calendar' | 'workload' | 'files' | 'routines' | 'whiteboard';
 export type ViewConfig = {
   text?: string; assignee?: string; hideDone?: boolean; hideRepeats?: boolean; types?: string[]; sprint?: string;
   groupBy?: 'status' | 'priority' | 'assignee' | 'type' | 'sprint';
@@ -172,6 +193,8 @@ export type ViewConfig = {
   /** List rows: the order of the priority, assignee and status fields. Time and due date keep their place. */
   rowFields?: string[];
   critical?: boolean; baselines?: {name: string; at: string; dates: Record<string, [string | null, string | null]>}[]; baseline?: number | null;
+  /** Whiteboard view: the board it shows. */
+  board?: string;
   zoom?: 'day' | 'week' | 'month'; calHours?: 'week' | 'day' | null; colorBy?: 'type' | 'assignee' | 'status' | 'priority'; level?: string; sort?: {col: string; dir: 1 | -1} | null; sorts?: {col: string; dir: 1 | -1}[];
 };
 /** Filters: a group of rules joined by AND or OR; a rule can itself be a group (one level of nesting in the UI). */

@@ -69,22 +69,26 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Area | Tools |
 | --- | --- |
 | Read | `get_guide`, `get_workspace`, `list_job_roles` (job roles, the spaces and levels each opens, who has them; names only for non-admins), `search_items`, `get_item`, `my_work`, `project_summary`, `changes_since`, `history` |
-| Write | `create_item`, `quick_add`, `update_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
+| Write | `create_item`, `quick_add`, `update_item`, `complete_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
 | Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
 | Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
 | Inbox | `my_notifications`, `mark_notifications_read` |
-| Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations` |
+| Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations`, `trigger_automation` |
 | Sprints | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report` |
 | Planning | `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Templates | `list_templates`, `get_template`, `create_template`, `update_template`, `delete_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack` |
-| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim` |
+| AI work loop | `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim` |
 | Approvals | `request_approval`, `list_approvals` |
 | Routines | `list_routines` (state: on, delayed, waiting, paused), `set_routine` (skip, delay, wait, pause, resume, end; one item, many, or a whole SOP by tag). Auto-job routines take AI agents only. The built-in Routines space (scope `routines`) shows them in every view |
 | Archive and later | `archive_item` (idea, parked, rejected), `snooze_item`, `restore_item`, `list_parked`. The built-in Archive and later space (scope `parked`) shows them |
 | SOP links | `list_sop_links`, `set_sop_links` (admins) |
+| Sub-spaces | `create_subspace` (tasks, pipeline or contact list under a space); `update_project` takes `parent` and `records` |
+| Day planner | `get_day_plan`, `update_day_plan` (top 3, brain dump, time boxes with reminders), `schedule_day` (fill the day from a time), `fit_day_to_time` (boxes to logged time, up to now or all day) |
+| Whiteboards | `list_boards`, `get_board`, `create_board`, `update_board` (add, change, remove nodes and connections), `delete_board`, `board_from_items` (routines by SOP, a tag, a parent, items), `boards_by_sop` (one board per SOP), `import_board` (from Claude Whiteboards), `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` (cancel, retry, skip) |
 | Meetings | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item` |
 | Agents | `agent_inbox`, `suggest_work`, `my_proposals` |
+| Plugins (docs/PLUGINS.md) | `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 
 Agents can run a board like a project manager: create and change anything their role allows, set up views,
 import and export items, and track time. They cannot approve: accepting a claim, approving or sending back AI work,
@@ -95,6 +99,7 @@ A person's review time is kept as a "review" time entry.
 | Area | Tools |
 | --- | --- |
 | Integrations | `upsert_external` (CRM or accounting records), `create_from_email`, `calendar_events`, `gmail_search` |
+| Webhooks (docs/WEBHOOKS.md) | `list_webhooks`, `set_webhooks`, `test_webhook`; every tool here is also an inbound action at `POST /api/hooks/in/<tool>` |
 
 `calendar_events` and `gmail_search` work after the person connects their Google account on the Team page.
 

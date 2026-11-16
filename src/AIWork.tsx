@@ -1,7 +1,7 @@
 // Human and AI work: the review dashboard, and the panel section for one item (who does it, review actions,
 // work log with links, screenshots and files).
 import {useEffect, useRef, useState} from 'react';
-import {Bot, Check as CheckIcon, FileText, Link2, Paperclip, RotateCcw, ThumbsDown, ThumbsUp, User, X, Eye} from 'lucide-react';
+import {Bot, Check as CheckIcon, FileText, Link2, Paperclip, RotateCcw, ThumbsDown, ThumbsUp, Trash2, User, X, Eye} from 'lucide-react';
 import type {Item} from './types.ts';
 import {api, type Store} from './store.ts';
 import {Elapsed} from './TimeTracker.tsx';
@@ -9,7 +9,10 @@ import {Avatar, Empty, itemKey} from './components.tsx';
 import {MarkdownView} from './BlockEditor.tsx';
 import {canQuickView, quickView} from './QuickView.tsx';
 
-type Review = {state: 'claimed' | 'accepted' | 'submitted' | 'changes' | 'approved' | 'declined'; by: string | null; at: string; note?: string; agent?: string};
+type Review = {state: 'claimed' | 'accepted' | 'submitted' | 'changes' | 'redo' | 'approved' | 'declined' | 'discarded'; by: string | null; at: string; note?: string; agent?: string; session?: string; attempt?: number};
+/** What the agent made. cleanup: pending (the agent must undo it), confirmed (it said it did), removed (Cadence removed it), null (kept). */
+type Artifact = {id: string; attempt: number; kind: string; ref: string; url: string | null; undo: string | null; cleanup: null | 'pending' | 'confirmed' | 'removed'; note: string | null};
+const CLEANUP = {pending: 'cleanup outstanding', confirmed: 'cleaned up', removed: 'removed'} as const;
 type LogEntry = {id: string; itemId: string; actor: string | null; at: string; kind: string; text: string; url: string | null};
 type FileRef = {id: string; name: string; mime: string; size: number; url: string};
 
@@ -21,31 +24,69 @@ export function WorkerToggle({item, store}: {item: Item; store: Store}) {
   return <div className="seg">{WORKER.map(o => <button key={o.v} className={w === o.v ? 'on' : ''} onClick={() => store.updateItem(item.id, {fields: {...item.fields, worker: o.v}})}>{o.icon && <o.icon size={12} />} {o.label}</button>)}</div>;
 }
 
-const STATE_LABEL: Record<Review['state'], string> = {claimed: 'AI asked to take this', accepted: 'AI is working on it', submitted: 'Ready for your review', changes: 'Sent back to AI', approved: 'Approved', declined: 'Claim declined'};
+const STATE_LABEL: Record<Review['state'], string> = {claimed: 'AI asked to take this', accepted: 'AI is working on it', submitted: 'Ready for your review', changes: 'Sent back to AI', redo: 'Redo: AI starts over', approved: 'Approved', declined: 'Claim declined', discarded: 'Work discarded'};
 
 /** Review actions, shared by the dashboard cards and the item panel. */
 export function ReviewActions({item, store, compact}: {item: Item; store: Store; compact?: boolean}) {
   const r = reviewOf(item);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [keep, setKeep] = useState(false);
+  const [arts, setArts] = useState<Artifact[]>([]);
+  useEffect(() => { if (r) api<Artifact[]>(`/items/${item.id}/artifacts`).then(setArts).catch(() => setArts([])); }, [item.id, r?.state, r?.at, store.tick]);
   if (!r) return null;
-  const go = async (path: string, body: object) => { setBusy(true); try { await api(path, {method: 'POST', body: {itemId: item.id, ...body}}); setComment(''); } catch (e) { store.fail(e); } setBusy(false); };
+  const go = async (path: string, body: object) => { setBusy(true); try { await api(path, {method: 'POST', body: {itemId: item.id, ...body}}); setComment(''); setDiscarding(false); } catch (e) { store.fail(e); } setBusy(false); };
+  const agent = store.people.find(p => p.id === r.agent);
+  const current = arts.filter(a => a.attempt === (r.attempt ?? 1) && !a.cleanup);
+  const outside = current.filter(a => !a.url?.startsWith('/api/files/') && a.kind !== 'item');
+  const owed = arts.filter(a => a.cleanup === 'pending').length;
+  const inProgress = ['accepted', 'changes', 'redo'].includes(r.state);
+  const needComment = comment.trim() ? '' : 'Write a comment for the agent first';
   return (
     <div className={'review-box state-' + r.state + (compact ? ' compact' : '')} onClick={e => e.stopPropagation()}>
-      <div className="review-head"><Bot size={14} /> <b>{STATE_LABEL[r.state]}</b>{r.agent && <span className="muted small">by {store.people.find(p => p.id === r.agent)?.name}</span>}</div>
+      <div className="review-head"><Bot size={14} /> <b>{STATE_LABEL[r.state]}</b>{agent && <span className="muted small">by {agent.name}</span>}
+        {r.session && (/^https?:\/\//.test(r.session)
+          ? <a className="link small" href={r.session} target="_blank" rel="noreferrer" title="Where the agent worked"><Link2 size={11} /> Agent session</a>
+          : <span className="muted small" title="Where the agent worked">Session {r.session.slice(0, 40)}</span>)}</div>
+      {(r.state === 'redo' || r.state === 'changes' || r.state === 'discarded') && r.note && !compact && <div className="small">{r.note}</div>}
       {r.state === 'claimed' && <div className="review-actions">
         <button className="btn primary small" disabled={busy} onClick={() => go('/ai/decide', {accept: true})}><CheckIcon size={12} /> Accept and assign</button>
         <button className="btn small" disabled={busy} onClick={() => go('/ai/decide', {accept: false})}><X size={12} /> Decline</button>
       </div>}
       {r.state === 'submitted' && <>
-        <textarea className="comment-box" style={{minHeight: compact ? 40 : 56}} placeholder="Comment for the agent (optional to approve, needed to send back)" value={comment} onChange={e => setComment(e.target.value)}
+        <textarea className="comment-box" style={{minHeight: compact ? 40 : 56}} placeholder="Comment for the agent (optional to approve, needed to send back or redo)" value={comment} onChange={e => setComment(e.target.value)}
           onFocus={() => { if (!store.running) store.startTimer(item.id, 'review'); }} />
         {store.running?.itemId === item.id && store.running.kind === 'review' && <div className="muted small">Reviewing for <Elapsed start={store.running.start} /></div>}
         <div className="review-actions">
-          <button className="btn primary small" disabled={busy} onClick={() => go('/ai/review', {approve: true, comment})}><ThumbsUp size={12} /> Approve</button>
-          <button className="btn small" disabled={busy || !comment.trim()} title={comment.trim() ? '' : 'Write what to change first'} onClick={() => go('/ai/review', {approve: false, comment})}><ThumbsDown size={12} /> Send back</button>
+          <button className="btn primary small" disabled={busy} onClick={() => go('/ai/review', {decision: 'approve', comment})}><ThumbsUp size={12} /> Approve</button>
+          <button className="btn small" disabled={busy || !!needComment} title={needComment || 'The agent keeps its work and fixes what you ask'} onClick={() => go('/ai/review', {decision: 'changes', comment})}><ThumbsDown size={12} /> Send back</button>
+          <button className="btn small" disabled={busy || !!needComment} title={needComment || 'The agent starts over from scratch. Its uploaded files are removed and it cleans up what it made elsewhere.'} onClick={() => go('/ai/review', {decision: 'redo', comment})}><RotateCcw size={12} /> Redo</button>
+          <button className="btn small" disabled={busy} title="Reject this work and close the attempt" onClick={() => setDiscarding(true)}><Trash2 size={12} /> Discard</button>
         </div>
       </>}
+      {inProgress && !compact && !discarding && <div className="review-actions"><button className="btn ghost small" disabled={busy} onClick={() => setDiscarding(true)}><Trash2 size={12} /> Discard this work</button></div>}
+      {discarding && <div className="review-confirm small">
+        <b>Discard this work?</b> The task goes back to where it was before {agent?.name ?? 'the agent'} took it. Cadence removes the files the agent uploaded ({current.filter(a => a.url?.startsWith('/api/files/')).length}),
+        deletes the subitems it created ({current.filter(a => a.kind === 'item').length}) and undoes its changes to this item. {outside.length ? `${outside.length} thing${outside.length === 1 ? '' : 's'} outside Cadence (${outside.map(a => `${a.kind} ${a.ref}`).join(', ').slice(0, 200)}) will be listed for the agent to clean up.` : 'Nothing outside Cadence was registered.'}
+        <div className="review-actions">
+          <label><input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} /> Keep {agent?.name ?? 'the agent'} assigned</label>
+          <button className="btn small" style={{color: 'var(--danger)'}} disabled={busy} onClick={() => go('/ai/review', {decision: 'discard', comment, keep})}><Trash2 size={12} /> Discard work</button>
+          <button className="btn ghost small" onClick={() => setDiscarding(false)}>Cancel</button>
+        </div>
+      </div>}
+      {compact ? owed > 0 && <div className="small" style={{color: 'var(--danger)'}}>{owed} cleanup{owed === 1 ? '' : 's'} outstanding</div>
+        : arts.length > 0 && <div className="artifacts">
+          <div className="small muted">What the agent made{owed ? `, ${owed} cleanup${owed === 1 ? '' : 's'} outstanding` : ''}</div>
+          {arts.map(a => (
+            <div key={a.id} className="set-item small" title={a.undo ?? ''}>
+              <span className="tag">{a.kind}</span>
+              {a.url && a.cleanup !== 'removed' ? <a className="link grow" href={a.url} target="_blank" rel="noreferrer">{a.ref}</a> : <span className="grow">{a.ref}</span>}
+              {a.cleanup && <span className={'tag cleanup-' + a.cleanup}>{CLEANUP[a.cleanup]}</span>}
+              {a.cleanup === 'pending' && <button className="btn ghost small" title="Mark it cleaned up yourself" onClick={() => go('/ai/cleanup', {artifact: a.id, note: 'Confirmed by the reviewer'})}>Done</button>}
+            </div>
+          ))}
+        </div>}
     </div>
   );
 }
@@ -89,7 +130,7 @@ export function WorkSection({item, store}: {item: Item; store: Store}) {
             <div key={e.id} className={'wl-entry k-' + e.kind}>
               <Avatar person={person(e.actor)} size={18} />
               <div className="grow">
-                <div className="small"><b>{person(e.actor)?.name ?? 'System'}</b> <span className="muted">{e.kind === 'result' ? 'submitted' : e.kind === 'missed' ? 'could not do' : e.kind} {new Date(e.at).toLocaleString()}</span></div>
+                <div className="small"><b>{person(e.actor)?.name ?? 'System'}</b> <span className="muted">{e.kind === 'result' ? 'submitted' : e.kind === 'missed' ? 'could not do' : e.kind === 'cleanup' ? 'cleaned up' : e.kind} {new Date(e.at).toLocaleString()}</span></div>
                 {e.kind === 'file' && e.url && /\.(png|jpe?g|gif|webp)$/i.test(e.text) ? <a href={e.url} onClick={ev => { ev.preventDefault(); quickView({url: e.url!, name: e.text}); }}><img className="wl-img" src={e.url} alt={e.text} /></a>
                   : e.kind === 'result' ? <div className="wl-text"><MarkdownView text={e.text} /></div> : <div className="wl-text">{e.text}</div>}
                 {e.url && e.kind !== 'file' && <a className="link small" href={e.url} target="_blank" rel="noreferrer"><Link2 size={11} /> {e.url.replace(/^https?:\/\//, '').slice(0, 60)}</a>}
@@ -159,11 +200,12 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
   const r = (i: Item) => reviewOf(i);
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
   const cols: {id: string; title: string; hint: string; list: Item[]}[] = [
-    {id: 'open', title: 'Ready for AI', hint: 'Marked for AI, nobody on it yet', list: items.filter(i => !i.completed && i.fields.worker === 'ai' && (!r(i) || r(i)!.state === 'declined') && !i.assignees.some(a => ais.has(a)))},
+    {id: 'open', title: 'Ready for AI', hint: 'Marked for AI, nobody on it yet', list: items.filter(i => !i.completed && i.fields.worker === 'ai' && (!r(i) || ['declined', 'discarded'].includes(r(i)!.state)) && !i.assignees.some(a => ais.has(a)))},
     {id: 'claimed', title: 'Claims to approve', hint: 'An agent asked to take these', list: items.filter(i => r(i)?.state === 'claimed')},
-    {id: 'working', title: 'AI working', hint: 'Accepted, or sent back with changes', list: items.filter(i => !i.completed && (['accepted', 'changes'].includes(r(i)?.state ?? '') || (!r(i) && i.assignees.some(a => ais.has(a)))))},
-    {id: 'review', title: 'Ready for review', hint: 'Check the report, approve or send back', list: items.filter(i => r(i)?.state === 'submitted')},
+    {id: 'working', title: 'AI working', hint: 'Accepted, sent back with changes, or starting over', list: items.filter(i => !i.completed && (['accepted', 'changes', 'redo'].includes(r(i)?.state ?? '') || (!r(i) && i.assignees.some(a => ais.has(a)))))},
+    {id: 'review', title: 'Ready for review', hint: 'Check the report: approve, send back, redo or discard', list: items.filter(i => r(i)?.state === 'submitted')},
     {id: 'done', title: 'Approved this week', hint: '', list: items.filter(i => r(i)?.state === 'approved' && r(i)!.at > weekAgo)},
+    {id: 'discarded', title: 'Discarded this week', hint: 'Rejected work. Open one to see what is left to clean up.', list: items.filter(i => r(i)?.state === 'discarded' && r(i)!.at > weekAgo)},
   ];
   useEffect(() => {
     const ids = [...cols[3].list, ...cols[2].list].map(i => i.id).slice(0, 40);
@@ -173,7 +215,7 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
   return (
     <div className="page" style={{maxWidth: 'none'}}>
       <h1><Bot size={20} /> AI work</h1>
-      <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve or send it back with a comment. Mark tasks Human, AI or Either in any item.</p>
+      <p className="muted">Tasks marked for AI flow left to right. Agents claim work, you accept, they log every step and submit a report with links and screenshots, you approve, send it back with a comment, ask for a redo, or discard it. Mark tasks Human, AI or Either in any item.</p>
       <div className="toolbar" style={{padding: '0 0 10px', border: 0}}>
         <select className="plain-select" value={whose} onChange={e => setWhose(e.target.value)}>
           <option value="mine">My agents ({myAgents.size})</option>
@@ -198,7 +240,7 @@ export function AIWorkPage({store, open}: {store: Store; open: (id: string) => v
                   <div className="card-title">{i.title}</div>
                   {last && <div className="small muted ai-last">{last.kind === 'result' ? 'Report: ' : ''}{last.text.slice(0, 140)}</div>}
                   {(c.id === 'claimed' || c.id === 'review') && <ReviewActions item={i} store={store} compact />}
-                  {rv?.state === 'changes' && <div className="small" style={{color: 'var(--danger)'}}><RotateCcw size={11} /> {rv.note}</div>}
+                  {(rv?.state === 'changes' || rv?.state === 'redo') && <div className="small" style={{color: 'var(--danger)'}}><RotateCcw size={11} /> {rv.state === 'redo' ? 'Redo: ' : ''}{rv.note}</div>}
                 </div>
               );
             })}

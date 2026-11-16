@@ -9,7 +9,7 @@ import {randomBytes} from 'node:crypto';
 import type {Tasks} from './service.ts';
 import type {Item} from '../src/types.ts';
 import {Invalid, NotFound} from './errors.ts';
-import {aiQueue, agentOwner, claim, decide} from './aiwork.ts';
+import {aiQueue, agentOwner, claim, decide, pendingCleanup} from './aiwork.ts';
 import {createEvent, deleteEvent, updateEvent, type EventInput} from './events.ts';
 
 export type AgentSettings = {
@@ -91,7 +91,9 @@ export function saveAgentSettings(tasks: Tasks, agent: string, patch: Partial<Ag
 export const WRITE_OPS = new Set(['routine', 'archiveItem', 'restoreItem', 'snoozeItem', 'createItem', 'updateItem', 'deleteItem', 'quickAdd', 'importItems', 'applyPlan', 'applyToChildren', 'upsertExternal', 'fromEmail', 'fileTask',
   'createSprint', 'updateSprint', 'deleteSprint', 'rolloverSprint', 'updateProject', 'createProject', 'createProjectFromTemplate', 'createRollup', 'deleteProject',
   'createView', 'updateView', 'deleteView', 'reorderViews', 'createTemplate', 'updateTemplate', 'deleteTemplate', 'saveItemTemplate', 'saveProjectTemplate', 'saveViewTemplate',
-  'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes']);
+  'useItemTemplate', 'useViewTemplate', 'installPack', 'revert', 'setDayMinutes', 'triggerHook', 'setWebhooks',
+  'createBoard', 'updateBoard', 'deleteBoard', 'boardFromItems', 'boardToTasks', 'runBoard', 'boardRunAction', 'updateDayPlan', 'autoSchedule', 'fitDayToLogged', 'createSubspace', 'boardsBySop', 'importBoard',
+  'savePlugin', 'submitPlugin', 'deletePlugin', 'installPlugin', 'uninstallPlugin', 'setPlugin']);
 
 export function needsReview(tasks: Tasks, actor: string | null) {
   if (!isAgent(tasks, actor)) return false;
@@ -126,6 +128,13 @@ function describe(tasks: Tasks, op: string, args: unknown[]) {
     case 'event.update': return `Change meeting ${String(a0)}`;
     case 'event.delete': return `Cancel meeting ${String(a0)}`;
     case 'suggestWork': return `Suggest "${(a0 as {title?: string})?.title ?? ref((a0 as {item?: string})?.item)}" for ${nameOf(tasks, (a0 as {forPerson?: string})?.forPerson ?? null)}`;
+    case 'createBoard': return `Make whiteboard "${(a0 as {name?: string})?.name ?? 'Untitled board'}"`;
+    case 'boardFromItems': return `Draw a whiteboard from ${(a0 as {tag?: string; routines?: boolean})?.tag ?? ((a0 as {routines?: boolean})?.routines ? 'routines' : 'items')}`;
+    case 'updateBoard': case 'deleteBoard': case 'runBoard': case 'boardToTasks': {
+      const name = (() => { try { return tasks.board(String(a0)).name; } catch { return String(a0); } })();
+      return `${({updateBoard: 'Change', deleteBoard: 'Delete', runBoard: 'Run', boardToTasks: 'Create tasks from'} as Record<string, string>)[op]} whiteboard "${name}"`;
+    }
+    case 'boardRunAction': return `${String(args[1] ?? '')} a whiteboard run`;
     default: return op.replace(/([A-Z])/g, ' $1').toLowerCase();
   }
 }
@@ -238,14 +247,17 @@ export function agentInbox(tasks: Tasks, agent: string, since?: string) {
   const notes = tasks.db.prepare('select * from notifications where person = ? and created > ? order by created').all(agent, after) as Record<string, unknown>[];
   const assigned = owner ? tasks.listItems({open: true}).filter(i => i.assignees.includes(owner) && inSpace(i.projectId) && i.updated > after && (i.fields.worker ?? 'either') !== 'human') : [];
   const queue = aiQueue(tasks, agent).filter(x => inSpace(x.item.projectId) && (s.workTypes === 'ai+either' || x.item.fields.worker === 'ai'));
-  const mine = queue.filter(x => x.review?.agent === agent && ['claimed', 'accepted', 'changes'].includes(x.review.state));
+  const mine = queue.filter(x => x.review?.agent === agent && ['claimed', 'accepted', 'changes', 'redo'].includes(x.review.state));
   return {
     now: now(), owner: owner ? {id: owner, name: nameOf(tasks, owner)} : null, settings: s,
     openClaims: mine.length, canClaimMore: Math.max(0, s.maxClaims - mine.length),
     newForOwner: assigned.map(brief),
-    available: queue.filter(x => !x.review || x.review.state === 'declined').map(x => brief(x.item)),
+    available: queue.filter(x => !x.review || x.review.state === 'declined' || x.review.state === 'discarded').map(x => brief(x.item)),
     working: mine.filter(x => x.review!.state === 'accepted').map(x => brief(x.item)),
-    sentBack: mine.filter(x => x.review!.state === 'changes').map(x => ({...brief(x.item), comment: x.review!.note ?? ''})),
+    // decision "changes": continue the same work. "redo": start over; get_feedback has the context and what to clean up first.
+    sentBack: mine.filter(x => ['changes', 'redo'].includes(x.review!.state)).map(x => ({...brief(x.item), decision: x.review!.state, comment: x.review!.note ?? '', session: x.review!.session ?? null})),
+    // What the agent still has to undo after a redo or a discard; confirm each with confirm_cleanup.
+    cleanup: pendingCleanup(tasks, agent).flatMap(a => { try { return [{item: key(tasks.item(a.itemId)), artifact: a.id, kind: a.kind, ref: a.ref, url: a.url, undo: a.undo}]; } catch { return []; } }),
     waiting: mine.filter(x => x.review!.state === 'claimed').map(x => brief(x.item)),
     proposals: listProposals(tasks, {agent, since: after}).map(p => ({id: p.id, summary: p.summary, state: p.state, note: p.note})),
     notifications: notes.map(n => ({text: n.text, itemId: n.item_id, at: n.created, kind: n.kind})),

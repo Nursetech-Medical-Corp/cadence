@@ -11,7 +11,7 @@ export type Attendee = {person: string | null; email: string | null; name?: stri
 export type CalEvent = {id: string; projectId: string | null; itemId: string | null; kind: 'meeting' | 'timeblock' | 'deadline'; title: string; body: string; location: string;
   meetUrl: string | null; start: string; end: string; allDay: boolean; tz: string; rrule: string | null; recurringId: string | null; originalStart: string | null;
   organizer: string; visibility: string; attendees: Attendee[]; source: 'cadence' | 'google'; readonly: boolean; occurrenceOf?: string;
-  google?: {ok: boolean; skipped?: string; error?: string} | null};
+  google?: {ok: boolean; skipped?: string; error?: string} | null; color?: string | null; googleUrl?: string | null};
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const localDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -114,7 +114,7 @@ function layout(list: CalEvent[]) {
 
 function EventChip({e, people, onClick}: {e: CalEvent; people: Person[]; onClick: () => void}) {
   void people;
-  return <div className={`tg-chip ${e.kind}${e.readonly ? ' ro' : ''}`} onClick={onClick} title={e.title}>{e.title}</div>;
+  return <div className={`tg-chip ${e.kind}${e.readonly ? ' ro' : ''}`} onClick={onClick} title={e.title} style={e.color && GCAL_COLORS[e.color] ? {background: GCAL_COLORS[e.color][1], color: '#fff'} : undefined}>{e.title}</div>;
 }
 
 const REPEATS: {label: string; rule: (d: Date) => string | null}[] = [
@@ -136,7 +136,10 @@ const repeatLabel = (rule: string | null) => {
 };
 
 /** Create or change a meeting. Repeating meetings ask: this one or all. */
-export function EventEditor({store, event, draft, items, onClose, open}: {store: Store; event?: CalEvent; draft?: Partial<CalEvent>; items: Item[]; onClose: () => void; open: (id: string) => void}) {
+/** Google Calendar's event colors (colorId 1 to 11). */
+export const GCAL_COLORS: Record<string, [string, string]> = {'1': ['Lavender', '#7986cb'], '2': ['Sage', '#33b679'], '3': ['Grape', '#8e24aa'], '4': ['Flamingo', '#e67c73'], '5': ['Banana', '#f6bf26'], '6': ['Tangerine', '#f4511e'],
+  '7': ['Peacock', '#039be5'], '8': ['Graphite', '#616161'], '9': ['Blueberry', '#3f51b5'], '10': ['Basil', '#0b8043'], '11': ['Tomato', '#d50000']};
+export function EventEditor({store, event, draft, items, onClose, open, onSaved}: {store: Store; event?: CalEvent; draft?: Partial<CalEvent>; items: Item[]; onClose: () => void; open: (id: string) => void; onSaved?: (e: CalEvent) => void}) {
   const base = event ?? draft ?? {};
   const s0 = new Date(base.start ?? new Date(Math.ceil(Date.now() / 1800000) * 1800000).toISOString()), e0 = new Date(base.end ?? new Date(s0.getTime() + 1800000).toISOString());
   const [title, setTitle] = useState(base.title ?? '');
@@ -153,6 +156,7 @@ export function EventEditor({store, event, draft, items, onClose, open}: {store:
   const [notes, setNotes] = useState(base.body ?? '');
   const [itemId, setItemId] = useState(base.itemId ?? '');
   const [visibility, setVisibility] = useState(base.visibility ?? 'space');
+  const [color, setColor] = useState<string | null>(base.color ?? null);
   const [scope, setScope] = useState<'one' | 'all'>(event?.occurrenceOf ? 'one' : 'all');
   const [slots, setSlots] = useState<{start: string; end: string}[] | null>(null);
   const [msg, setMsg] = useState('');
@@ -168,7 +172,7 @@ export function EventEditor({store, event, draft, items, onClose, open}: {store:
     const d = new Date(toIso(day, start));
     const pick = REPEATS.find(r => r.label === repeat);
     return {title: title.trim(), start: allDay ? day : toIso(day, start), end: allDay ? addDays(day, 1) : toIso(day, end), allDay, attendees,
-      location, body: notes, itemId: itemId || null, visibility, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      location, body: notes, itemId: itemId || null, visibility, color, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       ...(repeat === 'Custom' ? {rrule: rule} : {rrule: pick ? pick.rule(d) : null}), ...(event ? {} : {meet, projectId: draft?.projectId ?? null})};
   };
   const report = (r: CalEvent) => {
@@ -189,6 +193,7 @@ export function EventEditor({store, event, draft, items, onClose, open}: {store:
       const r = event
         ? await api<CalEvent>(`/meetings/${event.occurrenceOf ?? event.id}`, {method: 'PATCH', body: {...b, ...(scope === 'one' && isRepeating ? {rrule: undefined, scope: 'one', occurrence: event.originalStart ?? event.start} : {})}})
         : await api<CalEvent>('/meetings', {method: 'POST', body: b});
+      onSaved?.(r);
       if (report(r)) onClose();
     } catch (e) { setMsg(String(e instanceof Error ? e.message : e)); setBusy(false); }
   };
@@ -244,6 +249,11 @@ export function EventEditor({store, event, draft, items, onClose, open}: {store:
         <div className="ev-row"><Video size={14} />
           {event?.meetUrl ? <a href={event.meetUrl} target="_blank" rel="noreferrer">{event.meetUrl}</a>
             : !event ? <label className="small"><input type="checkbox" checked={meet} onChange={e => setMeet(e.target.checked)} /> Add a Google Meet link (needs Google Calendar connected)</label> : <span className="small muted">No video link</span>}
+        </div>
+        <div className="ev-row"><span className="small muted">Color</span>
+          <button className={'ev-color' + (!color ? ' on' : '')} title="Calendar color" disabled={!canEdit} onClick={() => setColor(null)} style={{background: 'var(--line)'}} />
+          {Object.entries(GCAL_COLORS).map(([id, [name, hex]]) => <button key={id} className={'ev-color' + (color === id ? ' on' : '')} title={name} disabled={!canEdit} onClick={() => setColor(id)} style={{background: hex}} />)}
+          {event?.googleUrl && <a className="btn small ghost" href={event.googleUrl} target="_blank" rel="noreferrer" title="Open it in Google Calendar for everything Google offers there">Open in Google Calendar</a>}
         </div>
         <input className="plain-select ev-wide" placeholder="Location" value={location} disabled={!canEdit} onChange={e => setLocation(e.target.value)} />
         <textarea className="comment-box ev-wide" placeholder="Agenda or notes" value={notes} disabled={!canEdit} onChange={e => setNotes(e.target.value)} />

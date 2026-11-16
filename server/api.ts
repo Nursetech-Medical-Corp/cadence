@@ -4,13 +4,17 @@
 // Every write is checked against the actor's role in the item's project (see auth.ts).
 import type {IncomingMessage, ServerResponse} from 'node:http';
 import {listSopLinks, migrateSops, setSopLinks} from './sops.ts';
+import {boardByKey, migrateBoards, startBoards} from './boards.ts';
+import {dayPlanReminders, migrateDayPlans} from './dayplan.ts';
 import {existsSync, mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {openDb} from './db.ts';
 import {Invalid, NotFound, Tasks} from './service.ts';
-import {calendarFeed, startWebhooks} from './integrations.ts';
+import {calendarFeed} from './integrations.ts';
+import {startWebhooks} from './webhooks.ts';
 import {backupDir, exportAll, getSettings, importAll, listSnapshots, maybeSnapshot, mirrorUploads, restoreSnapshotFile, retention, saveSettings, snapFromName, snapshot} from './backup.ts';
 import {cleanPersonJobRoles, joinByDomain} from './jobroles.ts';
 import {CAPS, CAP_LABELS, areaLocked, capsFor, checkPassword, getWorkspace, hashPassword, loginForced, mayChangeAccess, migrate, personalAccess, saveWorkspace, settingsChanged, type Access, type Cap} from './auth.ts';
+import {PluginCatalog, listInstalls, migratePluginInstalls} from './plugins.ts';
 import {ACCOUNT_COOKIE, Accounts, accountCookie, openAccounts, quietNow, type NotifyPrefs} from './accounts.ts';
 import * as push from './push.ts';
 import {NOTIFY_KINDS} from '../src/types.ts';
@@ -20,11 +24,13 @@ import {cloudStatus, listCloud, restoreFromCloud, uploadSnapshot} from './cloudb
 import {googleCallback, googleStart, publicOrigin, sendEmail, sendNotificationEmail} from './google.ts';
 import {addEvent, calendars, events, gmailSearch, listLinks, migrateGoogleLinks, removeLink} from './googlelinks.ts';
 import {busyHours, calendarSettings, createEvent, deleteEvent, freeSlots, getEvent, listEvents, migrateEvents, saveCalendarSettings, timeblockItem, updateEvent, canSeeEvent, type CalEvent} from './events.ts';
-import {allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
+import {googleUrl, allBusy, createCadenceCalendar, flushGoogle, onPush, pullCalendar, pushAllItems, startCalendarSync} from './gcal.ts';
 import {addAgent, agentsOf, approvedSop, decideProposal, getProposal, listAgents, listProposals, needsReview, propose, saveAgentSettings, startAgents} from './agents.ts';
 import {safeTarget} from './integrations.ts';
 import {acceptInvite, createInvite, findInvite, listInvites, migrateInvites, revokeInvite} from './invites.ts';
-import {createToken, deleteToken, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
+import {Forbidden, createToken, deleteToken, guarded, listTokens, migrateTokens, tokenPerson} from './tokens.ts';
+import {buildMcp} from './mcp.ts';
+import * as z from 'zod';
 import {handleMcpHttp} from './mcp-http.ts';
 import {accessGrant, disconnect, handleOAuth, isOAuthAccess, isOAuthPath, listConnections, mcpResource, migrateOAuth, resourceMetadataUrl, revokePerson, type Grant, type OAuthContext} from './oauth.ts';
 import {devLogMode, googleSignInCallback, googleSignInReady, googleSignInStart, logSignIn, clientIp, publicUrl, sendSmtp, smtpReady, staffGoogleOnly, type SignInMethod} from './signin.ts';
@@ -110,6 +116,19 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   migrateGoogleLinks(tasks.db);
   migrateEvents(tasks);
   migrateSops(tasks);
+  migrateBoards(tasks);
+  migrateDayPlans(tasks);
+  migratePluginInstalls(tasks.db);
+  // Plugins: one catalog for every workspace on this server; the server owner reviews what is shared with everyone.
+  tasks.catalog = new PluginCatalog(accounts.db);
+  tasks.isReviewer = pid => {
+    if (!getWorkspace(tasks.db).requireLogin) return true;
+    const email = pid ? (tasks.db.prepare('select email from people where id = ?').get(pid) as {email: string | null} | undefined)?.email : null;
+    const owner = accounts.owner();
+    return !!email && !!owner && accounts.group(owner).includes(email);
+  };
+  // Day planner reminders: checked every minute.
+  setInterval(() => { try { dayPlanReminders(tasks); } catch (e) { console.error('Day planner reminders failed', e); } }, 60_000).unref();
   migrateOAuth(accounts.db);
   startCalendarSync(tasks, info.id, {poll: process.env.NODE_ENV !== 'test' && !process.env.TASKS_NO_SYNC});
   // AI agents hear when their owner gets new work; their webhook (Zapier, n8n, a Claude trigger) fires too.
@@ -135,7 +154,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
   const periodic = () => { try { tasks.periodic(); } catch (e) { console.error('Periodic check failed', e); } };
   periodic();
   setInterval(periodic, 3600 * 1000).unref();
+  tasks.workspace = info.id;
   startWebhooks(tasks);
+  startBoards(tasks);
   tasks.onNotify(n => { sendNotificationEmail(tasks.db, n).catch(e => console.error('Email notification failed', e.message)); });
   // Push to the person's phones and desktops (every device of their linked accounts), unless they turned that kind off or it is quiet time.
   const personEmail = (id: string) => (tasks.db.prepare('select email from people where id = ? and active = 1').get(id) as {email: string | null} | undefined)?.email?.trim().toLowerCase() || null;
@@ -270,9 +291,9 @@ function workspaceApi(tasks: Tasks, info: {id: string; dir: string; main: boolea
         const origin = req.headers.origin, host = req.headers.host;
         if (!bearer && origin && origin !== `http://${host}` && origin !== `https://${host}`) return send(res, 403, {error: 'Cross-origin request refused'});
         const ct = String(req.headers['content-type'] ?? '');
-        if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout')) return send(res, 415, {error: 'Send JSON with content-type application/json'});
+        if (m !== 'DELETE' && !ct.startsWith('application/json') && !(a === 'auth' && b === 'logout') && a !== 'hooks') return send(res, 415, {error: 'Send JSON with content-type application/json'});
       }
-      const body = m === 'GET' || m === 'DELETE' ? {} : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' ? 15_000_000 : 2_000_000);
+      const body = m === 'GET' || m === 'DELETE' ? {} : a === 'hooks' && b?.startsWith('wb_') ? await readJson(req, 200_000).catch(() => ({})) : await readJson(req, a === 'import' || (a === 'me' && b === 'import') ? 100_000_000 : c === 'files' || c === 'file-tasks' || (a === 'hooks' && b === 'in') ? 15_000_000 : a === 'plugins' ? 4_000_000 : 2_000_000);
       const num = (v: string | undefined, d: number, max: number) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : d; };
       const need = (projectId: string, cap: Cap) => { if (!caps(actor, projectId, !!bearer).has(cap)) throw new Denied(`You need "${CAP_LABELS[cap]}" permission in this space`); };
       const needAdmin = () => { if ((ws.requireLogin || bearer) && !isAdmin(actor)) throw new Denied('Only workspace admins can do this'); };
@@ -519,7 +540,7 @@ If you did not ask for it, ignore this email.`)
           const pid = q('project');
           const rollup = pid ? !!tasks.project(pid).settings.rollup : false;
           if (pid && !rollup) need(pid, 'view');
-          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee));
+          return send(res, 200, listEvents(tasks, {from: q('from') ?? '', to: q('to') ?? '', person: actor, projectId: rollup ? undefined : pid, mine: q('mine') === '1'}, canSee).map(e => ({...e, googleUrl: googleUrl(tasks, e.occurrenceOf ?? e.id)})));
         }
         if (!b && m === 'POST') {
           if (body.projectId) need(body.projectId, 'edit');
@@ -548,7 +569,7 @@ If you did not ask for it, ignore this email.`)
         if (b) {
           const e = getEvent(tasks, b);
           if (!visible(e) && !isAdmin(actor)) throw new Denied('You cannot see this event');
-          if (m === 'GET') return send(res, 200, e);
+          if (m === 'GET') return send(res, 200, {...e, googleUrl: googleUrl(tasks, e.id)});
           if (m === 'PATCH') {
             if (body.projectId) need(body.projectId, 'edit');
             const {scope, occurrence, ...patch} = body;
@@ -631,7 +652,7 @@ If you did not ask for it, ignore this email.`)
           people: tasks.listPeople(), projects, items, today: tasks.today(),
           time: Object.fromEntries(Object.entries(tasks.timeTotals()).filter(([iid]) => seen.has(iid))),
           sprints: tasks.listSprints().filter(s => ids.has(s.projectId)), views: projects.flatMap(p => tasks.listViews(p.id, actor)),
-          prefs: actor && !bearer ? tasks.prefs(actor) : {}, settings: {custom: ws.custom, features: ws.features, admin: !ws.requireLogin || isAdmin(actor)},
+          prefs: actor && !bearer ? tasks.prefs(actor) : {}, plugins: listInstalls(tasks.db, actor), settings: {custom: ws.custom, features: ws.features, admin: !ws.requireLogin || isAdmin(actor)},
         });
       }
 
@@ -682,6 +703,7 @@ If you did not ask for it, ignore this email.`)
             syncHash(email, hash);
           }
           tasks.emit({kind: 'people'});
+          tasks.event('person.updated', {actor, details: {person: {id: b, changed: Object.keys(body).filter(k => !/password/i.test(k))}}});
           return send(res, 200, team().find(p => p.id === b));
         }
       }
@@ -736,6 +758,21 @@ If you did not ask for it, ignore this email.`)
         const feed = calendarFeed(tasks, {person: q('person'), project: q('project'), baseUrl: publicOrigin(req), canSee});
         res.end(feed);
         return;
+      }
+      if (a === 'plugins') {
+        const scope = (body.scope ?? q('scope') ?? 'me') as 'workspace' | 'me';
+        // Workspace installs change what everyone sees, so they are for admins; anyone installs for themselves.
+        const needScope = () => { if (scope === 'workspace') needAdmin(); };
+        if (!b && m === 'GET') return send(res, 200, tasks.plugins(actor, q('q') ?? ''));
+        if (b === 'check' && m === 'POST') return send(res, 200, tasks.checkPlugin(body.manifest));
+        if (!b && m === 'POST') return send(res, 200, tasks.savePlugin(body.manifest, actor));
+        if (b && !c && m === 'GET') return send(res, 200, tasks.pluginInfo(b, actor));
+        if (b && !c && m === 'DELETE') return send(res, 200, tasks.deletePlugin(b, actor));
+        if (b && c === 'submit' && m === 'POST') return send(res, 200, tasks.submitPlugin(b, actor));
+        if (b && c === 'review' && m === 'POST') return send(res, 200, tasks.reviewPlugin(b, !!body.approve, String(body.note ?? ''), actor));
+        if (b && c === 'install' && m === 'POST') { needScope(); return send(res, 200, tasks.installPlugin(b, scope, actor)); }
+        if (b && c === 'install' && m === 'DELETE') { needScope(); return send(res, 200, tasks.uninstallPlugin(b, scope, actor)); }
+        if (b && c === 'install' && m === 'PATCH') { needScope(); return send(res, 200, tasks.setPlugin(b, scope, actor, {enabled: body.enabled, settings: body.settings})); }
       }
       if (a === 'packs') {
         if (b === 'gallery' && m === 'GET') return send(res, 200, tasks.gallery());
@@ -851,6 +888,8 @@ If you did not ask for it, ignore this email.`)
           if (body.personal) { if (!actor) throw new Denied('Sign in first'); return send(res, 201, tasks.createProject({...body, settings: {...body.settings, access: personalAccess(actor)}})); }
           needAdmin(); return send(res, 201, tasks.createProject(body));
         }
+        // Sub-spaces: the parent's settings permission is enough; the new space starts with the parent's access.
+        if (b && c === 'subspaces' && m === 'POST') { need(b, 'settings'); return send(res, 201, tasks.createSubspace(b, {name: String(body.name ?? ''), kind: body.kind, key: body.key})); }
         if (b && c === 'files' && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.projectFiles(b)); }
         if (b && c === 'file-tasks' && m === 'POST') { need(b, 'create'); return send(res, 201, tasks.fileTask(b, actor, {name: String(body.name ?? 'file'), mime: String(body.mime ?? ''), data: String(body.data ?? ''), parentId: body.parentId ?? null, status: body.status})); }
         if (b && !c && m === 'GET') { need(b, 'view'); return send(res, 200, tasks.project(b)); }
@@ -1006,6 +1045,7 @@ If you did not ask for it, ignore this email.`)
           const map: Record<string, string> = {weeklyHours: 'weekly_hours', skill: 'skill', rate: 'rate', start: 'start_date', end: 'end_date', plannedHire: 'planned_hire'};
           for (const [k, col] of Object.entries(map)) if (body[k] !== undefined) tasks.db.prepare(`update people set ${col} = ? where id = ?`).run(k === 'plannedHire' ? (body[k] ? 1 : 0) : k === 'weeklyHours' || k === 'rate' ? Math.max(0, Number(body[k]) || 0) : (String(body[k] ?? '').slice(0, 60) || null), c);
           tasks.emit({kind: 'people'});
+          tasks.event('person.updated', {actor, details: {person: {id: c, changed: Object.keys(body)}}});
           return send(res, 200, planningPeople(tasks).find(p => p.id === c));
         }
       }
@@ -1016,6 +1056,40 @@ If you did not ask for it, ignore this email.`)
         if (!bearer) return send(res, 401, {error: 'Use an API token (Team page) for inbound email'});
         need(body.projectId, 'create');
         return send(res, 201, tasks.fromEmail(body, actor));
+      }
+
+      // ---- Webhooks: a space's endpoints (scope = space id) or the workspace's (scope = workspace), their deliveries, and inbound actions ----
+      // Inbound webhook: anyone holding the board's secret link can start a run; the JSON body is the run's input.
+      if (a === 'hooks' && b?.startsWith('wb_') && m === 'POST') {
+        const bd = boardByKey(tasks, b);
+        if (!bd) throw new NotFound('Unknown webhook link');
+        const r = tasks.runBoard(bd.id, bd.createdBy, {trigger: 'webhook', input: body});
+        return send(res, 202, {run: r.id, state: r.state, steps: r.steps.length});
+      }
+      if (a === 'hooks') {
+        // Inbound: POST /api/hooks/in/<action> runs an MCP tool as the token's person, with the JSON body as its arguments.
+        if (b === 'in' && m === 'POST') {
+          if (!bearer) return send(res, 401, {error: 'Send Authorization: Bearer <API token> (Team page). A token in the URL is not accepted here.'});
+          const {tools} = buildMcp(guarded(tasks, bearer), bearer);
+          const tool = tools.get(c === 'trigger' ? 'trigger_automation' : c ?? '');
+          if (!tool) return send(res, 404, {error: `Unknown action "${c ?? ''}"`, actions: ['trigger', ...tools.keys()].sort()});
+          // trigger: the whole body is what webhook actions pass on, unless data is given.
+          const parsed = z.object(tool.shape).safeParse(c === 'trigger' ? {...body, data: body.data ?? body} : body);
+          if (!parsed.success) return send(res, 400, {error: 'Bad input for this action', problems: parsed.error.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`),
+            fields: Object.entries(tool.shape).map(([name, f]) => ({name, required: !(f as z.ZodType).isOptional(), description: (f as z.ZodType).description ?? ''}))});
+          try { return send(res, 200, (await tool.fn(parsed.data)) ?? {ok: true}); }
+          catch (e) {
+            if (e instanceof Forbidden) return send(res, 403, {error: e.message});
+            if (e instanceof Invalid || e instanceof NotFound || e instanceof Denied) throw e;
+            return send(res, 400, {error: e instanceof Error ? e.message : 'Failed'});
+          }
+        }
+        const scope = String(q('scope') ?? body.scope ?? '');
+        if (scope === 'workspace') needAdmin(); else need(scope, 'settings');
+        if (!b && m === 'GET') return send(res, 200, {...tasks.webhooks(scope), deliveries: tasks.hookDeliveries(scope)});
+        if (!b && m === 'PUT') return send(res, 200, tasks.setWebhooks(scope, {webhooks: body.webhooks, dueSoonDays: body.dueSoonDays}));
+        if (b === 'test' && m === 'POST') return send(res, 200, tasks.testWebhook(scope, String(body.id ?? ''), actor));
+        if (b === 'deliveries' && m === 'GET') return send(res, 200, tasks.hookDeliveries(scope, q('hook'), num(q('limit'), 50, 200)));
       }
 
       // ---- Sync for CRMs and other systems ----
@@ -1086,6 +1160,112 @@ If you did not ask for it, ignore this email.`)
         if (held(op, args)) return send(res, 202, propose(tasks, actor!, op, args));
         return send(res, 200, (tasks[op] as (...x: unknown[]) => unknown)(...args));
       }
+      // ---- Day planner: your own day (top 3, brain dump, time boxes) ----
+      if (a === 'day') {
+        const person = ws.requireLogin || bearer ? actor : (actor ?? q('person') ?? null);
+        if (!person) throw new Invalid('Pick who you are first');
+        const date = b ?? tasks.today();
+        // ?tz= is where the person is now: a day not saved yet takes it (saved first for Plan and Fit).
+        const hint = q('tz');
+        if (b && !c && m === 'GET') return send(res, 200, tasks.dayPlan(person, date, hint));
+        if (b && (c === 'auto' || c === 'fit') && m === 'POST' && hint && !tasks.dayPlan(person, date).updated) tasks.updateDayPlan(person, date, {tz: tasks.dayPlan(person, date, hint).tz});
+        if (b && !c && m === 'PUT') {
+          const patch = Object.fromEntries(['top', 'dump', 'blocks', 'dayStart', 'dayEnd', 'slot', 'tz'].filter(k => body[k] !== undefined).map(k => [k, body[k]]));
+          for (const e of [...(patch.top ?? []), ...(patch.dump ?? []), ...(patch.blocks ?? [])] as {itemId?: string}[]) if (e.itemId && !seesItem(tasks.findItem(e.itemId).id)) throw new NotFound('Task not found');
+          if (held('updateDayPlan', [person, date, patch])) return send(res, 202, propose(tasks, actor!, 'updateDayPlan', [person, date, patch]));
+          return send(res, 200, tasks.updateDayPlan(person, date, patch));
+        }
+        // Fit the boxes to time logged with timers, up to a moment (now) or the whole day.
+        if (b && c === 'fit' && m === 'POST') {
+          const opts = {upTo: body.upTo ? String(body.upTo) : null, offsetMinutes: typeof body.offsetMinutes === 'number' ? body.offsetMinutes : undefined};
+          if (held('fitDayToLogged', [person, date, opts])) return send(res, 202, propose(tasks, actor!, 'fitDayToLogged', [person, date, opts]));
+          return send(res, 200, tasks.fitDayToLogged(person, date, opts));
+        }
+        if (b && c === 'auto' && m === 'POST') {
+          const opts = {from: body.from ? String(body.from) : undefined, offsetMinutes: typeof body.offsetMinutes === 'number' ? body.offsetMinutes : undefined, include: Array.isArray(body.include) ? body.include : undefined};
+          if (held('autoSchedule', [person, date, opts])) return send(res, 202, propose(tasks, actor!, 'autoSchedule', [person, date, opts]));
+          return send(res, 200, tasks.autoSchedule(person, date, opts));
+        }
+      }
+      // ---- Whiteboards: design and run workflows (boards.ts) ----
+      if (a === 'boards') {
+        type B = ReturnType<Tasks['board']>;
+        const seesB = (bd: B) => !bd.projectId || canSee(bd.projectId);
+        const editsB = (bd: B) => bd.projectId ? caps(actor, bd.projectId, !!bearer).has('edit') : (!ws.requireLogin && !bearer) || bd.createdBy === actor || isAdmin(actor);
+        const out = (bd: B) => editsB(bd) ? {...bd, hookUrl: `${publicOrigin(req)}/api/hooks/${bd.hookKey}?ws=${info.id}`} : {...bd, hookKey: undefined};
+        const one = (ref: string) => { const bd = tasks.board(ref); if (!seesB(bd)) throw new NotFound('No such whiteboard'); return bd; };
+        const edit = (ref: string) => { const bd = one(ref); if (!editsB(bd)) throw new Denied('You cannot change this whiteboard'); return bd; };
+        const pick = (o: Record<string, unknown>, keys: string[]) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+        const BOARD_KEYS = ['name', 'description', 'projectId', 'sop', 'nodes', 'edges', 'webhooks', 'addNodes', 'updateNodes', 'removeNodes', 'addEdges', 'removeEdges', 'rotateKey'];
+        const runOf = (rid: string) => { const r = tasks.boardRun(rid); one(r.boardId); return r; };
+        if (!b && m === 'GET') return send(res, 200, tasks.listBoards({projectId: q('projectId'), sop: q('sop'), itemId: q('itemId') ? tasks.findItem(q('itemId')!).id : undefined}).filter(seesB).map(out));
+        // Bring in a board made with Claude Whiteboards: {elements, name?, projectId?}.
+        if (b === 'import' && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const input = {elements: body.elements, name: body.name ? String(body.name) : undefined, projectId: body.projectId ?? null};
+          if (held('importBoard', [input, actor])) return send(res, 202, propose(tasks, actor!, 'importBoard', [input, actor]));
+          const r = tasks.importBoard(input, actor);
+          return send(res, 201, {...r, board: out(r.board)});
+        }
+        // One board per SOP for every routine (existing SOP boards are kept).
+        if (b === 'by-sop' && m === 'POST') {
+          if (held('boardsBySop', [{actor}])) return send(res, 202, propose(tasks, actor!, 'boardsBySop', [{actor}]));
+          const r = tasks.boardsBySop({actor, canSee: pid => canSee(pid) && caps(actor, pid, !!bearer).has('edit')});
+          return send(res, 201, {made: r.made.map(out), kept: r.kept.filter(seesB).map(out)});
+        }
+        if (!b && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const input = pick(body, BOARD_KEYS);
+          if (held('createBoard', [input, actor])) return send(res, 202, propose(tasks, actor!, 'createBoard', [input, actor]));
+          return send(res, 201, out(tasks.createBoard(input, actor)));
+        }
+        if (b === 'from-items' && m === 'POST') {
+          if (body.projectId) need(body.projectId, 'edit');
+          const qy = pick(body, ['name', 'projectId', 'tag', 'parentId', 'itemIds', 'routines']);
+          // An SOP already has its board: open that one instead of making another.
+          const code = typeof body.tag === 'string' && /^sop-/i.test(body.tag) ? body.tag.toUpperCase() : null;
+          const have = code ? tasks.listBoards({sop: code}).find(seesB) : undefined;
+          if (have && !body.fresh) return send(res, 200, out(have));
+          if (held('boardFromItems', [qy, actor])) return send(res, 202, propose(tasks, actor!, 'boardFromItems', [qy, actor]));
+          return send(res, 201, out(tasks.boardFromItems(qy, actor, canSee)));
+        }
+        if (b === 'runs' && c && !parts[3] && m === 'GET') return send(res, 200, runOf(c));
+        if (b === 'runs' && c && parts[3] === 'act' && m === 'POST') {
+          const r = runOf(c); edit(r.boardId);
+          if (held('boardRunAction', [c, body.action, body.node])) return send(res, 202, propose(tasks, actor!, 'boardRunAction', [c, body.action, body.node]));
+          return send(res, 200, tasks.boardRunAction(c, body.action, body.node));
+        }
+        if (b && !c && m === 'GET') return send(res, 200, out(one(b)));
+        if (b && !c && m === 'PATCH') {
+          const bd = edit(b);
+          if (body.projectId) need(body.projectId, 'edit');
+          const patch = pick(body, BOARD_KEYS);
+          if (held('updateBoard', [bd.id, patch, actor])) return send(res, 202, propose(tasks, actor!, 'updateBoard', [bd.id, patch, actor]));
+          return send(res, 200, out(tasks.updateBoard(bd.id, patch, actor)));
+        }
+        if (b && !c && m === 'DELETE') {
+          const bd = edit(b);
+          if (bd.projectId) need(bd.projectId, 'delete');
+          if (held('deleteBoard', [bd.id])) return send(res, 202, propose(tasks, actor!, 'deleteBoard', [bd.id]));
+          return send(res, 200, tasks.deleteBoard(bd.id));
+        }
+        if (b && c === 'to-tasks' && m === 'POST') {
+          const bd = edit(b), pid = (body.projectId as string) ?? bd.projectId;
+          if (pid) need(pid, 'create');
+          const opts = pick(body, ['projectId', 'parentId']);
+          if (held('boardToTasks', [bd.id, actor, opts])) return send(res, 202, propose(tasks, actor!, 'boardToTasks', [bd.id, actor, opts]));
+          const r = tasks.boardToTasks(bd.id, actor, opts);
+          return send(res, 200, {...r, board: out(r.board)});
+        }
+        if (b && c === 'run' && m === 'POST') {
+          const bd = one(b);
+          if (bd.projectId) need(bd.projectId, 'create');
+          const opts = {trigger: 'manual', input: body.input, title: body.title ? String(body.title) : undefined};
+          if (held('runBoard', [bd.id, actor, opts])) return send(res, 202, propose(tasks, actor!, 'runBoard', [bd.id, actor, opts]));
+          return send(res, 201, tasks.runBoard(bd.id, actor, opts));
+        }
+        if (b && c === 'runs' && m === 'GET') return send(res, 200, tasks.listBoardRuns(one(b).id, num(q('limit'), 20, 200)));
+      }
       if (a === 'sops') {
         if (!b && m === 'GET') return send(res, 200, listSopLinks(tasks));
         if (!b && m === 'PUT') { needAdmin(); return send(res, 200, setSopLinks(tasks, body.links as {code: string; url: string}[])); }
@@ -1114,14 +1294,18 @@ If you did not ask for it, ignore this email.`)
             .filter(x => !mineIds || (x.review?.agent && mineIds.has(x.review.agent)) || x.item.assignees.some(a => mineIds.has(a))));
         }
         const it = body.itemId ? tasks.findItem(body.itemId) : null;
-        if (it) need(it.projectId, b === 'log' ? 'comment' : 'edit');
-        if (b === 'claim' && m === 'POST') return send(res, 200, tasks.claimTask(it!.id, actor ?? '', body.note ?? ''));
+        if (it) need(it.projectId, b === 'log' || b === 'cleanup' ? 'comment' : 'edit');
+        if (b === 'claim' && m === 'POST') return send(res, 200, tasks.claimTask(it!.id, actor ?? '', body.note ?? '', body.session ?? null));
         if (b === 'decide' && m === 'POST') return send(res, 200, tasks.decideClaim(it!.id, actor, !!body.accept, body.note ?? ''));
-        if (b === 'submit' && m === 'POST') return send(res, 200, tasks.submitWork(it!.id, actor ?? '', String(body.report ?? ''), String(body.missed ?? '')));
-        if (b === 'review' && m === 'POST') return send(res, 200, tasks.reviewWork(it!.id, actor, !!body.approve, String(body.comment ?? '')));
-        if (b === 'log' && m === 'POST') return send(res, 201, tasks.logWork(it!.id, actor, body.kind ?? 'note', String(body.text ?? ''), body.url ?? null));
+        if (b === 'submit' && m === 'POST') return send(res, 200, tasks.submitWork(it!.id, actor ?? '', String(body.report ?? ''), String(body.missed ?? ''), {session: body.session, artifacts: body.artifacts}));
+        // decision: approve, changes, redo or discard. The older {approve: true|false} still works.
+        if (b === 'review' && m === 'POST') return send(res, 200, tasks.reviewWork(it!.id, actor, body.decision ?? !!body.approve, String(body.comment ?? ''), {keep: !!body.keep}));
+        if (b === 'cleanup' && m === 'POST') return send(res, 200, tasks.confirmCleanup(it!.id, actor, String(body.artifact ?? ''), String(body.note ?? '')));
+        if (b === 'log' && m === 'POST') return send(res, 201, tasks.logWork(it!.id, actor, body.kind ?? 'note', String(body.text ?? ''), body.url ?? null, {session: body.session, artifact: body.artifact}));
       }
       if (a === 'items' && b && c === 'log' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.workLog(it.id)); }
+      if (a === 'items' && b && c === 'artifacts' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.workArtifacts(it.id)); }
+      if (a === 'items' && b && c === 'feedback' && m === 'GET') { const it = tasks.findItem(b); need(it.projectId, 'view'); return send(res, 200, tasks.workFeedback(it.id)); }
       if (a === 'items' && b && c === 'files') {
         const it = tasks.findItem(b); need(it.projectId, m === 'GET' ? 'view' : 'comment');
         if (m === 'GET') return send(res, 200, tasks.itemFiles(it.id));

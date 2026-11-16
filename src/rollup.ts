@@ -15,3 +15,7 @@ export function rollupTarget(ps: Project[], prefs: Record<string, unknown>, pid:
   const pick = (prefs.rollupAdd as Record<string, string> | undefined)?.[pid];
   return spaces.find(x => x.id === pick) ?? spaces[0];
 }
+
+/** Spaces a rollup shows. "All spaces" leaves out list spaces (records, not tasks) unless it is a built-in one (Routines). */
+export const includedIn = (rollup: Project, all: Project[]) =>
+  all.filter(p => p.id !== rollup.id && !p.settings.rollup && (rollup.settings.rollup!.include ? rollup.settings.rollup!.include.includes(p.id) : (!p.settings.records || !!rollup.settings.rollup!.scope)));

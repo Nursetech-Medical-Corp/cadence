@@ -147,7 +147,7 @@ export function checkTree(n: Node, depth = 0): number {
   return 1 + (n.children ?? []).reduce((a, c) => a + checkTree(c, depth + 1), 0);
 }
 
-const VIEW_KINDS = ['list', 'table', 'board', 'gantt', 'backlog', 'sprint', 'calendar', 'workload', 'files', 'routines'];
+const VIEW_KINDS = ['list', 'table', 'board', 'gantt', 'backlog', 'sprint', 'calendar', 'workload', 'files', 'routines', 'whiteboard'];
 /** Validates template data before it is saved, from the editor, the API or an agent. */
 export function checkTemplateData(kind: 'item' | 'project' | 'view', d: unknown) {
   if (kind === 'item') { if (checkTree(d as Node) > 2000) throw new Invalid('Templates are limited to 2000 steps'); return; }

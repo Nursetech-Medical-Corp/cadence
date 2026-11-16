@@ -5,6 +5,7 @@ import {Check as CheckIcon, CircleUser, Copy, KeyRound, Mail, Plus, Shield, Tras
 import {FEATURE_LABELS, type Customization, type Features, type Project} from './types.ts';
 import {api, type Store, switchWorkspace, wsId} from './store.ts';
 import {Avatar} from './components.tsx';
+import {WebhooksEditor} from './Webhooks.tsx';
 import {ConnectedAppsCard, pendingConnect} from './ConnectedApps.tsx';
 import {DomainJoinCard, JobRolePicker, JobRolesCard, jobRoleNames, type DomainJoin, type JobRole} from './JobRoles.tsx';
 
@@ -337,6 +338,10 @@ export function TeamPage({store, me}: {store: Store; me: Me}) {
         {ws.requireLogin && <button className="btn" onClick={async () => { await api('/auth/logout', {method: 'POST'}); location.reload(); }}>Sign out</button>}
       </section>}
 
+      {ws && isAdmin && <section className="set-card">
+        <div className="set-card-head"><h3>Workspace webhooks</h3><span className="muted small">POSTs JSON to a URL when something happens in any space (private spaces are left out). Pick the events per endpoint, add a secret to sign each call. Each space has its own endpoints too, in its settings under Integrations. Details: docs/WEBHOOKS.md.</span></div>
+        <WebhooksEditor scope="workspace" store={store} />
+      </section>}
       {ws && isAdmin && <section className="set-card google-card">
         <div className="set-card-head"><h3><GoogleMark /> Google and Gmail</h3><span className="muted small">Sends notification emails through one connected Gmail account and lets people connect their own calendars and Gmail. Signing in with Google is set up on the server (GOOGLE_CLIENT_ID).</span></div>
         <ol className="small steps">

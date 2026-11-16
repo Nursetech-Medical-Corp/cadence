@@ -4,6 +4,7 @@ import {Copy, Plus, Trash2, Zap} from 'lucide-react';
 import type {Action, Condition, InheritKey, Project, Rule, Template, Trigger} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {api, type Store, wsId} from './store.ts';
+import {WebhooksEditor} from './Webhooks.tsx';
 
 const save = (store: Store, p: Project, patch: Partial<Project['settings']>) => store.updateProject(p.id, {settings: {...p.settings, ...patch}});
 
@@ -27,18 +28,31 @@ export function InheritCard({store, project}: {store: Store; project: Project}) 
 
 const TRIGGERS: {kind: Trigger['kind']; label: string}[] = [
   {kind: 'created', label: 'An item is created'}, {kind: 'status', label: 'Status changes to'}, {kind: 'completed', label: 'An item is completed'},
-  {kind: 'assigned', label: 'Someone is assigned'}, {kind: 'due-passed', label: 'The due date passes'},
+  {kind: 'assigned', label: 'Someone is assigned'}, {kind: 'unassigned', label: 'Someone is unassigned'}, {kind: 'comment-added', label: 'A comment is added'},
+  {kind: 'due-soon', label: 'The due date is near, days before:'}, {kind: 'due-today', label: 'It is due today'}, {kind: 'due-passed', label: 'The due date passes'},
+  {kind: 'overdue-by', label: 'It is overdue by days:'}, {kind: 'start-reached', label: 'The start date is reached'},
+  {kind: 'review', label: 'AI review reaches'}, {kind: 'routine-resumed', label: 'A waiting or paused routine starts again'},
+  {kind: 'webhook-received', label: 'An inbound webhook arrives with key'},
 ];
+const REVIEW_STATES: [string, string][] = [['claimed', 'claimed by an agent'], ['accepted', 'claim accepted'], ['submitted', 'submitted for review'], ['changes', 'sent back'], ['redo', 'redo requested'],
+  ['approved', 'approved'], ['declined', 'claim declined'], ['discarded', 'discarded']];
+const defaultTrigger = (kind: Trigger['kind'], p: Project): Trigger =>
+  kind === 'status' ? {kind, to: p.statuses[0].id} : kind === 'review' ? {kind, to: 'submitted'} : kind === 'due-soon' || kind === 'overdue-by' ? {kind, days: 3}
+    : kind === 'webhook-received' ? {kind, key: 'my-hook'} : {kind} as Trigger;
 const ACTIONS: {kind: Action['kind']; label: string}[] = [
   {kind: 'status', label: 'Set status'}, {kind: 'assign', label: 'Assign to'}, {kind: 'priority', label: 'Set priority'}, {kind: 'tag', label: 'Add tag'},
   {kind: 'sprint', label: 'Move to sprint'}, {kind: 'due', label: 'Set due in N days'}, {kind: 'notify', label: 'Notify'},
   {kind: 'template', label: 'Add subitems from template'}, {kind: 'parent-status', label: 'When all siblings are done, set parent status'},
+  {kind: 'webhook', label: 'Call a webhook'}, {kind: 'routine-resume', label: 'Start the waiting or paused routine now'},
 ];
 const RECIPES: {name: string; make: (p: Project) => Omit<Rule, 'id'>}[] = [
   {name: 'Close the parent when all its subitems are done', make: p => ({name: 'Close parent when children are done', enabled: true, trigger: {kind: 'completed'}, conditions: [], actions: [{kind: 'parent-status', value: p.statuses.find(s => s.category === 'done')?.id ?? ''}]})},
   {name: 'New bugs are urgent and go into the current sprint', make: () => ({name: 'Triage new bugs', enabled: true, trigger: {kind: 'created'}, conditions: [{field: 'type', value: 'Bug'}], actions: [{kind: 'priority', value: 1}, {kind: 'sprint', value: 'current'}]})},
   {name: 'Tag overdue work and notify the assignees', make: () => ({name: 'Flag overdue', enabled: true, trigger: {kind: 'due-passed'}, conditions: [], actions: [{kind: 'tag', value: 'overdue'}, {kind: 'notify', value: 'assignees'}]})},
   {name: 'When work starts, put it in the current sprint', make: p => ({name: 'Started work joins the sprint', enabled: true, trigger: {kind: 'status', to: p.statuses.find(s => s.category === 'doing')?.id ?? ''}, conditions: [], actions: [{kind: 'sprint', value: 'current'}]})},
+  {name: 'When completed, call a webhook', make: () => ({name: 'Tell another system when work is done', enabled: true, trigger: {kind: 'completed'}, conditions: [], actions: [{kind: 'webhook', value: ''}]})},
+  {name: 'Three days before the due date, notify the assignees', make: () => ({name: 'Due soon reminder', enabled: true, trigger: {kind: 'due-soon', days: 3}, conditions: [], actions: [{kind: 'notify', value: 'assignees'}]})},
+  {name: 'When a waiting routine starts, call a webhook', make: () => ({name: 'Routine started', enabled: true, trigger: {kind: 'routine-resumed'}, conditions: [], actions: [{kind: 'webhook', value: ''}]})},
   {name: 'Assign new items to whoever created them', make: () => ({name: 'Creator owns new items', enabled: true, trigger: {kind: 'created'}, conditions: [], actions: [{kind: 'assign', value: 'creator'}]})},
 ];
 
@@ -67,10 +81,18 @@ export function AutomationsCard({store, project, templates}: {store: Store; proj
             <button className="icon" title="Delete rule" onClick={() => set(rules.filter(x => x.id !== r.id))}><Trash2 size={14} /></button>
           </div>
           <div className="rule-line"><b>When</b>
-            <select className="plain-select" value={r.trigger.kind} onChange={e => upd(r.id, {trigger: e.target.value === 'status' ? {kind: 'status', to: project.statuses[0].id} : {kind: e.target.value} as Trigger})}>
+            <select className="plain-select" value={r.trigger.kind} onChange={e => upd(r.id, {trigger: defaultTrigger(e.target.value as Trigger['kind'], project)})}>
               {TRIGGERS.map(t => <option key={t.kind} value={t.kind}>{t.label}</option>)}
             </select>
             {r.trigger.kind === 'status' && <select className="plain-select" value={r.trigger.to} onChange={e => upd(r.id, {trigger: {kind: 'status', to: e.target.value}})}>{project.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
+            {r.trigger.kind === 'review' && <select className="plain-select" value={r.trigger.to} onChange={e => upd(r.id, {trigger: {kind: 'review', to: e.target.value}})}>{REVIEW_STATES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>}
+            {(r.trigger.kind === 'due-soon' || r.trigger.kind === 'overdue-by') && <input className="plain-select" type="number" min={1} max={365} style={{width: 70}} value={r.trigger.days}
+              onChange={e => upd(r.id, {trigger: {kind: r.trigger.kind, days: Math.max(1, Math.round(Number(e.target.value)) || 1)} as Trigger})} />}
+            {r.trigger.kind === 'webhook-received' && <>
+              <input className="plain-select" style={{width: 140}} defaultValue={r.trigger.key} key={r.trigger.key} placeholder="key" title="Letters, digits, dots, dashes and underscores"
+                onBlur={e => e.target.value !== (r.trigger as {key: string}).key && upd(r.id, {trigger: {kind: 'webhook-received', key: e.target.value.trim()}})} />
+              <span className="muted small">POST /api/hooks/in/trigger with {'{'}"project": "{project.key}", "key": "{r.trigger.key}"{'}'} and an API token</span>
+            </>}
           </div>
           {r.conditions.map((c, k) => (
             <div key={k} className="rule-line"><b>{k === 0 ? 'If' : 'and'}</b>
@@ -86,7 +108,8 @@ export function AutomationsCard({store, project, templates}: {store: Store; proj
               <select className="plain-select" value={a.kind} onChange={e => upd(r.id, {actions: r.actions.map((x, n) => n === k ? defaultAction(e.target.value as Action['kind'], project) : x)})}>
                 {ACTIONS.map(x => <option key={x.kind} value={x.kind}>{x.label}</option>)}
               </select>
-              <ActionValue a={a} project={project} store={store} templates={templates} onChange={value => upd(r.id, {actions: r.actions.map((x, n) => n === k ? {...x, value} as Action : x)})} />
+              <ActionValue a={a} project={project} store={store} templates={templates} onChange={value => upd(r.id, {actions: r.actions.map((x, n) => n === k ? {...x, value} as Action : x)})}
+                onSecret={secret => upd(r.id, {actions: r.actions.map((x, n) => n === k ? {...x, secret} as Action : x)})} />
               <button className="icon" onClick={() => upd(r.id, {actions: r.actions.filter((_, n) => n !== k)})}><Trash2 size={12} /></button>
             </div>
           ))}
@@ -113,7 +136,8 @@ function defaultAction(kind: Action['kind'], p: Project): Action {
   if (kind === 'sprint') return {kind, value: 'current'};
   if (kind === 'notify') return {kind, value: 'assignees'};
   if (kind === 'assign') return {kind, value: 'creator'};
-  if (kind === 'tag' || kind === 'template') return {kind, value: ''};
+  if (kind === 'tag' || kind === 'template' || kind === 'webhook') return {kind, value: ''};
+  if (kind === 'routine-resume') return {kind};
   return {kind, value: kind === 'parent-status' ? p.statuses.find(s => s.category === 'done')?.id ?? '' : p.statuses[0].id} as Action;
 }
 
@@ -124,7 +148,7 @@ function ConditionValue({c, project, store, onChange}: {c: Condition; project: P
   return <input className="plain-select" placeholder="tag" value={c.value} onChange={e => onChange(e.target.value)} />;
 }
 
-function ActionValue({a, project, store, templates, onChange}: {a: Action; project: Project; store: Store; templates: Template[]; onChange: (v: unknown) => void}) {
+function ActionValue({a, project, store, templates, onChange, onSecret}: {a: Action; project: Project; store: Store; templates: Template[]; onChange: (v: unknown) => void; onSecret: (secret: string) => void}) {
   const people = <>{store.people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</>;
   switch (a.kind) {
     case 'status': case 'parent-status': return <select className="plain-select" value={a.value} onChange={e => onChange(e.target.value)}>{project.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select>;
@@ -134,6 +158,13 @@ function ActionValue({a, project, store, templates, onChange}: {a: Action; proje
     case 'sprint': return <select className="plain-select" value={a.value} onChange={e => onChange(e.target.value)}><option value="current">Current sprint</option><option value="next">Next sprint</option><option value="none">Backlog</option></select>;
     case 'due': return <input className="plain-select" type="number" style={{width: 70}} value={a.value} onChange={e => onChange(Number(e.target.value))} />;
     case 'template': return <select className="plain-select" value={a.value} onChange={e => onChange(e.target.value)}><option value="">Pick a template</option>{templates.filter(t => t.kind === 'item').map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>;
+    // The URL and secret are saved when you leave the field, since a half-typed URL is refused.
+    case 'webhook': return <>
+      <input className="plain-select" style={{flex: 1, minWidth: 200}} placeholder="https://..." defaultValue={a.value} key={a.value} onBlur={e => e.target.value.trim() !== a.value && onChange(e.target.value.trim())} />
+      <input className="plain-select" style={{width: 170}} type="password" autoComplete="new-password" placeholder={a.hasSecret ? 'Secret saved' : 'Secret (optional)'} title="Signs the call with X-Cadence-Signature"
+        onBlur={e => { if (e.target.value) { onSecret(e.target.value); e.target.value = ''; } }} />
+    </>;
+    case 'routine-resume': return null;
     default: return <input className="plain-select" placeholder="tag" value={a.value} onChange={e => onChange(e.target.value)} />;
   }
 }
@@ -162,13 +193,11 @@ export function TemplatesCard({store, project, templates, reload}: {store: Store
 }
 
 export function IntegrationsCard({store, project}: {store: Store; project: Project}) {
-  const [url, setUrl] = useState('');
   const base = location.origin;
   const feeds = [
     {label: 'This space', href: `${base}/api/calendar.ics?project=${project.id}&ws=${wsId()}`},
     ...store.people.map(p => ({label: `${p.name}'s work, all spaces`, href: `${base}/api/calendar.ics?person=${p.id}&ws=${wsId()}`})),
   ];
-  const hooks = project.settings.webhooks;
   return (
     <section className="set-card">
       <div className="set-card-head"><h3>Integrations</h3><span className="muted small">Calendars, other apps, and AI assistants.</span></div>
@@ -185,13 +214,12 @@ export function IntegrationsCard({store, project}: {store: Store; project: Proje
       </div>
       <div className="int-block">
         <b>Webhooks</b>
-        <div className="muted small">POSTs JSON to a URL when items are created, updated, completed, deleted or restored. Works with Zapier, Make, n8n and Slack workflows, so you can send Gmail messages or Slack posts from those tools.</div>
-        {hooks.map(h => (
-          <div key={h.id} className="set-item"><span className="grow small" style={{wordBreak: 'break-all'}}>{h.url}</span>
-            <button className="icon" onClick={() => save(store, project, {webhooks: hooks.filter(x => x.id !== h.id)})}><Trash2 size={14} /></button></div>
-        ))}
-        <div className="set-add"><input className="plain-select" style={{flex: 1}} placeholder="https://hooks.zapier.com/..." value={url} onChange={e => setUrl(e.target.value)} />
-          <button className="btn" disabled={!/^https?:\/\//.test(url)} onClick={() => { save(store, project, {webhooks: [...hooks, {id: Math.random().toString(36).slice(2, 10), url, events: []}]}); setUrl(''); }}><Plus size={14} /> Add</button></div>
+        <div className="muted small">POSTs JSON to a URL when something happens in this space: items, dates, comments, time, approvals, AI work, routines. Pick the events per endpoint; add a secret to sign each call. Failed calls are retried after 1, 5 and 30 minutes. Works with Zapier, Make, n8n and Slack workflows. Endpoints for every space at once are on the Team page. Details: docs/WEBHOOKS.md.</div>
+        <WebhooksEditor scope={project.id} store={store} />
+      </div>
+      <div className="int-block">
+        <b>Inbound webhooks</b>
+        <div className="muted small">Other systems can act here with an API token (Team page): POST JSON to <code>{base}/api/hooks/in/&lt;action&gt;</code> with header <code>Authorization: Bearer &lt;token&gt;</code>. Actions are the same as the AI tools: <code>create_item</code>, <code>update_item</code>, <code>complete_item</code>, <code>add_comment</code>, <code>log_time</code>, <code>upsert_external</code> and the rest, plus <code>trigger</code> to run the automations here that wait for a webhook key. An unknown action answers with the full list.</div>
       </div>
       <div className="int-block">
         <b>Email to task</b>

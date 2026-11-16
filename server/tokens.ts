@@ -48,7 +48,32 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
   const isAdmin = () => !!(tasks.db.prepare('select admin from people where id = ?').get(actor) as {admin: number} | undefined)?.admin;
   const self = (person: string, what: string) => { if (person !== actor) throw new Forbidden(`You can only ${what} your own`); };
   const selfOrAdmin = (person: string, what: string) => { if (person !== actor && !isAdmin()) throw new Forbidden(`Only admins ${what} for others`); };
+  // Whiteboards in a space follow that space's permissions; boards without a space are seen by everyone and changed by their maker or an admin.
+  const boardOf = (ref: string) => tasks.board(ref);
+  const seesBoard = (b: {projectId: string | null}) => !b.projectId || sees(b.projectId);
+  const editsBoard = (b: {projectId: string | null; createdBy: string | null}) => b.projectId ? caps(b.projectId).has('edit') : b.createdBy === actor || isAdmin();
+  const needBoard = (ref: string) => { const b = boardOf(ref); if (!seesBoard(b)) throw new Forbidden('Not found'); if (!editsBoard(b)) throw new Forbidden('Not allowed: you cannot change this whiteboard'); return b; };
+  const boardOut = (b: any) => editsBoard(b) ? b : {...b, hookKey: undefined};
+  const runBoardOf = (runId: string) => { const r = tasks.db.prepare('select board_id from board_runs where id = ?').get(runId) as {board_id: string} | undefined; if (!r) throw new Forbidden('Not found'); const b = boardOf(r.board_id); if (!seesBoard(b)) throw new Forbidden('Not found'); return b; };
+  // Workspace endpoints hear every space, so they are for admins; a space's own need the settings permission there.
+  const hooks = (scope: string) => { if (scope === 'workspace') { if (!isAdmin()) throw new Forbidden('Only admins manage workspace webhooks'); } else need(scope, 'settings'); };
   const checks: Record<string, (...a: any[]) => void> = {
+    dayPlan: (person) => self(person, 'read day plans'),
+    updateDayPlan: (person) => self(person, 'plan days'),
+    autoSchedule: (person) => self(person, 'plan days'),
+    fitDayToLogged: (person) => self(person, 'plan days'),
+    createSubspace: (pid) => need(pid, 'settings'),
+    boardsBySop: (o) => { if (o) o.visible = tasks.listProjects().filter(p => sees(p.id) && caps(p.id).has('edit')).map(p => p.id); else throw new Forbidden('Pass options'); },
+    importBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
+    createBoard: (i) => { if (i?.projectId) need(i.projectId, 'edit'); },
+    updateBoard: (ref, patch) => { needBoard(ref); if (patch?.projectId) need(patch.projectId, 'edit'); },
+    deleteBoard: (ref) => { const b = needBoard(ref); if (b.projectId) need(b.projectId, 'delete'); },
+    boardFromItems: (q) => { if (q?.projectId) need(q.projectId, 'edit'); for (const x of q?.itemIds ?? []) if (!sees(projOfItem(x))) throw new Forbidden('Not found'); if (q?.parentId && !sees(projOfItem(q.parentId))) throw new Forbidden('Not found'); if (q) q.visible = tasks.listProjects().filter(p => sees(p.id)).map(p => p.id); },
+    boardToTasks: (ref, _a, opts) => { const b = needBoard(ref); const pid = opts?.projectId ?? b.projectId; if (pid) need(pid, 'create'); },
+    runBoard: (ref) => { const b = boardOf(ref); if (!seesBoard(b)) throw new Forbidden('Not found'); if (b.projectId) need(b.projectId, 'create'); },
+    listBoardRuns: (ref) => { if (ref && !seesBoard(boardOf(ref))) throw new Forbidden('Not found'); },
+    boardRun: (runId) => runBoardOf(runId),
+    boardRunAction: (runId) => { const b = runBoardOf(runId); if (!editsBoard(b)) throw new Forbidden('Not allowed: you cannot change this whiteboard'); },
     createItem: (i) => { need(i.projectId, 'create'); for (const d of i.deps ?? []) need(projOfItem(d), 'view'); },
     quickAdd: (i) => need(i.projectId, 'create'),
     routine: (id, _a, _actor, opts) => { need(projOfItem(id), 'edit'); for (const d of opts?.on ?? []) need(projOfItem(d), 'view'); },
@@ -96,6 +121,15 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     createView: (i) => need(i.projectId, 'views'),
     applyPlan: (pid) => need(pid, 'edit'),
     upsertExternal: (i) => need(i.projectId, 'create'),
+    plugins: (person) => self(person ?? '', 'see plugins'),
+    pluginInfo: (_id, person) => self(person ?? '', 'see plugins'),
+    checkPlugin: () => {},
+    savePlugin: (_m, person) => self(person ?? '', 'save plugins'),
+    submitPlugin: (_id, person) => self(person ?? '', 'submit plugins'),
+    deletePlugin: (_id, person) => self(person ?? '', 'remove plugins'),
+    installPlugin: (_id, scope, person) => { self(person ?? '', 'install plugins'); if (scope === 'workspace' && !isAdmin()) throw new Forbidden('Only admins install plugins for the whole workspace'); },
+    uninstallPlugin: (_id, scope, person) => { self(person ?? '', 'remove plugins'); if (scope === 'workspace' && !isAdmin()) throw new Forbidden('Only admins remove workspace plugins'); },
+    setPlugin: (_id, scope, person) => { self(person ?? '', 'change plugins'); if (scope === 'workspace' && !isAdmin()) throw new Forbidden('Only admins change workspace plugins'); },
     installPack: (_p, pid) => { if (pid) need(pid, 'settings'); else if (!isAdmin()) throw new Forbidden('Only admins install packs workspace-wide'); },
     claimTask: (id) => need(projOfItem(id), 'edit'),
     requestApproval: (id) => need(projOfItem(id), 'edit'),
@@ -110,6 +144,11 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     fileTask: (pid) => need(pid, 'create'),
     projectFiles: (pid) => need(pid, 'view'),
     workLog: (id) => need(projOfItem(id), 'view'),
+    workArtifacts: (id) => need(projOfItem(id), 'view'),
+    workFeedback: (id) => need(projOfItem(id), 'view'),
+    confirmCleanup: (id) => need(projOfItem(id), 'comment'),
+    triggerHook: (pid, _key, opts) => { need(pid, 'edit'); if (opts?.item) need(projOfItem(opts.item), 'view'); },
+    webhooks: (scope) => hooks(scope), setWebhooks: (scope) => hooks(scope), testWebhook: (scope) => hooks(scope), hookDeliveries: (scope) => hooks(scope),
     itemFiles: (id) => need(projOfItem(id), 'view'),
     listComments: (id) => need(projOfItem(id), 'view'),
     approvalState: (id) => need(projOfItem(id), 'view'),
@@ -121,6 +160,11 @@ export function guarded(tasks: Tasks, actor: string): Tasks {
     exportPack: (ids: string[]) => { for (const id of ids) checks.getTemplate(id); },
   };
   const filters: Record<string, (r: any) => any> = {
+    listBoards: (r: any[]) => r.filter(seesBoard).map(boardOut),
+    boardsBySop: (r: any) => ({made: r.made.map(boardOut), kept: r.kept.filter(seesBoard).map(boardOut)}),
+    board: (b: any) => { if (!seesBoard(b)) throw new Forbidden('Not found'); return boardOut(b); },
+    createBoard: boardOut, updateBoard: boardOut, boardFromItems: boardOut, importBoard: (r: any) => ({...r, board: boardOut(r.board)}),
+    listBoardRuns: (r: any[]) => r.filter(x => { try { return seesBoard(boardOf(x.boardId)); } catch { return false; } }),
     // Admins see the full setup; everyone else sees job role names and their own job roles.
     jobRoles: (r: any) => isAdmin() ? r : {levels: r.levels.map((l: any) => ({id: l.id, name: l.name})), jobRoles: r.jobRoles.map((j: any) => ({id: j.id, name: j.name})), people: r.people.filter((p: any) => p.id === actor), domainJoin: null},
     listProjects: (r: any[]) => r.filter(p => sees(p.id)),

@@ -15,8 +15,13 @@ export {Invalid, NotFound};
 import * as planner from './planner.ts';
 import * as ai from './aiwork.ts';
 import * as approvals from './approvals.ts';
+import * as boards from './boards.ts';
+import * as dayplan from './dayplan.ts';
 import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateData} from './packs.ts';
-import {apply as applyRule, matches as ruleMatches, type RuleHost} from './automations.ts';
+import {DATE_TRIGGERS, apply as applyRule, matches as ruleMatches, validateRules, type RuleContext, type RuleHost} from './automations.ts';
+import {cleanHooks, cleanRuleSecrets, listDeliveries, queueHooks, saveWorkspaceHooks, workspaceHooks} from './webhooks.ts';
+import {normalizeHook} from '../src/hooks.ts';
+import {PluginCatalog, checkManifest, install as installPluginRow, listInstalls, migratePluginInstalls, pluginEffects, setInstall, uninstall as uninstallPluginRow, type Manifest} from './plugins.ts';
 import {PRIORITIES} from '../src/types.ts';
 import type {Activity, BurnPoint, InheritKey, ProjectSettings, Rule, Template, Trigger, ChangeEvent, Comment, FieldDef, Item, ItemPatch, Notification, Person, Project, Recur, Sprint, Status, TimeEntry, View, ViewConfig, ViewKind} from '../src/types.ts';
 
@@ -159,6 +164,10 @@ export type ItemQuery = {
   text?: string; dueBefore?: string; open?: boolean; limit?: number;
 };
 
+/** Something that happened, for webhooks (server/webhooks.ts). target sends it to one URL only: a rule's webhook action, or a test. */
+export type HookEvent = {event: string; projectId?: string | null; project?: {id: string; key: string; name: string}; item?: Item | null; changes?: {before: unknown; after: unknown};
+  actor?: string | null; details?: Record<string, unknown>; target?: {hook: string; scope: string; url: string; secretKey: string | null}};
+
 export class Tasks {
   private listeners = new Set<(e: ChangeEvent) => void>();
   /** Folder for this workspace's uploaded files. */
@@ -167,6 +176,15 @@ export class Tasks {
 
   on(fn: (e: ChangeEvent) => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(e: ChangeEvent) { for (const fn of this.listeners) fn(e); }
+  /** Id of this workspace, sent with webhook events. */
+  workspace = 'main';
+  private eventListeners = new Set<(e: HookEvent) => void>();
+  onEvent(fn: (e: HookEvent) => void) { this.eventListeners.add(fn); return () => this.eventListeners.delete(fn); }
+  /** The one place outside systems hear from: every event goes to the webhook queue. A problem here never breaks a save. */
+  event(event: string, e: Omit<HookEvent, 'event'> = {}) {
+    const ev = {event, ...e};
+    try { queueHooks(this, ev); for (const fn of this.eventListeners) fn(ev); } catch (err) { console.error('Event failed', event, err); }
+  }
 
   // People. No passwords yet: the UI picks who you are. Real auth is a later iteration.
   listPeople(): Person[] {
@@ -209,6 +227,7 @@ export class Tasks {
     const p: Person = {id: id(), name, email: input.email ?? null, color: COLORS[count % COLORS.length]};
     this.db.prepare('insert into people (id,name,email,color) values (?,?,?,?)').run(p.id, p.name, p.email, p.color);
     this.emit({kind: 'people'});
+    this.event('person.added', {details: {person: p}});
     return p;
   }
 
@@ -237,8 +256,37 @@ export class Tasks {
       .run(p.id, p.name, p.key, JSON.stringify(p.statuses), JSON.stringify(p.types), JSON.stringify(p.fields), p.sort, p.created, JSON.stringify(p.settings));
     if (!input.noViews) DEFAULT_VIEWS.forEach((v, n) => this.createView({projectId: p.id, name: v.name, kind: v.kind, config: v.config, sort: n}));
     this.emit({kind: 'project', project: p});
+    this.event('project.created', {projectId: p.id});
     return p;
   }
+  /**
+   * A space under another space. kind 'tasks' is a normal space nested in the sidebar. 'pipeline' and 'contacts' are list
+   * spaces (records, not tasks) with stages, contact columns and Board, Table and Calendar views; the parent gets a
+   * relation column so its tasks can point at the records (which investor a task is about).
+   */
+  createSubspace(parentId: string, input: {name: string; kind?: 'tasks' | 'pipeline' | 'contacts'; key?: string}) {
+    const parent = this.project(parentId);
+    if (parent.settings.rollup) throw new Invalid('A rollup cannot hold sub-spaces');
+    const kind = input.kind ?? 'tasks';
+    if (!['tasks', 'pipeline', 'contacts'].includes(kind)) throw new Invalid('kind must be tasks, pipeline or contacts');
+    const settings: Partial<ProjectSettings> = {parent: parent.id, ...(parent.settings.access ? {access: parent.settings.access} : {}), ...(kind !== 'tasks' ? {records: true, icon: kind === 'pipeline' ? 'lucide:Target' : 'lucide:Users'} : {})};
+    if (kind === 'tasks') return this.createProject({name: input.name, key: input.key, settings});
+    const st = (id: string, name: string, category: Status['category'], color: string): Status => ({id, name, category, color});
+    const statuses = kind === 'pipeline'
+      ? [st('lead', 'To contact', 'todo', '#94a3b8'), st('contacted', 'Contacted', 'doing', '#3b82f6'), st('meeting', 'Meeting', 'doing', '#a855f7'), st('committed', 'Committed', 'done', '#22c55e'), st('passed', 'Passed', 'done', '#ef4444')]
+      : [st('new', 'New', 'todo', '#94a3b8'), st('reached', 'Reached', 'doing', '#3b82f6'), st('following', 'Following up', 'doing', '#f59e0b'), st('closed', 'Closed', 'done', '#22c55e')];
+    const fields: FieldDef[] = [{id: 'company', name: 'Company', kind: 'text'}, {id: 'email', name: 'Email', kind: 'email'}, {id: 'phone', name: 'Phone', kind: 'phone'},
+      ...(kind === 'pipeline' ? [{id: 'amount', name: 'Amount', kind: 'money', currency: 'USD'} as FieldDef] : []),
+      {id: 'last', name: 'Last contact', kind: 'date'}, {id: 'next', name: 'Next step', kind: 'text'}, {id: 'touches', name: 'Times contacted', kind: 'number'}];
+    const p = this.createProject({name: input.name, key: input.key, statuses, types: [kind === 'pipeline' ? 'Contact' : 'Person'], fields, settings, noViews: true});
+    ([[kind === 'pipeline' ? 'Pipeline' : 'Board', 'board', {groupBy: 'status', hideDone: false}], ['Table', 'table', {calcs: kind === 'pipeline' ? {'f:amount': 'sum'} : {}}], ['Calendar', 'calendar', {}]] as [string, ViewKind, ViewConfig][])
+      .forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config, sort: i}));
+    // The parent's tasks can point at these records.
+    if (!parent.fields.some(f => f.id === `rel-${p.id}`)) this.updateProject(parent.id, {fields: [...parent.fields, {id: `rel-${p.id}`, name: p.name, kind: 'relation'}]});
+    return p;
+  }
+  /** Spaces whose entries are records, not tasks. */
+  recordSpaces() { return new Set(this.listProjects().filter(p => p.settings.records).map(p => p.id)); }
   /** A project whose views show work from other projects together (All projects, or the ones chosen in its settings). */
   createRollup(name = 'All spaces') {
     const min = Math.min(0, ...this.listProjects().map(p => p.sort));
@@ -252,7 +300,7 @@ export class Tasks {
   ensureSystemSpaces() {
     const made: Project[] = [];
     const spaces: [NonNullable<NonNullable<ProjectSettings['rollup']>['scope']>, string, string, string, [string, ViewKind, ViewConfig?][]][] = [
-      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}]]],
+      ['routines', 'Routines', 'RTN', 'lucide:Repeat', [['Routines', 'routines'], ['Table', 'table'], ['Board', 'board', {groupBy: 'assignee'}], ['Timeline', 'gantt', {zoom: 'month'}], ['Calendar', 'calendar'], ['Workload', 'workload', {zoom: 'month'}], ['Whiteboard', 'whiteboard']]],
       ['parked', 'Archive and later', 'ARC', 'lucide:Archive', [['Table', 'table'], ['List', 'list'], ['Board', 'board', {groupBy: 'assignee'}]]],
     ];
     for (const [scope, name, key0, icon, views] of spaces) {
@@ -264,11 +312,26 @@ export class Tasks {
       views.forEach(([n, k, config], i) => this.createView({projectId: p.id, name: n, kind: k, config: config ?? {}, sort: i}));
       made.push(this.updateProject(p.id, {sort: max + 1}));
     }
+    // Routines spaces made before whiteboards get a Whiteboard view, once (deleting it is respected).
+    const rt = this.listProjects().find(p => p.settings.rollup?.scope === 'routines');
+    try {
+      if (rt && !this.db.prepare("select 1 from workspace where key = 'routines-whiteboard'").get()) {
+        if (!this.listViews(rt.id).some(v => v.kind === 'whiteboard')) this.createView({projectId: rt.id, name: 'Whiteboard', kind: 'whiteboard', config: {}});
+        this.db.prepare("insert into workspace (key, value) values ('routines-whiteboard', '1') on conflict(key) do nothing").run();
+      }
+    } catch { /* no workspace table yet (tests without auth) */ }
     return made;
   }
   updateProject(pid: string, patch: Partial<Pick<Project, 'name' | 'key' | 'statuses' | 'types' | 'fields' | 'sort' | 'settings'>>): Project {
     const cur = this.project(pid);
     const p = {...cur, ...patch, settings: {...cur.settings, ...patch.settings}};
+    if (patch.settings && 'parent' in patch.settings && p.settings.parent) {
+      if (p.settings.parent === pid) throw new Invalid('A space cannot sit under itself');
+      const par = this.project(p.settings.parent);
+      if (par.settings.rollup) throw new Invalid('A space cannot sit under a rollup');
+      if (par.settings.parent) throw new Invalid(`${par.name} is already a sub-space. Sub-spaces go one level deep.`);
+      if (this.listProjects().some(x => x.settings.parent === pid)) throw new Invalid(`${cur.name} has sub-spaces of its own, so it cannot move under another space`);
+    }
     if (patch.key !== undefined) {
       p.key = String(p.key).toUpperCase();
       if (!/^[A-Z][A-Z0-9]{1,9}$/.test(p.key)) throw new Invalid('A space key is 2 to 10 letters or digits, starting with a letter, like GEN');
@@ -285,15 +348,25 @@ export class Tasks {
     if (!p.statuses.length) throw new Invalid('A space needs at least one status');
     if (!p.statuses.some(s => s.category === 'done')) throw new Invalid('A space needs at least one status in the Done group');
     if (new Set(p.types).size !== p.types.length || !p.types.length) throw new Invalid('Item types must be unique and not empty');
+    // Rules and endpoints are checked when they change. Their secrets move out of the settings, which every viewer of the space can read.
+    if (patch.settings?.automations !== undefined && JSON.stringify(patch.settings.automations) !== JSON.stringify(cur.settings.automations)) {
+      validateRules(p.settings.automations, p, new Set(this.listPeople().map(x => x.id)));
+      p.settings = {...p.settings, automations: cleanRuleSecrets(this.db, p.settings.automations)};
+    }
+    if (patch.settings?.webhooks !== undefined && JSON.stringify(patch.settings.webhooks) !== JSON.stringify(cur.settings.webhooks))
+      p.settings = {...p.settings, webhooks: cleanHooks(this.db, p.settings.webhooks, cur.settings.webhooks)};
     this.db.prepare('update projects set name=?, key=?, statuses=?, types=?, fields=?, sort=?, settings=? where id=?')
       .run(p.name, p.key, JSON.stringify(p.statuses), JSON.stringify(p.types), JSON.stringify(p.fields), p.sort, JSON.stringify(p.settings), pid);
     this.emit({kind: 'project', project: p});
+    this.event('project.updated', {projectId: pid, details: {changed: Object.keys(patch)}});
     return p;
   }
   deleteProject(pid: string) {
-    if (this.project(pid).settings.rollup?.scope) throw new Invalid('Routines and Archive and later are built in and always there. Rename them if you like.');
+    const gone = this.project(pid);
+    if (gone.settings.rollup?.scope) throw new Invalid('Routines and Archive and later are built in and always there. Rename them if you like.');
     this.db.prepare('delete from projects where id = ?').run(pid);
     this.emit({kind: 'project-deleted', id: pid});
+    if (!gone.settings.access?.private) this.event('project.deleted', {project: {id: gone.id, key: gone.key, name: gone.name}});
   }
 
   // Items
@@ -447,6 +520,8 @@ export class Tasks {
     if (changed.length && !(changed.length === 1 && changed[0] === 'sort'))
       this.log('update', actor, next, Object.fromEntries(changed.map(k => [k, before[k]])), Object.fromEntries(changed.map(k => [k, next[k]])));
 
+    // Done and reopened follow the status, so they are not among the changed fields above.
+    if (wasDone !== !!isDone) this.event(isDone ? 'item.completed' : 'item.reopened', {projectId: next.projectId, item: next, actor, changes: {before: {status: before.status, completed: before.completed}, after: {status: next.status, completed: next.completed}}});
     if (!opts.keep) this.shiftFollowers(before, next, actor);
     const ref = `${p.key}-${next.number}`;
     for (const a of next.assignees.filter(a => !before.assignees.includes(a)))
@@ -460,6 +535,9 @@ export class Tasks {
     if (before.status !== next.status) this.fire({kind: 'status', to: next.status}, this.item(iid));
     if (!wasDone && isDone) this.fire({kind: 'completed'}, this.item(iid));
     if (next.assignees.some(a => !before.assignees.includes(a))) this.fire({kind: 'assigned'}, this.item(iid));
+    if (before.assignees.some(a => !next.assignees.includes(a))) this.fire({kind: 'unassigned'}, this.item(iid));
+    const reviewState = (i: Item) => (i.fields.review as {state?: string} | undefined)?.state;
+    if (reviewState(next) && reviewState(next) !== reviewState(before)) this.fire({kind: 'review', to: reviewState(next)!}, this.item(iid));
     return this.item(iid);
   }
 
@@ -567,8 +645,7 @@ export class Tasks {
     const sched = r.slot ?? done.due;
     const base = r.mode === 'completion' || !sched ? this.today() : sched;
     const due = nextOccurrence(r, base, sched ?? base);
-    if (r.until && due > r.until) return;
-    if (r.count != null && r.count <= 0) return;
+    if ((r.until && due > r.until) || (r.count != null && r.count <= 0)) { this.event('routine.ended', {projectId: p.id, item: done, actor, details: {reason: r.until && due > r.until ? 'until' : 'count'}}); return; }
     const start = done.start && done.due ? addUnit(done.start, daysBetween(done.due, due), 'day') : null;
     const {spawned: _s, slot: _sl, waiting: _w, ...rule} = r;
     void _s; void _sl; void _w;
@@ -578,7 +655,10 @@ export class Tasks {
       // Same item comes back: new dates, back to To do.
       this.db.prepare('update items set status = ?, completed = null, due = ?, start = ?, recur = ?, updated = ? where id = ?')
         .run(todo, due, start, nextRule ? JSON.stringify(nextRule) : null, now(), done.id);
-      this.emit({kind: 'item', item: this.item(done.id)});
+      const back = this.item(done.id);
+      this.emit({kind: 'item', item: back});
+      this.event('item.reopened', {projectId: p.id, item: back, actor});
+      this.event('routine.spawned', {projectId: p.id, item: back, actor, details: {reopened: true, previousDue: done.due}});
       return;
     }
     const next = this.createItem({
@@ -590,6 +670,7 @@ export class Tasks {
       this.createItem({projectId: p.id, parentId: next.id, type: c.type, title: c.title, body: c.body, priority: c.priority, assignees: c.assignees, tags: c.tags, estimate: c.estimate, fields: c.fields}, actor, {system: true});
     this.db.prepare('update items set recur = ? where id = ?').run(JSON.stringify({...r, spawned: next.id}), done.id);
     this.emit({kind: 'item', item: this.item(done.id)});
+    this.event('routine.spawned', {projectId: p.id, item: this.item(next.id), actor, details: {reopened: false, from: done.id}});
   }
 
   /** Routines: open items that repeat, paused ones included. One live copy each; the next is made when it is finished. */
@@ -606,6 +687,7 @@ export class Tasks {
     if (!r || r.spawned || it.completed) throw new Invalid(`${it.title} is not an open repeating item`);
     const shift = (due: string) => it.start && it.due ? addUnit(it.start, daysBetween(it.due, due), 'day') : it.start;
     const anchor = it.due ?? this.today();
+    const tell = (event: string, out: Item, details: Record<string, unknown> = {}) => { this.event(event, {projectId: out.projectId, item: out, actor, details}); return out; };
     if (action === 'pause') return this.updateItem(it.id, {recur: {...r, paused: true}, sprint: null}, actor);
     if (action === 'delay') {
       // Push only this copy. The next one is still counted from the date this one was scheduled for.
@@ -619,15 +701,18 @@ export class Tasks {
       if (!on.length) throw new Invalid('Wait needs the items it waits on');
       const open = on.filter(d => !this.item(d).completed);
       const deps = [...new Set([...it.deps, ...on])];
-      return this.updateItem(it.id, {deps, recur: open.length ? {...r, waiting: true} : {...r, waiting: false}, sprint: open.length ? null : it.sprint}, actor, {keep: true});
+      const out = this.updateItem(it.id, {deps, recur: open.length ? {...r, waiting: true} : {...r, waiting: false}, sprint: open.length ? null : it.sprint}, actor, {keep: true});
+      return open.length ? tell('routine.waiting', out, {waitingOn: open}) : out;
     }
-    if (action === 'end') return this.updateItem(it.id, {recur: null}, actor);
+    if (action === 'end') return tell('routine.ended', this.updateItem(it.id, {recur: null}, actor), {reason: 'ended'});
     if (action === 'resume') {
       const {paused: _p, waiting: _w, slot: _sl, ...rule} = r; void _p; void _w; void _sl;
       let due = it.due;
       for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, anchor);
-      if (due && rule.until && due > rule.until) return this.updateItem(it.id, {recur: null, due}, actor);
-      return this.updateItem(it.id, {recur: rule, due, start: due ? shift(due) : it.start}, actor);
+      if (due && rule.until && due > rule.until) return tell('routine.ended', this.updateItem(it.id, {recur: null, due}, actor), {reason: 'until'});
+      const out = tell('routine.resumed', this.updateItem(it.id, {recur: rule, due, start: due ? shift(due) : it.start}, actor), {reason: r.waiting ? 'wait-ended-by-hand' : 'resumed'});
+      this.fire({kind: 'routine-resumed'}, out);
+      return this.item(it.id);
     }
     if (action !== 'skip') throw new Invalid('Action must be skip, pause, resume or end');
     const sched = r.slot ?? anchor;
@@ -636,7 +721,7 @@ export class Tasks {
     if (r.until && due > r.until) throw new Invalid('That was the last one. End the routine instead.');
     if (r.count != null && r.count <= 1) throw new Invalid('That was the last one. End the routine instead.');
     const {slot: _sl, ...kept} = r; void _sl;
-    return this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...kept, count: r.count - 1} : kept}, actor);
+    return tell('routine.skipped', this.updateItem(it.id, {due, start: shift(due), recur: r.count != null ? {...kept, count: r.count - 1} : kept}, actor), {from: anchor, to: due});
   }
   /** When work finishes, start the routines that were waiting only on it. Their first date is the next one from today. */
   private releaseWaiting(doneId: string, actor: string | null) {
@@ -649,6 +734,10 @@ export class Tasks {
       for (let n = 0; due && due < this.today() && n < 5000; n++) due = nextOccurrence(rule, due, w.due!);
       this.updateItem(wid, {recur: rule, due: due ?? this.today()}, actor, {system: true, keep: true});
       for (const a of w.assignees) this.notify(a, actor, wid, 'assigned', `routine started (what it waited on is done): ${w.title}`);
+      // Told at once, so an outside system or a rule can act the moment the wait is over.
+      const started = this.item(wid);
+      this.event('routine.resumed', {projectId: started.projectId, item: started, actor, details: {reason: 'wait-over', releasedBy: doneId}});
+      this.fire({kind: 'routine-resumed'}, started);
     }
   }
 
@@ -698,6 +787,7 @@ export class Tasks {
     const c = this.comment(cid);
     this.db.prepare('update comments set resolved = ? where id = ?').run(resolved ? now() : null, cid);
     this.emit({kind: 'comment', itemId: c.itemId});
+    if (resolved) { const item = this.item(c.itemId); this.event('comment.resolved', {projectId: item.projectId, item, actor: _actor, details: {comment: this.comment(cid)}}); }
     return this.comment(cid);
   }
   addComment(itemId: string, author: string, body: string, assignee: string | null = null): Comment {
@@ -714,6 +804,9 @@ export class Tasks {
     if (assignee && assignee !== author) this.notify(assignee, author, itemId, 'assigned-comment', `assigned you a comment on ${ref}: ${c.body.slice(0, 80)}`);
     for (const m of mentioned.filter(x => x !== assignee)) this.notify(m, author, itemId, 'mention', `mentioned you on ${ref}: ${c.body.slice(0, 80)}`);
     for (const w of this.watchers(item).filter(w => !mentioned.includes(w))) this.notify(w, author, itemId, 'comment', `commented on ${ref}: ${c.body.slice(0, 80)}`);
+    this.event('comment.created', {projectId: p.id, item, actor: author, details: {comment: c}});
+    for (const m of mentioned) this.event('mention.created', {projectId: p.id, item, actor: author, details: {comment: c, person: m}});
+    this.fire({kind: 'comment-added'}, item);
     return c;
   }
 
@@ -739,6 +832,7 @@ export class Tasks {
     const e: TimeEntry = {id: id(), itemId, person, start: now(), end: null, minutes: null, note: null, kind: kind === 'review' ? 'review' : 'work'};
     this.db.prepare('insert into time_entries (id,item_id,person,start,kind) values (?,?,?,?,?)').run(e.id, e.itemId, e.person, e.start, e.kind);
     this.emit({kind: 'time', itemId});
+    this.timeEvent('timer.started', e);
     return e;
   }
   /** Stops the running timer. Time is kept to the second; a run under a second is dropped. */
@@ -751,6 +845,8 @@ export class Tasks {
     const minutes = seconds / 60, n = note == null ? run.note : String(note).slice(0, 500);
     this.db.prepare('update time_entries set end = ?, minutes = ?, note = ? where id = ?').run(end, minutes, n, run.id);
     this.emit({kind: 'time', itemId: run.itemId});
+    this.timeEvent('timer.stopped', {...run, end, minutes, note: n});
+    this.timeEvent('time.logged', {...run, end, minutes, note: n});
     return {...run, end, minutes, note: n};
   }
   /** Logs time by minutes (on a date), or by a start and an end (then minutes is the span). */
@@ -767,7 +863,12 @@ export class Tasks {
     const e: TimeEntry = {id: id(), itemId: input.itemId, person: input.person, start, end, minutes, note, kind: 'work'};
     this.db.prepare('insert into time_entries (id,item_id,person,start,end,minutes,note) values (?,?,?,?,?,?,?)').run(e.id, e.itemId, e.person, e.start, e.end, e.minutes, e.note);
     this.emit({kind: 'time', itemId: input.itemId});
+    this.timeEvent('time.logged', e);
     return e;
+  }
+  private timeEvent(event: string, entry: TimeEntry) {
+    const item = this.item(entry.itemId);
+    this.event(event, {projectId: item.projectId, item, actor: entry.person, details: {entry}});
   }
   /** Logged minutes per item (all people), for the Time tracked column. */
   timeTotals(itemId?: string): Record<string, number> {
@@ -826,6 +927,8 @@ export class Tasks {
     for (const fn of this.notifyListeners) { try { fn({person, actor, itemId, kind, text}); } catch { /* email problems must not block the save */ } }
     this.db.prepare('insert into notifications (id,person,item_id,kind,text,actor,created) values (?,?,?,?,?,?,?)').run(id(), person, itemId, kind, text, actor, now());
     this.emit({kind: 'notification', person});
+    const about = itemId ? this.db.prepare('select * from items where id = ?').get(itemId) : undefined;
+    this.event('notification.created', {projectId: about ? about.project_id as string : null, item: about ? toItem(about) : null, actor, details: {notification: {person, kind, text}}});
   }
   listNotifications(person: string, unreadOnly = false): Notification[] {
     return this.db.prepare(`select * from notifications where person = ? ${unreadOnly ? 'and read = 0' : ''} order by created desc, rowid desc limit 100`).all(person).map(r => ({
@@ -842,7 +945,8 @@ export class Tasks {
   // My Work: open items assigned to a person, bucketed by due date.
   myWork(person: string) {
     const today = this.today(), week = addUnit(today, 7, 'day');
-    const items = this.listItems({assignee: person, open: true});
+    const rec = this.recordSpaces();
+    const items = this.listItems({assignee: person, open: true}).filter(i => !rec.has(i.projectId));
     const bucket = (i: Item) => !i.due ? 'noDate' : i.due < today ? 'overdue' : i.due === today ? 'today' : i.due <= week ? 'thisWeek' : 'later';
     const out: Record<string, Item[]> = {overdue: [], today: [], thisWeek: [], later: [], noDate: []};
     for (const i of items) out[bucket(i)].push(i);
@@ -885,13 +989,22 @@ export class Tasks {
 
   // Automations. Depth guard stops rules from triggering each other forever.
   private ruleDepth = 0;
-  private fire(trigger: Trigger, item: Item) {
-    if (this.ruleDepth > 3) return;
-    const rules = this.project(item.projectId).settings.automations.filter(r => ruleMatches(r, trigger, item, this.ruleHost));
-    if (!rules.length) return;
+  /** item is null only for an inbound webhook without an item; then ctx names the space. Returns the rules that ran. */
+  private fire(trigger: Trigger, item: Item | null, ctx: {projectId?: string; data?: unknown} = {}): Rule[] {
+    if (this.ruleDepth > 3) return [];
+    const projectId = item?.projectId ?? ctx.projectId!;
+    const rules = this.project(projectId).settings.automations.filter(r => ruleMatches(r, trigger, item, this.ruleHost));
+    if (!rules.length) return [];
     this.ruleDepth++;
-    try { for (const r of rules) { applyRule(r, this.item(item.id), this.ruleHost); this.logRule(r, item); } }
+    try { for (const r of rules) this.runRule(r, item && this.item(item.id), {trigger, projectId, data: ctx.data}); }
     finally { this.ruleDepth--; }
+    return rules;
+  }
+  private runRule(r: Rule, item: Item | null, ctx: RuleContext) {
+    applyRule(r, item, this.ruleHost, ctx);
+    if (item) this.logRule(r, item);
+    const after = item ? this.db.prepare('select * from items where id = ?').get(item.id) : undefined;
+    this.event('automation.ran', {projectId: ctx.projectId, item: after ? toItem(after) : null, details: {rule: {id: r.id, name: r.name}, trigger: ctx.trigger}});
   }
   private logRule(r: Rule, item: Item) {
     this.db.prepare('insert or ignore into rule_runs (rule_id, item_id) values (?, ?)').run(r.id, item.id);
@@ -905,26 +1018,77 @@ export class Tasks {
       notifyPerson: (person, itemId, text) => this.notify(person, null, itemId, 'automation', text),
       instantiateTemplate: (tid, pid, parentId, actor) => this.useItemTemplate(tid, pid, parentId, actor),
       addDays: (d, n) => addUnit(d, n, 'day'),
+      sendWebhook: (rule, a, item, ctx) => this.event('automation.webhook', {projectId: ctx.projectId, item,
+        details: {rule: {id: rule.id, name: rule.name}, trigger: ctx.trigger, ...(ctx.data !== undefined ? {data: ctx.data} : {})},
+        target: {hook: `rule:${rule.id}`, scope: ctx.projectId, url: a.value, secretKey: `rule:${rule.id}:${a.value}`}}),
+      resumeRoutine: id => { const it = this.item(id); if (it.recur && !it.recur.spawned && !it.completed && (it.recur.waiting || it.recur.paused)) this.routine(id, 'resume', null); },
     };
   }
-  /** Hourly: due-date rules (once per item) and automatic sprint rollover. */
+  /** Inbound webhook (POST /api/hooks/in/trigger): runs this space's rules that wait for this key. With an item the rules act on it;
+   *  without one only webhook, template and notify-a-person actions run. data (the JSON that came in) goes out with webhook actions. */
+  triggerHook(projectId: string, key: string, opts: {item?: string | null; data?: unknown} = {}) {
+    const p = this.project(projectId);
+    if (typeof key !== 'string' || !key.trim()) throw new Invalid('key is required');
+    const item = opts.item ? this.findItem(opts.item) : null;
+    if (item && item.projectId !== p.id) throw new Invalid('That item is in another space');
+    return {ran: this.fire({kind: 'webhook-received', key}, item, {projectId: p.id, data: opts.data}).map(r => ({id: r.id, name: r.name}))};
+  }
+  /** The date a date rule is about for this item today, or null when the rule does not apply now. A rule runs once per item and date. */
+  private ruleDate(t: Trigger, i: Item, today: string): string | null {
+    const left = i.due ? daysBetween(today, i.due) : null;
+    if (t.kind === 'due-passed') return left !== null && left < 0 ? i.due : null;
+    if (t.kind === 'due-today') return left === 0 ? i.due : null;
+    if (t.kind === 'due-soon') return left !== null && left > 0 && left <= t.days ? i.due : null;
+    if (t.kind === 'overdue-by') return left !== null && -left >= t.days ? i.due : null;
+    if (t.kind === 'start-reached') return i.start && i.start <= today ? i.start : null;
+    return null;
+  }
+  /** Hourly: date rules (once per item and date, so they run again when the date changes), date events and automatic sprint rollover. */
   periodic() {
     const today = this.today();
     for (const p of this.listProjects()) {
-      const rules = p.settings.automations.filter(r => r.enabled && r.trigger.kind === 'due-passed');
-      if (rules.length) for (const i of this.listItems({projectId: p.id, open: true}).filter(i => i.due && i.due < today)) {
+      const rules = p.settings.automations.filter(r => r.enabled && DATE_TRIGGERS.includes(r.trigger.kind));
+      if (rules.length) for (const i of this.listItems({projectId: p.id, open: true})) {
         for (const r of rules) {
-          if (this.db.prepare('select 1 from rule_runs where rule_id = ? and item_id = ?').get(r.id, i.id)) continue;
-          if (!ruleMatches(r, {kind: 'due-passed'}, i, this.ruleHost)) continue;
+          const stamp = this.ruleDate(r.trigger, i, today);
+          if (!stamp || !ruleMatches(r, r.trigger, i, this.ruleHost)) continue;
+          if (!this.db.prepare('insert or ignore into rule_fires (rule_id, item_id, stamp) values (?, ?, ?)').run(r.id, i.id, stamp).changes) continue;
           this.ruleDepth++;
-          try { applyRule(r, i, this.ruleHost); } finally { this.ruleDepth--; }
-          this.logRule(r, i);
+          try { this.runRule(r, i, {trigger: r.trigger, projectId: p.id}); } finally { this.ruleDepth--; }
         }
       }
       if (p.settings.autoRollover) for (const s of this.listSprints(p.id).filter(s => s.end < today))
         if (this.listItems({projectId: p.id, open: true}).some(i => i.sprint === s.id)) this.rolloverSprint(s.id);
     }
+    try { boards.boardsPeriodic(this); } catch (e) { console.error('Whiteboard schedules failed', (e as Error).message); }
+    this.dateEvents(today);
     this.reminders();
+  }
+  /** Date events for webhooks, each sent once per item (or sprint) and date. On the first run after an upgrade the dates
+   *  already reached are only marked, so old work does not flood the endpoints. */
+  private dateEvents(today: string) {
+    const silent = !!this.db.prepare("select 1 from event_runs where key = 'baseline-pending'").get();
+    const send = (key: string, event: string, e: Omit<HookEvent, 'event'>) => {
+      if (this.db.prepare('insert or ignore into event_runs (key, at) values (?, ?)').run(key, now()).changes && !silent) this.event(event, e);
+    };
+    const soon = workspaceHooks(this.db).dueSoonDays;
+    for (const i of this.listItems({open: true})) {
+      const e = {projectId: i.projectId, item: i};
+      if (i.due) {
+        const left = daysBetween(today, i.due), days = left > 0 ? soon.find(n => left <= n) : undefined;
+        if (days !== undefined) send(`due_soon:${i.id}:${i.due}:${days}`, 'item.due_soon', {...e, details: {days, daysLeft: left}});
+        if (left === 0) send(`due_today:${i.id}:${i.due}`, 'item.due_today', e);
+        if (left < 0) send(`overdue:${i.id}:${i.due}`, 'item.overdue', {...e, details: {daysOverdue: -left}});
+      }
+      if (i.start && i.start <= today) send(`start:${i.id}:${i.start}`, 'item.start_reached', e);
+    }
+    for (const s of this.listSprints()) {
+      const e = {projectId: s.projectId, details: {sprint: s}}, left = daysBetween(today, s.end);
+      if (s.start <= today && left >= 0) send(`sprint_started:${s.id}:${s.start}`, 'sprint.started', e);
+      if (s.start <= today && left >= 0 && left <= 2) send(`sprint_ending:${s.id}:${s.end}`, 'sprint.ending_soon', {...e, details: {sprint: s, daysLeft: left}});
+      if (left < 0) send(`sprint_ended:${s.id}:${s.end}`, 'sprint.ended', e);
+    }
+    if (silent) this.db.prepare("delete from event_runs where key = 'baseline-pending'").run();
   }
 
   /** Reminders, each sent once: due today or tomorrow and overdue (8 am to 8 pm only), and timers left running 4 hours. */
@@ -934,8 +1098,9 @@ export class Tasks {
     const ref = (i: Item) => `${keys.get(i.projectId)}-${i.number}: ${i.title}`;
     if (now.getHours() >= 8 && now.getHours() < 20) {
       const today = this.today(), tomorrow = addUnit(today, 1, 'day');
+      const rec = this.recordSpaces();
       for (const i of this.listItems({open: true})) {
-        if (!i.due || i.due > tomorrow) continue;
+        if (!i.due || i.due > tomorrow || rec.has(i.projectId)) continue;
         const [kind, text, since] = i.due < today ? ['overdue', `${ref(i)} is overdue (due ${i.due})`, ''] : ['due', `${ref(i)} is due ${i.due === today ? 'today' : 'tomorrow'}`, today];
         for (const a of i.assignees) if (!sent(a, i.id, kind, since)) this.notify(a, null, i.id, kind, text);
       }
@@ -1120,8 +1285,26 @@ export class Tasks {
   onLog(fn: (a: {kind: Activity['kind']; item: Item; before: unknown; after: unknown; actor: string | null}) => void) { this.logListeners.add(fn); return () => this.logListeners.delete(fn); }
   private log(kind: Activity['kind'], actor: string | null, item: Item, before: unknown, after: unknown) {
     for (const fn of this.logListeners) { try { fn({kind, item, before, after, actor}); } catch { /* a listener must not break a save */ } }
+    this.itemEvents(kind, actor, item, before, after);
     this.db.prepare('insert into activity (at, actor, kind, item_id, project_id, title, before, after) values (?,?,?,?,?,?,?,?)')
       .run(now(), actor, kind, item.id, item.projectId, item.title, before == null ? null : JSON.stringify(before), after == null ? null : JSON.stringify(after));
+  }
+  /** Webhook events for a saved change: the general one, plus one per kind of change so endpoints can subscribe narrowly. */
+  private itemEvents(kind: Activity['kind'], actor: string | null, item: Item, before: unknown, after: unknown) {
+    const send = (event: string, details?: Record<string, unknown>) => this.event(event, {projectId: item.projectId, item, actor, ...(kind === 'update' ? {changes: {before, after}} : {}), details});
+    if (kind !== 'update') return send(({create: 'item.created', delete: 'item.deleted', revert: 'item.restored'} as const)[kind], kind === 'revert' ? after as Record<string, unknown> : undefined);
+    const b = before as Partial<Item>, a = after as Partial<Item>;
+    send('item.updated');
+    if ('status' in a) send('item.status_changed', {from: b.status, to: a.status});
+    if (a.assignees) {
+      const added = a.assignees.filter(x => !b.assignees?.includes(x)), removed = (b.assignees ?? []).filter(x => !a.assignees!.includes(x));
+      if (added.length) send('item.assigned', {people: added});
+      if (removed.length) send('item.unassigned', {people: removed});
+    }
+    if ('due' in a) send('item.due_changed', {from: b.due, to: a.due});
+    if ('priority' in a) send('item.priority_changed', {from: b.priority, to: a.priority});
+    if ('projectId' in a || 'parentId' in a) send('item.moved', {fromProject: b.projectId, fromParent: b.parentId});
+    if (a.fields && !!a.fields.archived !== !!b.fields?.archived) send(a.fields.archived ? 'item.archived' : 'item.unarchived');
   }
   listActivity(q: {itemId?: string; projectId?: string; limit?: number; before?: number}): Activity[] {
     const where: string[] = [], args: (string | number)[] = [];
@@ -1241,6 +1424,7 @@ export class Tasks {
     const next = this.listSprints(s.projectId).find(x => x.start > s.start) ?? this.createSprint({projectId: s.projectId});
     const open = this.listItems({projectId: s.projectId}).filter(i => i.sprint === sid && !i.completed);
     for (const i of open) this.updateItem(i.id, {sprint: next.id}, actor);
+    this.event('sprint.rolled_over', {projectId: s.projectId, actor, details: {sprint: s, to: next, moved: open.length}});
     return {moved: open.length, to: next};
   }
   /** The sprint running today, else the next one, else the last one. */
@@ -1333,6 +1517,58 @@ export class Tasks {
 
   /** Everything in this workspace as one JSON file (the same as Data and backups, Export). Passwords are left out. */
   exportWorkspace() { return exportAll(this.db, {skipPrivate: true}); }
+  // ---- Plugins (server/plugins.ts): a server-wide catalog and installs in this workspace ----
+  /** The catalog; the API points this at the server-wide accounts database. Alone (stdio MCP) it uses this workspace. */
+  catalog?: PluginCatalog;
+  /** Server owners review plugins submitted for everyone (set by the API). */
+  isReviewer: (person: string | null) => boolean = () => false;
+  private cat() { return this.catalog ??= new PluginCatalog(this.db); }
+  private pluginOwner(person: string | null) {
+    const p = person ? this.db.prepare('select email from people where id = ?').get(person) as {email: string | null} | undefined : undefined;
+    return p?.email || (person ? `person:${person}` : 'local');
+  }
+  /** The catalog this person can see (search with q) and what is installed for the workspace and for them. */
+  plugins(person: string | null, q = '') {
+    migratePluginInstalls(this.db);
+    const owner = this.pluginOwner(person), reviewer = this.isReviewer(person);
+    const installed = listInstalls(this.db, person);
+    return {
+      catalog: this.cat().list(owner, q, reviewer).map(e => ({id: e.id, name: e.manifest.name, description: e.manifest.description, publisher: e.manifest.publisher ?? (e.builtin ? 'Cadence' : e.owner),
+        icon: e.manifest.icon, tags: e.manifest.tags ?? [], version: e.manifest.version, status: e.status, builtin: e.builtin, mine: e.owner === owner, note: e.note,
+        installed: installed.filter(i => i.id === e.id).map(i => i.scope)})),
+      installed, reviewer,
+    };
+  }
+  /** One plugin with everything it changes, shown before install. */
+  pluginInfo(id: string, person: string | null) {
+    const owner = this.pluginOwner(person), e = this.cat().get(id, owner, this.isReviewer(person));
+    return {...e, mine: e.owner === owner, reviewer: this.isReviewer(person), effects: pluginEffects(e.manifest), installed: listInstalls(this.db, person).filter(i => i.id === id)};
+  }
+  /** Check a manifest without saving it. */
+  checkPlugin(manifest: unknown) { const m = checkManifest(manifest); return {ok: true, manifest: m, effects: pluginEffects(m)}; }
+  /** Save a plugin you make (draft, only you see it until it is approved). */
+  savePlugin(manifest: unknown, person: string | null) { return this.cat().save(manifest, this.pluginOwner(person)); }
+  submitPlugin(id: string, person: string | null) { return this.cat().submit(id, this.pluginOwner(person)); }
+  deletePlugin(id: string, person: string | null) { this.cat().remove(id, this.pluginOwner(person), this.isReviewer(person)); return {ok: true}; }
+  reviewPlugin(id: string, approve: boolean, note: string, person: string | null) {
+    if (!this.isReviewer(person)) throw new Invalid('Only the server owner reviews plugins for everyone');
+    this.cat().review(id, approve, note); return this.pluginInfo(id, person);
+  }
+  /** Install for the whole workspace (admins) or just for me. Your own drafts install only for you, to test them. */
+  installPlugin(id: string, scope: 'workspace' | 'me', person: string | null) {
+    migratePluginInstalls(this.db);
+    if (scope !== 'workspace' && scope !== 'me') throw new Invalid('scope is workspace or me');
+    const owner = this.pluginOwner(person), e = this.cat().get(id, owner, this.isReviewer(person));
+    if (e.status !== 'listed' && scope === 'workspace') throw new Invalid('Only approved plugins install for the whole workspace. Install it for yourself to test it.');
+    installPluginRow(this.db, e.manifest as Manifest, scope, person);
+    return listInstalls(this.db, person);
+  }
+  uninstallPlugin(id: string, scope: 'workspace' | 'me', person: string | null) { migratePluginInstalls(this.db); uninstallPluginRow(this.db, id, scope, person); return listInstalls(this.db, person); }
+  /** Turn an installed plugin off or on (it stays installed) or change its settings. */
+  setPlugin(id: string, scope: 'workspace' | 'me', person: string | null, patch: {enabled?: boolean; settings?: Record<string, unknown>}) {
+    migratePluginInstalls(this.db); setInstall(this.db, id, scope, person, patch); return listInstalls(this.db, person);
+  }
+
   /** Job roles (company roles and the spaces each one opens), permission levels, and who holds which job roles. Read only; changes are made on the Team page. */
   jobRoles() {
     const w = getWorkspace(this.db), projects = this.listProjects();
@@ -1432,12 +1668,43 @@ export class Tasks {
   approvalState(itemId: string) { return approvals.approvalState(this, itemId); }
   notifyPublic(person: string, actor: string | null, itemId: string | null, kind: string, text: string) { this.notify(person, actor, itemId, kind, text); }
 
+  // ---- Day planner: top 3, brain dump and time boxes for one person's day (see dayplan.ts) ----
+  dayPlan(person: string, date: string, hintTz?: string) { return dayplan.getDayPlan(this, person, date, hintTz); }
+  updateDayPlan(person: string, date: string, patch: dayplan.DayPatch) { return dayplan.updateDayPlan(this, person, date, patch); }
+  autoSchedule(person: string, date: string, opts: Parameters<typeof dayplan.autoSchedule>[3] = {}) { return dayplan.autoSchedule(this, person, date, opts); }
+  fitDayToLogged(person: string, date: string, opts: {upTo?: string | null; offsetMinutes?: number} = {}) { return dayplan.fitToLogged(this, person, date, opts); }
+
+  // ---- Whiteboards: design and run workflows on a canvas (see boards.ts) ----
+  listBoards(q: {projectId?: string; itemId?: string; sop?: string} = {}) { return boards.listBoards(this, q); }
+  boardsBySop(o: {actor?: string | null; canSee?: (projectId: string) => boolean; visible?: string[]} = {}) { return boards.boardsBySop(this, o.actor ?? null, o.canSee, o.visible); }
+  board(ref: string) { return boards.getBoard(this, ref); }
+  createBoard(input: boards.BoardInput, actor: string | null = null) { return boards.createBoard(this, input, actor); }
+  updateBoard(ref: string, patch: boards.BoardInput & boards.BoardOps & {rotateKey?: boolean}, actor: string | null = null) { return boards.updateBoard(this, ref, patch, actor); }
+  deleteBoard(ref: string) { return boards.deleteBoard(this, ref); }
+  importBoard(input: Parameters<typeof boards.importClaudeBoard>[1], actor: string | null = null) { return boards.importClaudeBoard(this, input, actor); }
+  boardFromItems(q: Parameters<typeof boards.boardFromItems>[1], actor: string | null = null, canSee?: (projectId: string) => boolean) { return boards.boardFromItems(this, q, actor, canSee); }
+  boardToTasks(ref: string, actor: string | null = null, opts: {projectId?: string; parentId?: string | null} = {}) { return boards.boardToTasks(this, ref, actor, opts); }
+  runBoard(ref: string, actor: string | null = null, opts: {trigger?: string; input?: unknown; title?: string} = {}) { return boards.runBoard(this, ref, actor, opts); }
+  listBoardRuns(boardRef?: string, limit = 50) { return boards.listRuns(this, boardRef ? boards.getBoard(this, boardRef).id : undefined, limit); }
+  boardRun(runId: string) { return boards.advance(this, runId); }
+  boardRunAction(runId: string, action: 'cancel' | 'retry' | 'skip', node?: string) { return boards.runAction(this, runId, action, node); }
+
   // ---- Human and AI workers (see aiwork.ts) ----
-  claimTask(itemId: string, agent: string, note = '') { return ai.claim(this, itemId, agent, note); }
+  claimTask(itemId: string, agent: string, note = '', session: string | null = null) { return ai.claim(this, itemId, agent, note, session); }
   decideClaim(itemId: string, reviewer: string | null, accept: boolean, note = '') { return ai.decide(this, itemId, reviewer, accept, note); }
-  submitWork(itemId: string, agent: string, report: string, missed = '') { return ai.submit(this, itemId, agent, report, missed); }
-  reviewWork(itemId: string, reviewer: string | null, approve: boolean, comment = '') { return ai.reviewWork(this, itemId, reviewer, approve, comment); }
-  logWork(itemId: string, actor: string | null, kind: ai.LogEntry['kind'], text: string, url: string | null = null) { return ai.log(this, itemId, actor, kind, text, url); }
+  submitWork(itemId: string, agent: string, report: string, missed = '', opts: {session?: string | null; artifacts?: ai.ArtifactInput[]} = {}) { return ai.submit(this, itemId, agent, report, missed, opts); }
+  /** decision: approve, changes, redo or discard (true and false still mean approve and changes). keep: on discard, leave the agent assigned. */
+  reviewWork(itemId: string, reviewer: string | null, decision: boolean | ai.Decision, comment = '', opts: {keep?: boolean} = {}) { return ai.reviewWork(this, itemId, reviewer, decision, comment, opts); }
+  logWork(itemId: string, actor: string | null, kind: ai.LogEntry['kind'], text: string, url: string | null = null, opts: {session?: string | null; artifact?: ai.ArtifactInput} = {}) {
+    const entry = ai.log(this, itemId, actor, kind, text, url, opts);
+    if (kind !== 'review') { const item = this.item(itemId); this.event('ai.step_logged', {projectId: item.projectId, item, actor, details: {entry}}); }
+    return entry;
+  }
+  /** What the agent made on this item, with the cleanup state of each after a redo or a discard. */
+  workArtifacts(itemId: string) { this.item(itemId); return ai.listArtifacts(this, itemId); }
+  confirmCleanup(itemId: string, actor: string | null, artifactId: string, note = '') { return ai.confirmCleanup(this, itemId, actor, artifactId, note); }
+  /** The latest decision, the reviewer's comment, the session to resume, a compact record of the attempt, and what is left to clean up. */
+  workFeedback(itemId: string) { return ai.feedback(this, itemId); }
   workLog(itemId: string) { return ai.listLog(this, itemId); }
   aiQueue(agent: string | null, projectId?: string) { return ai.aiQueue(this, agent, projectId); }
   attachFile(itemId: string, by: string | null, name: string, mime: string, base64: string) { return ai.saveFile(this, itemId, by, name, mime, base64); }
@@ -1450,6 +1717,24 @@ export class Tasks {
     try { this.attachFile(it.id, actor, f.name, f.mime, f.data); } catch (e) { this.deleteItem(it.id, actor); throw e; }
     return this.item(it.id);
   }
+
+  // ---- Outbound webhooks (see webhooks.ts). scope is a space id, or 'workspace' for the endpoints that hear every space. ----
+  webhooks(scope: string) { return scope === 'workspace' ? workspaceHooks(this.db) : {webhooks: this.project(scope).settings.webhooks.map(normalizeHook)}; }
+  setWebhooks(scope: string, patch: {webhooks?: unknown; dueSoonDays?: unknown}) {
+    if (scope === 'workspace') return saveWorkspaceHooks(this.db, patch);
+    const p = this.project(scope);
+    if (patch.webhooks !== undefined) this.updateProject(p.id, {settings: {...p.settings, webhooks: patch.webhooks as ProjectSettings['webhooks']}});
+    return this.webhooks(scope);
+  }
+  /** Sends a webhook.test event to one endpoint; the result shows in its deliveries. */
+  testWebhook(scope: string, hookId: string, actor: string | null = null) {
+    const h = this.webhooks(scope).webhooks.find(x => x.id === hookId);
+    if (!h) throw new NotFound('Webhook not found');
+    this.event('webhook.test', {projectId: scope === 'workspace' ? null : scope, actor, details: {message: 'Test event from Cadence', hook: {id: h.id, name: h.name}},
+      target: {hook: h.id, scope, url: h.url, secretKey: `hook:${h.id}`}});
+    return this.hookDeliveries(scope, hookId, 1)[0];
+  }
+  hookDeliveries(scope: string, hookId?: string, limit?: number) { if (scope !== 'workspace') this.project(scope); return listDeliveries(this.db, {scope, hook: hookId, limit}); }
 
   /** Cumulative flow: items per status group at the end of each day, rebuilt from the change history. */
   flow(projectId: string, days = 30) {

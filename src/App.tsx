@@ -1,9 +1,12 @@
 import {Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {NewItemSpotlight, NewItemsButton, AddToSpace} from './NewItems.tsx';
+import {FocusHost} from './Focus.tsx';
+import {PluginsPage, PluginPageView} from './Plugins.tsx';
+import {hasFeature, pluginPages, usePluginTheme} from './pluginsClient.ts';
 import {CoverHeader} from './Cover.tsx';
 import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
-import {CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive} from 'lucide-react';
+import {Puzzle, CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive, Workflow, CalendarClock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
 import {api, fmtClock, getMe, useNow, useStore, type Store, storeMe, switchWorkspace, wsId} from './store.ts';
 import {Avatar, Avatars, Check, Empty, InlineText, Popover, StoreContext, TypeBadge, itemKey} from './components.tsx';
@@ -49,10 +52,13 @@ const ApprovalsPage = lazy(() => import('./Approvals.tsx').then(m => ({default: 
 const RoutinesView = lazy(() => import('./Routines.tsx').then(m => ({default: m.RoutinesView})));
 const RoutineSummary = lazy(() => import('./Routines.tsx').then(m => ({default: m.RoutineSummary})));
 const TemplatesPage = lazy(() => import('./Library.tsx').then(m => ({default: m.TemplatesPage})));
+const DayPlanner = lazy(() => import('./DayPlanner.tsx').then(m => ({default: m.DayPlanner})));
+const WhiteboardsPage = lazy(() => import('./Whiteboard.tsx').then(m => ({default: m.WhiteboardsPage})));
+const WhiteboardView = lazy(() => import('./Whiteboard.tsx').then(m => ({default: m.WhiteboardView})));
 const TimesheetPage = lazy(() => import('./Timesheet.tsx').then(m => ({default: m.TimesheetPage})));
 const TeamPage = lazy(() => import('./Team.tsx').then(m => ({default: m.TeamPage})));
 
-type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'; focus?: string} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'};
+type Route = {page: 'project'; id: string; view: string} | {page: 'mywork'} | {page: 'inbox'} | {page: 'data'} | {page: 'history'} | {page: 'team'} | {page: 'signin'} | {page: 'insights'} | {page: 'ai'} | {page: 'templates'} | {page: 'timesheet'} | {page: 'invite'; id: string} | {page: 'signin-link'; id: string} | {page: 'today'} | {page: 'template'; id: string} | {page: 'routines'; focus?: string} | {page: 'parked'} | {page: 'plan'} | {page: 'help'} | {page: 'approvals'} | {page: 'boards'; id?: string} | {page: 'day'} | {page: 'plugins'; id?: string} | {page: 'x'; plugin: string; id: string};
 
 function readRoute(): Route {
   const [page, id, view] = location.hash.slice(2).split('?')[0].split('/');
@@ -65,16 +71,19 @@ function readRoute(): Route {
   if (page === 'ai') return {page: 'ai'};
   if (page === 'templates' && id) return {page: 'template', id};
   if (page === 'routines' && id) return {page: 'routines', focus: id};
+  if (page === 'boards') return {page: 'boards', id: id || undefined};
+  if (page === 'plugins') return {page: 'plugins', id: id ? decodeURIComponent(id) : undefined};
+  if (page === 'x' && id && view) return {page: 'x', plugin: decodeURIComponent(id), id: view};
   if (page === 'timesheet') return {page: 'timesheet'};
   if (page === 'invite' && id) return {page: 'invite', id};
   if (page === 'signin-link' && id) return {page: 'signin-link', id};
   if (page === 'today') return {page: 'today'};
-  if (page === 'templates' || page === 'routines' || page === 'parked' || page === 'plan' || page === 'help' || page === 'approvals') return {page};
+  if (page === 'templates' || page === 'routines' || page === 'parked' || page === 'plan' || page === 'help' || page === 'approvals' || page === 'day') return {page};
   if (page === 'signin') return {page: 'signin'};
   if (page === 'open' && id) { sessionStorage.setItem('open-after', id); history.replaceState(null, '', '#/mywork'); return {page: 'mywork'}; }
   return {page: 'mywork'};
 }
-const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : r.page === 'routines' && r.focus ? `/routines/${r.focus}` : `/${r.page}`; };
+const go = (r: Route) => { location.hash = r.page === 'project' ? `/p/${r.id}/${r.view}` : r.page === 'x' ? `/x/${encodeURIComponent(r.plugin)}/${r.id}` : r.page === 'plugins' && r.id ? `/plugins/${encodeURIComponent(r.id)}` : r.page === 'routines' && r.focus ? `/routines/${r.focus}` : r.page === 'boards' && r.id ? `/boards/${r.id}` : `/${r.page}`; };
 
 export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint: string}[] = [
   {kind: 'list', label: 'List', icon: List, hint: 'Nested outline, fastest for writing'},
@@ -87,10 +96,11 @@ export const VIEW_KINDS: {kind: ViewKind; label: string; icon: typeof List; hint
   {kind: 'sprint', label: 'Sprint', icon: Zap, hint: 'Sprint board, burndown, capacity'},
   {kind: 'files', label: 'Files', icon: Paperclip, hint: 'Every attachment in the space. Drop files to make a task per file'},
   {kind: 'routines', label: 'Routines', icon: Repeat, hint: 'Routines by SOP, frequency or person, with on/off switches, skip, delay and wait'},
+  {kind: 'whiteboard', label: 'Whiteboard', icon: Workflow, hint: 'Map and run the flow: task cards, SOP links, triggers and webhooks on a canvas'},
 ];
 export const viewIcon = (k: ViewKind) => VIEW_KINDS.find(v => v.kind === k)?.icon ?? CalendarRange;
 /** A color per view kind, so tabs and the sidebar are easy to scan. */
-export const VIEW_COLORS: Record<string, string> = {list: '#3b82f6', table: '#10b981', board: '#8b5cf6', gantt: '#ec4899', calendar: '#f97316', workload: '#14b8a6', backlog: '#64748b', sprint: '#ef4444', files: '#d97706', routines: '#0d9488'};
+export const VIEW_COLORS: Record<string, string> = {list: '#3b82f6', table: '#10b981', board: '#8b5cf6', gantt: '#ec4899', calendar: '#f97316', workload: '#14b8a6', backlog: '#64748b', sprint: '#ef4444', files: '#d97706', routines: '#0d9488', whiteboard: '#7c3aed'};
 
 export function App() {
   const [me, setMeState] = useState(getMe);
@@ -102,6 +112,7 @@ export function App() {
     setAuth(a); if (a.required && a.person) { sessionStorage.setItem('me', a.person.id); setMeState(a.person.id); }
   }).catch(() => {}); }, []);
   const store = useStore(me);
+  usePluginTheme(store);
   const storeRef = useRef(store);
   storeRef.current = store;
   const [rawRoute, setRoute] = useState(readRoute);
@@ -233,6 +244,7 @@ export function App() {
       {drawer && <div className="drawer-scrim" onClick={() => setDrawer(false)} />}
       <button className="side-toggle" onClick={toggleSide} title="Show sidebar"><PanelLeft size={16} /></button>
       <main className="main">
+        <FocusHost store={store} open={open} />
         {route.page === 'project' && project && (
           <ProjectPage store={store} project={project} views={projectViews} view={view} settings={route.view === 'settings'} open={open} />
         )}
@@ -248,6 +260,11 @@ export function App() {
         {route.page === 'templates' && <div className="content"><TemplatesPage store={store} open={open} /></div>}
         {route.page === 'template' && <div className="content"><TemplateEditor store={store} id={route.id} /></div>}
         {(route.page === 'routines' || route.page === 'parked') && <SystemRedirect store={store} scope={route.page === 'routines' ? 'routines' : 'parked'} focus={route.page === 'routines' ? route.focus : undefined} />}
+        {route.page === 'plugins' && <div className="content"><PluginsPage store={store} id={route.id} /></div>}
+        {route.page === 'x' && <div className="content"><PluginPageView store={store} pluginId={route.plugin} pageId={route.id} open={open} /></div>}
+        {route.page === 'day' && hasFeature(store, 'dayPlanner') && <div className="content dp-page"><DayPlanner store={store} me={me} open={open} /></div>}
+        {(route.page === 'day' && !hasFeature(store, 'dayPlanner') || route.page === 'boards' && !hasFeature(store, 'whiteboards')) && <div className="content pl-page muted">This page comes from a plugin that is off or not installed. <button className="link" onClick={() => go({page: 'plugins'})}>Open Plugins</button></div>}
+        {route.page === 'boards' && hasFeature(store, 'whiteboards') && <div className="content wb-page"><WhiteboardsPage store={store} id={route.id} open={open} /></div>}
         {route.page === 'timesheet' && <div className="content"><TimesheetPage store={store} open={open} /></div>}
         {route.page === 'plan' && <div className="content"><PlanPage store={store} /></div>}
         {route.page === 'ai' && <div className="content"><AIWorkPage store={store} open={open} /></div>}
@@ -312,6 +329,8 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
       </span>
       <button className="nav-btn" onClick={openPalette}><Search size={15} /> Search <kbd>Ctrl K</kbd></button>
       <button className={'nav-btn' + (route.page === 'mywork' ? ' active' : '')} onClick={() => go({page: 'mywork'})}><Sun size={15} /> My work</button>
+      {hasFeature(store, 'dayPlanner') && <button className={'nav-btn' + (route.page === 'day' ? ' active' : '')} title="Top 3, brain dump and time boxes for today" onClick={() => go({page: 'day'})}><CalendarClock size={15} /> Day planner</button>}
+      {pluginPages(store).map(({plugin, page}) => <button key={plugin.id + page.id} className={'nav-btn' + (route.page === 'x' && route.plugin === plugin.id && route.id === page.id ? ' active' : '')} title={`From the ${plugin.manifest.name} plugin`} onClick={() => go({page: 'x', plugin: plugin.id, id: page.id})}><Puzzle size={15} /> {page.title}</button>)}
       {wsCount > 1 && <button className={'nav-btn' + (route.page === 'today' ? ' active' : '')} onClick={() => go({page: 'today'})}><Layers size={15} /> Everything</button>}
       <button className={'nav-btn' + (route.page === 'inbox' ? ' active' : '')} onClick={() => go({page: 'inbox'})}><Bell size={15} /> Inbox {unread > 0 && <span className="badge">{unread}</span>}</button>
       {store.settings.features.approvals && <button className={'nav-btn' + (route.page === 'approvals' ? ' active' : '')} onClick={() => go({page: 'approvals'})}><FileSignature size={15} /> Approvals</button>}
@@ -344,6 +363,8 @@ function Sidebar({store, me, setMe, route, unread, openPalette, open, onToggle, 
           {(['routines', 'parked'] as const).map(scope => { const sp = store.projects.find(p => p.settings.rollup?.scope === scope); const on = !!sp && route.page === 'project' && route.id === sp.id;
             return <button key={scope} className={'nav-btn' + (on ? ' active' : '')} title={scope === 'routines' ? 'Every repeating task from every space' : 'Archived ideas, rejected work and snoozed items'} onClick={() => go({page: scope})}>
               {scope === 'routines' ? <Repeat size={15} /> : <Archive size={15} />} {sp?.name ?? (scope === 'routines' ? 'Routines' : 'Archive and later')}</button>; })}
+          {hasFeature(store, 'whiteboards') && <button className={'nav-btn' + (route.page === 'boards' ? ' active' : '')} title="Map, design and run workflows on a canvas" onClick={() => go({page: 'boards'})}><Workflow size={15} /> Whiteboards</button>}
+          <button className={'nav-btn' + (route.page === 'plugins' ? ' active' : '')} title="Themes, pages, view sets and setups" onClick={() => go({page: 'plugins'})}><Puzzle size={15} /> Plugins</button>
           {store.settings.features.timeTracking && <button className={'nav-btn' + (route.page === 'timesheet' ? ' active' : '')} onClick={() => go({page: 'timesheet'})}><Clock size={15} /> Timesheet</button>}
           <button className={'nav-btn' + (route.page === 'templates' ? ' active' : '')} onClick={() => go({page: 'templates'})}><LayoutTemplate size={15} /> Templates</button>
           {store.settings.features.insights && <button className={'nav-btn' + (route.page === 'insights' ? ' active' : '')} onClick={() => go({page: 'insights'})}><BarChart3 size={15} /> Team insights</button>}
@@ -538,6 +559,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
       {!settings && view?.kind === 'board' && <FileDrop store={store} projectId={own.id}><BoardView {...props} /></FileDrop>}
       {!settings && view?.kind === 'files' && <FilesView {...props} />}
       {!settings && view?.kind === 'routines' && <Suspense fallback={null}><RoutinesView {...props} /></Suspense>}
+      {!settings && view?.kind === 'whiteboard' && <Suspense fallback={null}><WhiteboardView store={store} project={project} open={open} config={config} setConfig={setConfig} /></Suspense>}
       {!settings && view?.kind === 'gantt' && <GanttView {...props} />}
       {!settings && view?.kind === 'calendar' && <CalendarView {...props} />}
       {!settings && view?.kind === 'workload' && <WorkloadView {...props} />}

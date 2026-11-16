@@ -4,7 +4,7 @@ import {openDb} from '../server/db.ts';
 import {Tasks} from '../server/service.ts';
 import {migrateGoogleLinks, saveLink} from '../server/googlelinks.ts';
 import {busyHours, createEvent, deleteEvent, freeSlots, listEvents, migrateEvents, occurrences, saveCalendarSettings, timeblockItem, updateEvent, zoned, cadenceBusy} from '../server/events.ts';
-import {applyGoogle, migrateGcal, pullCalendar, pushEvent, pushItem, toGoogle} from '../server/gcal.ts';
+import {applyGoogle, googleUrl, migrateGcal, pullCalendar, pushEvent, pushItem, toGoogle} from '../server/gcal.ts';
 import {migratePlanning, replan} from '../server/planner.ts';
 import {migrate, saveWorkspace} from '../server/auth.ts';
 import {migrateAiWork} from '../server/aiwork.ts';
@@ -21,6 +21,19 @@ function setup() {
   const p = t.createProject({name: 'Ops', key: 'OPS'});
   return {t, dave, sam, p};
 }
+
+test('event colors sync as Google colorIds; synced events link to Google Calendar', () => {
+  const {t, dave} = setup();
+  const e = createEvent(t, {title: 'Standup', start: '2026-11-12T16:00:00Z', end: '2026-11-12T16:15:00Z', tz: 'UTC', color: '7'}, dave.id);
+  assert.equal(e.color, '7');
+  assert.equal((toGoogle(t, e, 'main') as {colorId?: string}).colorId, '7', 'the color goes to Google');
+  assert.equal(updateEvent(t, e.id, {color: null}, dave.id).color, null);
+  assert.throws(() => updateEvent(t, e.id, {color: '12'}, dave.id), /1 to 11/);
+  saveLink(t.db, dave.id, 'david@x.test', 'refresh', 'openid email https://www.googleapis.com/auth/calendar.events');
+  const link = t.db.prepare('select id from google_links where person = ?').get(dave.id) as {id: string};
+  t.db.prepare('insert into event_links (event_id, link_id, calendar_id, google_id) values (?,?,?,?)').run(e.id, link.id, 'primary', 'abc123');
+  assert.equal(googleUrl(t, e.id), 'https://www.google.com/calendar/event?eid=' + Buffer.from('abc123 david@x.test').toString('base64').replace(/=+$/, ''));
+});
 
 test('weekly repeats keep wall-clock time across daylight saving', () => {
   // Mondays 10:00 Denver: 17:00Z in October (MDT), 17:00Z becomes 18:00Z after Nov 1 (MST).

@@ -32,7 +32,7 @@ const tok = (tasks: Tasks, person: string, linkId: string) => access(tasks.db, p
 
 // ---- Shapes ----
 
-type GEvent = {id: string; status?: string; summary?: string; description?: string; location?: string; etag?: string; updated?: string; iCalUID?: string; hangoutLink?: string;
+type GEvent = {id: string; colorId?: string; htmlLink?: string; status?: string; summary?: string; description?: string; location?: string; etag?: string; updated?: string; iCalUID?: string; hangoutLink?: string;
   start?: {date?: string; dateTime?: string; timeZone?: string}; end?: {date?: string; dateTime?: string; timeZone?: string};
   recurrence?: string[]; recurringEventId?: string; originalStartTime?: {date?: string; dateTime?: string};
   organizer?: {email?: string; self?: boolean}; attendees?: {email?: string; responseStatus?: string; optional?: boolean; self?: boolean; displayName?: string}[];
@@ -52,6 +52,7 @@ export function toGoogle(tasks: Tasks, e: CalEvent, wsId: string, opts: {meet?: 
     attendees: e.attendees.filter(a => a.person !== e.organizer).map(a => ({email: emailOf(tasks, a), optional: a.optional || undefined})).filter(a => a.email),
     extendedProperties: {private: {cadenceEvent: e.id, cadenceWs: wsId}},
     transparency: e.kind === 'timeblock' ? 'opaque' : undefined,
+    ...(e.color ? {colorId: e.color} : {}),
   };
   if (e.rrule) body.recurrence = e.rrule.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(l => /^(RRULE|EXDATE|RDATE|EXRULE)/i.test(l) ? l : 'RRULE:' + l);
   if (opts.meet && !e.meetUrl) body.conferenceData = {createRequest: {requestId: randomUUID(), conferenceSolutionKey: {type: 'hangoutsMeet'}}};
@@ -186,11 +187,12 @@ export function applyGoogle(tasks: Tasks, owner: string, linkId: string, cal: st
       const ins = tasks.db.prepare('insert into event_attendees (event_id, person, email, name, response, optional) values (?,?,?,?,?,?)');
       for (const a of attendees) ins.run(localId, a.person, a.email, a.name ?? null, a.response, a.optional ? 1 : 0);
     }
+    tasks.db.prepare('update events set color = ? where id = ?').run(ge.colorId ?? null, localId);
     saveLinkRow(tasks, localId, linkId, cal, ge);
     tasks.emit({kind: 'events'});
     return localId;
   }
-  const e = createEvent(tasks, {title: ge.summary ?? '(no title)', body: stripLink(ge.description ?? ''), location: ge.location ?? '', start, end, allDay, tz, rrule: masterLocal ? null : rrule,
+  const e = createEvent(tasks, {title: ge.summary ?? '(no title)', body: stripLink(ge.description ?? ''), location: ge.location ?? '', start, end, allDay, tz, rrule: masterLocal ? null : rrule, color: ge.colorId ?? null,
     visibility: 'attendees', kind: 'meeting'}, null, {organizer: owner, source: 'google', readonly: !organizerIsOwner, silent: true,
     ...(masterLocal && orig ? {recurringId: masterLocal, originalStart: orig} : {})});
   tasks.db.prepare('delete from event_attendees where event_id = ?').run(e.id);
@@ -405,4 +407,15 @@ export function startCalendarSync(tasks: Tasks, wsId: string, opts: {poll?: bool
   const tick = async () => { try { await pullAll(tasks); await renewWatches(tasks, wsId); } catch (e) { console.error('Calendar sync failed', (e as Error).message); } };
   setTimeout(tick, 20_000).unref();
   setInterval(tick, 5 * 60 * 1000).unref();
+}
+
+/** The event's page in Google Calendar, when it is synced there. */
+export function googleUrl(tasks: Tasks, eventId: string): string | null {
+  try {
+    const l = tasks.db.prepare('select l.calendar_id, l.google_id, g.email from event_links l left join google_links g on g.id = l.link_id where l.event_id = ? order by l.rowid limit 1').get(eventId) as {calendar_id: string; google_id: string; email: string | null} | undefined;
+    if (!l) return null;
+    const cal = l.calendar_id === 'primary' ? l.email : l.calendar_id;
+    if (!cal) return null;
+    return `https://www.google.com/calendar/event?eid=${Buffer.from(`${l.google_id} ${cal}`).toString('base64').replace(/=+$/, '')}`;
+  } catch { return null; }
 }

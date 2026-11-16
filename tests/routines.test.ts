@@ -144,7 +144,7 @@ test('built-in spaces: Routines and Archive and later exist once, have views, an
   const parked = t.listProjects().find(p => p.settings.rollup?.scope === 'parked')!;
   assert.ok(routines && parked);
   const kinds = t.listViews(routines.id).map(v => v.kind);
-  assert.deepEqual(kinds, ['routines', 'table', 'board', 'gantt', 'calendar', 'workload']);
+  assert.deepEqual(kinds, ['routines', 'table', 'board', 'gantt', 'calendar', 'workload', 'whiteboard']);
   assert.throws(() => t.deleteProject(routines.id), /built in/);
   assert.throws(() => t.createItem({projectId: parked.id, title: 'x'}), /other spaces/);
 });

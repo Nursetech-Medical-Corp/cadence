@@ -20,10 +20,28 @@ Read this once, then call `get_workspace`. Everything a person can do on screen,
 ## Working as an AI worker
 
 1. `ai_queue` lists tasks marked for AI (or Either) and your own in-progress work.
-2. `claim_task` asks to take one. A person accepts it (you get assigned) or declines. Do not start before acceptance unless you are already assigned.
-3. While working, `log_step` short factual entries: what you did (`step`), links you used or produced (`link`, with `url`), and anything you could not do (`missed`). Attach screenshots with `attach_file` (base64), then reference them in reports as `![name](/api/files/<id>)`.
-4. `submit_work` with a Markdown report: what was done, links, screenshots, and `missed` for gaps. Status moves to review.
-5. `get_feedback` shows the reviewer's comments. If sent back, fix, log, and submit again.
+2. `claim_task` asks to take one. A person accepts it (you get assigned) or declines. Do not start before acceptance unless you are already assigned. Pass `session`: the id or URL of the chat, session or run you work in.
+3. While working, `log_step` short factual entries: what you did (`step`), links you used or produced (`link`, with `url`), and anything you could not do (`missed`). Attach screenshots with `attach_file` (base64), then reference them in reports as `![name](/api/files/<id>)`. Pass `session` again when it changes.
+4. Register what you make outside the task as artifacts, so it can be undone: `log_step` with `artifact`, or `artifacts` on `submit_work`. Each is `{kind: file|doc|design|commit|branch|pr|item|url|other, ref, url?, undo?}`; write `undo` for an agent that has none of your context ("git revert abc123 on main", "delete the page Draft memo"). Files you attach and subitems you create under the task are tracked for you.
+5. `submit_work` with a Markdown report: what was done, links, screenshots, `missed` for gaps, and `artifacts`. Status moves to review.
+6. `get_feedback` tells you what the reviewer decided and what to do next (below).
+
+### After review: continue, redo, discard, clean up
+
+A person decides with `review_work` (`decision`: `approve`, `changes`, `redo`, `discard`). `get_feedback` returns `decision`, `comment`, `session`, `context` and `cleanup`:
+
+| Decision | State | What you do |
+| --- | --- | --- |
+| `approve` | `approved` | Nothing. The task is done. |
+| `changes` | `changes` | Keep your work, fix what the comment asks, `log_step`, `submit_work` again. |
+| `redo` | `redo` | Start over from scratch, following the comment. First clean up (below). The task is still yours; `submit_work` when done. |
+| `discard` | `discarded` | Stop. The task went back to its earlier status and you are unassigned (unless the reviewer kept you). Clean up (below). |
+
+- `session` is where you worked last. Reopen that chat or run if you can. If you cannot, `context` carries what you need into a new one: your last `report`, the `missed` list, the `steps` you logged and the `artifacts` you registered.
+- On redo and discard Cadence hides the files you uploaded in that attempt. On discard it also undoes your changes to the item (where nobody changed the same field after you) and deletes the subitems you created; both can be restored from history.
+- Everything else you made is in `cleanup`: `[{id, kind, ref, url, undo}]`. Undo each one (revert the commit, delete the branch, close the PR, remove the document), then call `confirm_cleanup` with `item`, `artifact` (the id) and a `note` saying what you did. The reviewer sees which are confirmed and which are outstanding. If you cannot undo one, say so in a comment; do not confirm it.
+- `agent_inbox` lists redo and sent-back work under `sentBack` (with `decision` and `session`) and everything you still owe under `cleanup`.
+- After a redo your next attempt is separate: register its artifacts again.
 
 Agents belong to a person (their owner, set on the Team page under My AI agents):
 
@@ -43,16 +61,23 @@ Rules: never mark your own work approved; never change access, roles or tokens; 
 | Views (list, table, board, timeline, calendar, backlog, sprint, files) | Tabs under each space; double-click a tab name in the sidebar to rename it | `list_views`, `create_view`, `update_view` (name, filters, sorts, grouping, columns, color rules), `reorder_views`, `delete_view` |
 | Routines | Built-in Routines space: Routines view (by SOP, switches, skip, delay, wait), plus Table, Board, Timeline, Calendar and Workload. A "Routine" chip in a task's header and a repeat mark on its type open it there | `list_routines`, `set_routine` |
 | Archive and later | Built-in Archive and later space (Table, List, Board) with Parked as, Reason, Snoozed until and Restore columns; snooze and archive buttons in a task's header | `archive_item`, `snooze_item`, `restore_item`, `list_parked` |
+| Sub-spaces and list spaces | Space ... menu: Add a sub-space (Tasks, Pipeline, Contact list); Settings: Sub-space and list card | `create_subspace`, `update_project` (`parent`, `records`) |
+| Day planner | Day planner page, right under My work: top 3, brain dump, today and overdue, a day of time boxes, Fit to my time | `get_day_plan`, `update_day_plan`, `schedule_day`, `fit_day_to_time` |
+| Whiteboards | Whiteboards page (Workspace section), a Whiteboard view in any space (the Routines space can draw every routine), Whiteboards row in a task | `list_boards`, `get_board`, `create_board`, `update_board`, `delete_board`, `board_from_items`, `board_to_tasks`, `run_board`, `list_board_runs`, `board_run_action` |
 | SOP links | SOP chips on tagged tasks; SOP column on Routines | `list_sop_links`, `set_sop_links` (admins) |
 | Spaces | Sidebar: shared spaces, then "Private to me" | `create_project`, `update_project` (name, key, statuses, types, fields), `create_rollup`, `delete_project` |
 | Sprints and planning | Sprint view, Plan and forecast | `list_sprints`, `create_sprint`, `update_sprint`, `rollover_sprint`, `sprint_report`, `estimate_missing`, `apply_estimates`, `replan`, `apply_plan`, `forecast` |
 | Meetings and calendar | Calendar view, Meetings, two-way Google sync | `list_events`, `create_event`, `update_event`, `delete_event`, `find_free_time`, `timeblock_item`, `calendar_events` |
 | Templates | Templates page, gallery packs | `list_templates`, `get_template`, `create_template`, `update_template`, `save_template`, `use_template`, `template_gallery`, `install_pack`, `export_pack`, `delete_template` |
-| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `review_work`, `decide_claim`, `suggest_work`, `my_proposals` |
-| Time | Timers, Timesheet | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| AI work and agents | AI work page, Approvals, Team (My AI agents) | `agent_inbox`, `ai_queue`, `claim_task`, `log_step`, `attach_file`, `submit_work`, `get_feedback`, `confirm_cleanup`, `review_work` (approve, changes, redo, discard), `decide_claim`, `suggest_work`, `my_proposals` |
+| Time | Timers, Timesheet, timer bar, focus mode, pop-out timer | `start_timer`, `stop_timer`, `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `delete_time_entry` |
+| Plugins (docs/PLUGINS.md) | Plugins page: store, search, install for me or everyone, on/off, settings, make, submit, review | `list_plugins`, `get_plugin`, `check_plugin`, `save_plugin`, `submit_plugin`, `install_plugin`, `uninstall_plugin`, `set_plugin` |
 | Inbox, comments | Inbox | `my_notifications`, `mark_notifications_read`, `add_comment`, `resolve_comment` |
 | Data and history | Data and backups, History | `export_items`, `import_items`, `export_workspace`, `history`, `revert_change`, `changes_since` |
 | Integrations | Team (Connect Google), CRM links | `upsert_external`, `create_from_email`, `gmail_search` |
+| Webhooks (docs/WEBHOOKS.md) | Space settings, Integrations (that space); Team page, Workspace webhooks (every space). Name, URL, secret, events, on or off, test, recent deliveries | `list_webhooks`, `set_webhooks`, `test_webhook` |
+| Automations | Space settings, Automations | `set_automations`, `trigger_automation` |
+| Inbound webhooks | `POST /api/hooks/in/<tool name>` with a Bearer token runs any tool; `trigger` runs rules waiting for a key | every tool, plus `complete_item` |
 | Approvals | Approvals page | `request_approval`, `list_approvals` |
 | Job roles and access | Team page: Job roles matrix (company roles by space; drag to reorder), People (job roles shown and set per person), Invite (job roles), Company email domain; each space's Access card shows the job roles that apply | `list_job_roles` (read only) |
 | Personal workspaces | Workspace switcher: New workspace (any signed-in member, unless the server owner turns it off) | none (app only) |
@@ -74,7 +99,8 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
   - `skip`: done for this cycle without doing it; moves to the next date.
   - `delay` with `to` (YYYY-MM-DD): moves only this copy. The next copy stays on the original schedule (kept in `recur.slot`). To move the whole schedule, change `due` with `update_item` instead.
   - `wait` with `on` (item ids or keys): hidden until all of those are done (a hire, a W-2 setup). Then it starts by itself on its next date from that day and its assignees are told. Use this for "start after X".
-  - `pause`: hidden from views, sprints, plans and open lists. History kept. `resume` brings it back on its next date from today.
+  - `pause`: hidden from views, sprints, plans and open lists. History kept. `resume` brings it back on its next date from today. `resume` on a waiting routine ends the wait now, without waiting for the items it depends on.
+  - How wait ends: the moment the last item it waits for is finished, the routine shows again, its assignees are told, the event `routine.resumed` is sent to webhooks, and rules with the trigger `routine-resumed` run (in the same change, no delay). Its due date is the next date on its schedule from that day, so a monthly routine released on the 3rd is due on the 1st of next month. To have it due sooner, `update_item` its `due` after it starts.
   - `end`: stop repeating. The copy stays as a normal task.
 - Paused, waiting, archived and snoozed items are left out of `search_items` with `openOnly`, My work, sprints and plans.
 - Conventions: tag every routine with its SOP code and one mode tag (`auto-job`: an AI job runs it and a person checks the output; `hybrid`: AI drafts, a person decides; `manual`: a person does it). The estimate is the human time per copy.
@@ -88,6 +114,57 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - `snooze_item` with `until` (YYYY-MM-DD): hidden until that day, then back in its lists. Use it to "decide later".
 - `list_parked` shows archived and snoozed items; `restore_item` brings one back. Stored in `fields.archived` and `fields.snooze`.
 - Never delete an idea someone may want later: archive it.
+
+## Sub-spaces and list spaces
+
+- A sub-space is a space with `settings.parent` set: it shows under its parent in the sidebar. One level deep.
+- A list space (`settings.records: true`) holds records, not tasks: investors in a pipeline, distributors or leads to reach once or a few times. It has its own views and statuses, but is left out of All spaces (and other rollups that take every space), My work, the day planner and due reminders. A rollup that names the space still shows it. The built-in Routines space still shows routines from it.
+- `create_subspace` with `kind`: `tasks` (a normal nested space), `pipeline` (stages To contact, Contacted, Meeting, Committed, Passed; Amount; Board, Table with a total, Calendar) or `contacts` (New, Reached, Following up, Closed). Both list kinds get Company, Email, Phone, Last contact, Next step and Times contacted columns.
+- The parent space gets a relation column named after the list, so a task there ("Send deck") can point at the records it is about. A routine (like a weekly pipeline check) lives in the parent space as a normal task.
+- Move a space with `update_project` `parent` (null for top level); turn list mode on or off with `records`.
+
+## Focus mode and the timer bar
+
+- Focus mode (Focus button on a task, or on the timer bar) fills the screen with one task: title, notes, subitems and the timer. Done stops a running timer and completes the task. Esc leaves.
+- While a timer runs, a bar at the top of every page shows the task, the clock, Stop, Done, Focus and Pop out.
+- Pop out opens a small timer window that stays on top of every window (Chrome and Edge; other browsers get a normal small window).
+- Each person picks what starting a timer does (gear on the bar or in focus mode): open focus mode, pop out the timer, show the bar. Saved in prefs `focus` `{onStart: none|focus, popOut, bar}`.
+- Agents start and stop timers with `start_timer` and `stop_timer`; the bar and focus mode follow in every open tab.
+
+## Plugins
+
+- Add-ons made of data only (docs/PLUGINS.md): themes, built-in modules (Day planner and Whiteboards are plugins), pages of safe blocks, view presets, setups and settings. The server checks every value; nothing runs.
+- Install for yourself (`scope: me`) or the workspace (`scope: workspace`, admins, approved plugins only). `set_plugin` turns one off without removing it. Drafts are seen only by their maker; the server owner approves plugins for everyone.
+- Agents can build a plugin: `check_plugin` until it passes, `save_plugin`, `install_plugin` for themselves to test, then `submit_plugin`.
+
+## Day planner
+
+- One plan per person per day, only for that person: `top` (up to 3 priorities), `dump` (brain dump lines) and `blocks` (time boxes). Each entry is text, or a task (`itemId`; done when the task is done).
+- Calendar events take `color`, a Google Calendar color id `1` to `11` (Lavender, Sage, Grape, Flamingo, Banana, Tangerine, Peacock, Graphite, Blueberry, Basil, Tomato); it syncs with Google both ways. Synced events carry `googleUrl`, their page in Google Calendar.
+- A block can stand for a calendar event (`eventId`) and carry `links` (tasks done in it or to discuss in it, like a meeting's agenda) and a `note`.
+- A block has `start` (HH:MM), `minutes`, `at` (the same moment as an ISO time, used for reminders) and `remind`. With `remind` on, the person gets a notification (kind `reminder`, to phone and desktop) when the box starts. Moving a box arms its reminder again.
+- `fit_day_to_time` (REST `POST /api/day/:date/fit` `{upTo?, offsetMinutes?}`) fits the boxes to time logged with timers: each task box moves to when the work happened, separate sessions become separate boxes, logged work with no box gets one (`fitted`), and each box keeps `planned` (its planned start and length). `upTo` (now) fits only the day so far. It returns `summary` with planned and logged minutes.
+- `schedule_day` fills the day from `from` (HH:MM, usually now): top 3, then tasks due today and overdue, then the brain dump, each in the next free gap by its estimate (30 minutes when none). Lines that name a time ("2PM meeting", "standup 09:15") go at that time. Pass `offsetMinutes` (offset from UTC) so reminders land right.
+- In the app the brain dump can be matched to existing tasks or turned into new tasks (quick-add syntax works). Drag lines and tasks onto the day; drag boxes to move, drag their bottom edge to resize. Time logged with timers shows beside the boxes.
+
+## Whiteboards (design and run workflows)
+
+- A whiteboard is a canvas of nodes and connections. Flow kinds: `terminal` (start or stop pill), `task` (a step), `decision` (yes or no diamond; label its arrows), `trigger`, `webhook`, `end`. Note kinds: `title` (first line big, the rest a subtitle), `text`, `sticky`, `info` (what to know at a step), `table` (`table`: rows of cells, first row the header), `shape` (rect, ellipse), `frame` (a group area), `link` (a document, such as a Google Drive SOP). Start every board with a `title`.
+- Looks: `shape` takes `shape` (rect, rounded, ellipse, diamond, pill, hexagon, parallelogram, database, document, cloud) and `fill` (yellow, peach, pink, green, blue, purple, white or #rrggbb). Text cards take `size` (small, body, large, title, huge) and `align`. Card text understands **bold**, *italic*, `code`, [label](https://...) and lines starting `- ` or `1. `. Tables take `colW` (column widths). Arrows take `route` (elbow, the default, or straight), `dash`, `color`, `heads` (end, both, none) and `fromSide`/`toSide`.
+- Good boards (same rules as Claude Whiteboards): a title and a one-line takeaway first; sections (frames) for each part; one kind of thing shares a fill, at most four fills, with a key; read left to right, then top to bottom; past 6 steps start a second row; tables for point-by-point comparisons.
+- `import_board` (REST `POST /api/boards/import` `{elements, name?, projectId?}`) brings in a Claude Whiteboards board: sections, blocks, text, tables, arrows and doc links.
+- One board per SOP: `boards_by_sop` (REST `POST /api/boards/by-sop`) makes a board for each SOP code on a routine, with a title, the SOP document and its routines in order. Boards carry `sop`; `GET /api/boards?sop=SOP-07.2` finds it, and `board_from_items` with that tag returns the existing board. The Routines page links each SOP group to its board.
+- In the app: left drag box-selects, middle drag, Space+drag or the hand tool (P) pans, Shift+wheel scrolls sideways, Ctrl+wheel zooms. Drag from any of a card's four dots; the arrow snaps to the card it is near.
+- A task card can link to a real item (`item` in the tools, `itemId` in REST): a routine, a task, anything. A linked routine follows its live copy after it repeats. A card can also carry `assignees` (or none), `worker` (human, ai, either), `sop` (code like `SOP-07.2`, shows its document), `estimate` and `repeat` (quick-add repeat like `week`, `2w`, `month`).
+- Connections between steps (task, webhook, end, through triggers) are the order of work (`flow`). Connections to stickies, text, shapes, frames and links are only `link`. A link node joined to a task card puts that document in the task it makes.
+- Draw from existing work: `board_from_items` with `routines: true` (every routine, a frame per SOP with its SOP document), `tag`, `parent` or `items`. Dependencies become arrows, later steps sit to the right.
+- Design new work: add task cards and arrows, then `board_to_tasks` creates items in the board's space for cards without one. Arrows become dependencies, `repeat` makes a routine, `worker: ai` marks it for agents. Cards already linked are left alone, so it is safe to run again.
+- Run it: `run_board` (or the Run button) makes one run task in the board's space with a subtask per unlinked task card, each waiting on the cards before it. Linked cards are tracked as they are. A `webhook` card POSTs `{event: "board.step", board, space, run, step, after}` once every step before it is done. The run ends when every step is done, and its run task closes.
+- Triggers: `manual`; `webhook` (POST any JSON to the board's hook link `/api/hooks/<hookKey>?ws=<workspace>`; the body becomes the run's input); `completed` with `tag` (a tag or an item key: finishing a matching item starts a run); `schedule` with `every` day, week or month (checked hourly).
+- Board webhooks (`webhooks: [{url, events}]`) hear `run.started`, `step.done`, `run.done`, `run.failed`. Webhooks only reach public addresses.
+- Runs are logged: `list_board_runs` shows each step's state (`waiting`, `open`, `done`, `fired`, `failed`, `skipped`) and the log. `board_run_action`: `cancel`, `retry` a failed webhook, `skip` a step.
+- Permissions: a board in a space follows that space (view to read, edit to change, create to run or make tasks). A board without a space is seen by everyone and changed by its maker or an admin. The hook link is shown only to people who can edit.
+- Layout tip for agents: steps left to right in order, about 280 apart; parallel steps stacked about 130 apart.
 
 ## SOP links
 
@@ -124,18 +201,25 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - **Onboard a vendor**: `use_template` with "New vendor onboarding" and `title` set to the vendor name (fills `{name}`) and a `due`; AI steps are marked `worker: ai`.
 - **Sync with a CRM**: `upsert_external` with `source` (for example `zoho-crm`) and `externalId` to create or update the linked item; poll `changes_since` with the last `now` it returned.
 - **Status update**: `project_summary`, `sprint_report`, and `history` for what changed.
-- **Automations**: `set_automations` replaces a project's rules: triggers `created`, `status` (with `to`), `completed`, `assigned`, `due-passed`; conditions on type, parent type, priority, tag, assignee; actions `status`, `assign`, `priority`, `tag`, `sprint` (current, next, none), `due` (days), `notify`, `template`, `parent-status`.
+- **Automations**: `set_automations` replaces a project's rules (checked on save; a bad rule is refused with the reason). Triggers: `created`, `status` (with `to`), `completed`, `assigned`, `unassigned`, `comment-added`, `review` (with `to`: an AI review state), `routine-resumed`, `webhook-received` (with `key`), and the date triggers `due-soon` (with `days`), `due-today`, `due-passed`, `overdue-by` (with `days`), `start-reached`, which run hourly, once per item and date, and again when the date changes. Conditions on type, parent type, priority, tag, assignee. Actions: `status`, `assign`, `priority`, `tag`, `sprint` (current, next, none), `due` (days), `notify`, `template`, `parent-status`, `webhook` (`value` is the URL, optional `secret`), `routine-resume`. `trigger_automation` with `project` and `key` runs the rules waiting for that key.
+- **Tell another system when something happens**: `set_webhooks` with an endpoint and the events it wants (`list_webhooks` returns every event name), then `test_webhook`. For one rule only, use the `webhook` action in `set_automations`. Payloads, signature and retries: docs/WEBHOOKS.md.
 
 ## REST quick reference
 
 - `GET /api/bootstrap` everything visible. `GET /api/items?projectId=&assignee=&open=true`
 - `POST /api/items` create, `POST /api/items/quick` `{projectId, text}`, `PATCH /api/items/:id`, `DELETE /api/items/:id`
-- `POST /api/ai/claim|decide|submit|review|log` `{itemId, ...}`; `GET /api/ai/queue`; `GET /api/items/:id/log`; `POST /api/items/:id/files` `{name, mime, data(base64)}`
+- `POST /api/ai/claim|decide|submit|review|log|cleanup` `{itemId, ...}` (claim, submit and log take `session`; submit takes `artifacts`, log takes `artifact`; review takes `decision: approve|changes|redo|discard`, `comment`, `keep`; cleanup takes `artifact`, `note`); `GET /api/ai/queue`; `GET /api/items/:id/log|artifacts|feedback`; `POST /api/items/:id/files` `{name, mime, data(base64)}`
+- `GET /api/hooks?scope=<spaceId|workspace>`; `PUT /api/hooks` `{scope, webhooks: [{id?, name, url, secret?, events, active}], dueSoonDays?}`; `POST /api/hooks/test` `{scope, id}`; `GET /api/hooks/deliveries?scope=&hook=`
+- `POST /api/hooks/in/<tool name>` with the tool's arguments as JSON runs that tool as the token's person (Bearer header only); `POST /api/hooks/in/trigger` `{project, key, item?, ...}` runs rules waiting for the key. See docs/WEBHOOKS.md
 - `GET /api/plan/estimates|replan|forecast`, `POST /api/plan/estimates|apply`
+- `GET /api/plugins?q=`, `GET /api/plugins/:id`, `POST /api/plugins/check|/api/plugins` `{manifest}`, `POST /api/plugins/:id/submit|review`, `POST|DELETE|PATCH /api/plugins/:id/install` `{scope, enabled?, settings?}`
 - `GET /api/changes?since=ISO`, `PUT /api/external/:source/:id` `{projectId, title, ...}`
 - `GET /api/routines`; `POST /api/routines/act` `{ids, action, to?, on?}` (action: skip, delay, wait, pause, resume, end)
 - `GET /api/parked`; `POST /api/park/:id` `{action: archive|restore|snooze, kind?, reason?, until?}`
+- Day planner (your own): `GET /api/day/:date`, `PUT /api/day/:date` `{top?, dump?, blocks?, dayStart?, dayEnd?, slot?}`, `POST /api/day/:date/auto` `{from?, offsetMinutes?, include?}`
+- Whiteboards: `GET /api/boards?projectId=&itemId=`, `POST /api/boards` `{name, projectId?, nodes, edges, webhooks?}`, `GET|PATCH|DELETE /api/boards/:id` (PATCH also takes `addNodes`, `updateNodes`, `removeNodes`, `addEdges`, `removeEdges`, `rotateKey`), `POST /api/boards/from-items` `{routines?|tag?|parentId?|itemIds?, name?, projectId?}`, `POST /api/boards/:id/to-tasks` `{projectId?, parentId?}`, `POST /api/boards/:id/run` `{input?, title?}`, `GET /api/boards/:id/runs`, `GET /api/boards/runs/:runId`, `POST /api/boards/runs/:runId/act` `{action: cancel|retry|skip, node?}`, inbound `POST /api/hooks/<hookKey>?ws=` (no sign-in; the key is the secret)
 - `GET /api/sops`; `PUT /api/sops` `{links: [{code, url, title}]}` (admins)
+- `POST /api/projects/:id/subspaces` `{name, kind: tasks|pipeline|contacts}` (needs settings permission on the parent)
 - `PATCH /api/projects/:id` `{name?, key?, statuses?, types?, fields?}`
 - `GET /api/calendar.ics?person=|project=` calendar feed; `GET /api/export` full JSON without personal spaces (admins)
 - `GET /api/team` people (with `jobRoles`), levels, `jobRoles`, `domainJoin` (admins; others get names); `PUT /api/workspace` `{jobRoles: [{id?, name, spaces: {spaceId: levelId|none}, others}], domainJoin: {domains, level, jobRoles}}` (admins); `PATCH /api/team/:id` `{jobRoles: [ids]}` (admins); `POST /api/invites` `{email, role, jobRoles?}`

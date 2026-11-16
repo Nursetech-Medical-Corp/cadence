@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {kindIcon} from './Fields.tsx';
-import {IconKit, RollupCard} from './ProjectNav.tsx';
+import {IconKit, RollupCard, SubspaceCard} from './ProjectNav.tsx';
 import {Calendar, CheckSquare, GripVertical, Hash, Link, List, Plus, Trash2, Type, Users, X} from 'lucide-react';
 import type {FieldKind, Project, Status, StatusCategory} from './types.ts';
 import type {Store} from './store.ts';
@@ -48,6 +48,7 @@ export function SettingsView({store, project, onDeleted}: {store: Store; project
       </div>
 
       {project.settings.rollup && !project.settings.rollup.scope && <RollupCard store={store} project={project} />}
+      {!project.settings.rollup && <SubspaceCard store={store} project={project} />}
       <section className="set-card">
         <div className="set-card-head"><h3>When dates move</h3><span className="muted small">For subitems set to move with their parent and steps that follow the step before.</span></div>
         <label className="row" style={{cursor: 'pointer'}}><input type="checkbox" checked={!!project.settings.dates?.skipWeekends} onChange={e => save({settings: {...project.settings, dates: {...project.settings.dates, skipWeekends: e.target.checked}}})} /> Skip weekends (a date that lands on Saturday or Sunday moves to Monday)</label>

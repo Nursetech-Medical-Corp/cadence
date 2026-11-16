@@ -150,8 +150,8 @@ Notifications: Inbox, Settings, Turn on, on each device. They arrive with the ap
 
 ### Integrations
 - Google: sign in, send notification emails through Gmail, connect personal calendars (read events, add events) and Gmail (search). A calendar feed (ICS) for any person or space.
-- Webhooks, email to task, and a CRM-ready sync API (external ids, changes since a time).
-- Automations: when an item is created, changes status, is completed, is assigned or passes its due date, then set fields, assign, notify, apply a template or close the parent.
+- Webhooks out (per space or for the whole workspace, signed, retried, with a delivery log and over 50 events to pick from) and in (`POST /api/hooks/in/<action>` with a token), email to task, and a CRM-ready sync API (external ids, changes since a time). See docs/WEBHOOKS.md.
+- Automations: when an item is created, changes status, is completed, is assigned or unassigned, gets a comment, nears or passes its due date, reaches an AI review state, or an inbound webhook arrives, then set fields, assign, notify, apply a template, close the parent or call a webhook.
 
 ### Data
 - Automatic snapshots with daily, weekly and monthly retention, a copy of every uploaded file, JSON export and import, and CSV export of any view.
