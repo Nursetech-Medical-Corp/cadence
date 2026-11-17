@@ -8,7 +8,8 @@ import {migrate} from '../server/auth.ts';
 import {dayPlanReminders} from '../server/dayplan.ts';
 import {createMcpServer} from '../server/mcp.ts';
 import {guarded} from '../server/tokens.ts';
-import {entryDone} from '../src/daycheck.ts';
+import {checkEntries, entryDone} from '../src/daycheck.ts';
+import {carryLines, copyBox} from '../src/dayweek.ts';
 
 function setup() {
   const t = new Tasks(openDb(':memory:'), () => '2026-11-14');
@@ -221,4 +222,33 @@ test('day planner: check_day_entry over MCP, and a token needs edit on the task'
   t.updateDayPlan(sam.id, '2026-11-14', {top: [{id: 'r', text: 'Read report'}], blocks: [{id: 'rb', text: '', itemId: report.id, start: '09:00', minutes: 30}]});
   assert.throws(() => guarded(t, sam.id).checkDayEntry(sam.id, '2026-11-14', 'r'), /edit/);
   assert.ok(!t.item(report.id).completed);
+});
+
+test('day planner: a box checked off before lines were linked still shows its brain dump line done', () => {
+  // Saved before check-offs were shared: only the box has done. The dump line with its text shows done too.
+  const plan = {top: [], dump: [{id: 'd', text: 'Meeting with Collin'}, {id: 'o', text: 'Other'}], blocks: [{id: 'b', text: 'meeting with collin', done: true}]};
+  const none = () => undefined;
+  assert.ok(entryDone(plan, plan.dump[0], none), 'the line follows its checked box');
+  assert.ok(!entryDone(plan, plan.dump[1], none));
+  // Unchecking any of them clears them all.
+  const r = checkEntries(plan, 'd', false, none)!;
+  assert.ok(!entryDone(r.plan, r.plan.dump[0], none) && !entryDone(r.plan, r.plan.blocks[0], none));
+});
+
+test('day planner week: a box copied to another day is a fresh box at the same time', () => {
+  const b = {id: 'b1', text: 'Write report', itemId: 'it1', start: '10:00', minutes: 90, done: true, remind: true, notified: true, eventId: 'ev1', planned: {start: '09:00', minutes: 60}, fitted: true, color: '5', note: 'n', links: ['x']};
+  const c = copyBox(b, () => 'new1');
+  assert.deepEqual(c, {id: 'new1', text: 'Write report', itemId: 'it1', start: '10:00', minutes: 90, remind: true, color: '5', note: 'n', links: ['x']});
+  assert.equal(copyBox(b, () => 'n2', '14:30').start, '14:30');
+});
+
+test('day planner: open brain dump lines from earlier days roll over, not tasks, done lines or ones already here', () => {
+  const none = () => undefined;
+  const earlier = [
+    {date: '2026-11-16', plan: {top: [], dump: [{id: 'a', text: 'Call bank'}, {id: 'b', text: 'Task line', itemId: 'it'}, {id: 'c', text: 'Done one', done: true}, {id: 'd', text: 'Boxed and checked'}], blocks: [{id: 'x', text: 'boxed and checked', done: true}]}},
+    {date: '2026-11-15', plan: {top: [], dump: [{id: 'e', text: 'call bank'}, {id: 'f', text: 'Buy stamps'}, {id: 'g', text: 'Already today'}], blocks: []}},
+  ];
+  const today = {top: [], dump: [{id: 'h', text: 'already today'}], blocks: []};
+  const got = carryLines(earlier, today, none);
+  assert.deepEqual(got.map(x => [x.date, x.entry.text]), [['2026-11-16', 'Call bank'], ['2026-11-15', 'Buy stamps']], 'newest copy of a line wins; one per text');
 });

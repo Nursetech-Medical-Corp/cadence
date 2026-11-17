@@ -99,6 +99,10 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Task boxes show status, priority, due, estimate, space, SOP and people; done boxes turn green and struck through.
 - Checking a line off (a box, a top 3 priority, a brain dump line, or Done on the Now card) marks it done everywhere it shows: the same task, or the same text, in the top 3, the dump and the boxes; a line that is a task completes the task (unchecking reopens it). A task completed elsewhere shows done on plain lines with its text. A line matching two tasks completes neither. Ctrl+Z after a check-off puts the lines back and reopens the task. Bug found: checking off a box left the same line open in the top 3 and the dump; Ctrl+Z missed tasks made after the page opened. (unit dayplan; e2e)
 - Timesheet for the day: the pencil (or double-click) on an entry edits its day, start, end and notes. (e2e)
+- A plain line and a box with the same text show done together, also on days saved before check-offs were shared. (unit)
+- Week view (Day / Week in the header): seven days side by side with their boxes and calendar events; arrows step a week. Dragging a box to another day copies it there (Shift while dropping moves it); within a day it moves. Lines and tasks from the left drop onto any day. Clicking a box opens its task or its day. (unit for the copy, manual for the drag)
+- In day view, dropping a box on a day in the week row copies it to that day at the same time (Shift moves it). (manual)
+- Roll over: on today and later days, open brain dump lines from the 7 days before (plain lines, not tasks, not done) are offered; tick which to bring over. They move to this day; Leave them stops offering them. (unit)
 - The day runs midnight to midnight; 12am to 6am folds open; a red line marks now. (e2e)
 - Plan my day from now: top 3, then due and overdue, then the dump; lines with a time ("2PM meeting") go at that time.
 - Calendar events show on the day in their color; clicking one opens the full calendar editor (guests, Meet link, repeats, color, visibility, Open in Google Calendar); + makes one a box to tie tasks to. (e2e)

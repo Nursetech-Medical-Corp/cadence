@@ -38,7 +38,9 @@ export function entryDone<E extends CheckEntry>(plan: CheckPlan<E>, e: E, task: 
   if (e.itemId) { const t = task(e.itemId); return t ? t.completed : !!e.done; }
   const g = sameEntries(plan, e.id, task);
   const t = g?.itemId ? task(g.itemId) : undefined;
-  return t ? t.completed : !!e.done;
+  if (t) return t.completed;
+  // Plain lines with the same text show done together, also when only one was checked (days saved before checks were shared).
+  return !!e.done || (!!g && all(plan).some(x => g.ids.has(x.id) && !x.itemId && x.done));
 }
 
 /**

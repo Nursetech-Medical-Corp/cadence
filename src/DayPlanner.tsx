@@ -5,7 +5,7 @@ import {BellRing} from 'lucide-react';
 import {spaceColor} from './ProjectNav.tsx';
 import {eventColor} from './Meetings.tsx';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Bell, BellOff, CalendarClock, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Timer, Undo2, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
+import {Bell, BellOff, CalendarClock, CalendarPlus, CalendarRange, ChevronDown, History, ChevronLeft, ChevronRight, Clock, GitMerge, GripVertical, Link2, ListPlus, Pencil, Play, Timer, Undo2, Plus, Square, Trash2, Video, Wand2, X, Check as CheckIcon} from 'lucide-react';
 import type {Item, TimeEntry} from './types.ts';
 import {PRIORITIES} from './types.ts';
 import {api, realProjects, type Store} from './store.ts';
@@ -18,7 +18,8 @@ type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number;
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
 type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null; color?: string | null};
 type Plan = {tz: string; updated?: string | null; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number};
-type DragData = {from: 'top' | 'dump' | 'task' | 'block'; id: string; itemId?: string | null; text: string; grab?: number; grabX?: number};
+/** day: the day a dragged box comes from (week view). */
+type DragData = {from: 'top' | 'dump' | 'task' | 'block'; id: string; itemId?: string | null; text: string; grab?: number; grabX?: number; day?: string};
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
@@ -39,6 +40,7 @@ const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).to
 import {matchScore} from './match.ts';
 import {TimeEntryEdit} from './TimeTracker.tsx';
 import {checkEntries, entryDone, type TaskInfo} from './daycheck.ts';
+import {carryLines, copyBox} from './dayweek.ts';
 import {EventEditor, GCAL_COLORS, type CalEvent as FullEvent} from './Meetings.tsx';
 import {uiAlert, uiConfirm} from './dialogs.tsx';
 
@@ -55,6 +57,18 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [bySource, setBySource] = useState(() => !!localStorage.getItem('day-bysource'));
   const [events, setEvents] = useState<CalEv[]>([]);
   const [week, setWeek] = useState<{date: string; boxes: number; minutes: number; events: number}[]>([]);
+  // Week view: the seven days around the day, their plans and calendar events. Dragging a box to another day copies it.
+  const [view, setViewState] = useState<'day' | 'week'>(() => localStorage.getItem('day-view') === 'week' ? 'week' : 'day');
+  const setView = (v: 'day' | 'week') => { setViewState(v); localStorage.setItem('day-view', v); };
+  const [weekPlans, setWeekPlans] = useState<{date: string; plan: Plan | null}[]>([]);
+  const [weekEvents, setWeekEvents] = useState<CalEv[]>([]);
+  const [weekTick, setWeekTick] = useState(0);
+  const [weekGhost, setWeekGhost] = useState<{date: string; m: number; len: number} | null>(null);
+  // Roll over: open brain dump lines from the 7 days before, offered on today and later days.
+  const [earlier, setEarlier] = useState<{date: string; plan: Plan}[]>([]);
+  const [carryOpen, setCarryOpen] = useState(false);
+  const [carryOff, setCarryOff] = useState<Set<string>>(new Set());
+  const [carrySkip, setCarrySkip] = useState<Set<string>>(() => { try { return new Set(JSON.parse(localStorage.getItem('day-carry-skip') ?? '[]') as string[]); } catch { return new Set(); } });
   const [editing, setEditing] = useState<string | null>(null);
   const [ghost, setGhost] = useState<{a: number; b: number} | null>(null);
   const [openSecs, setOpenSecs] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('day-open') ?? '{}'); } catch { return {}; } });
@@ -111,9 +125,20 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     const d0 = new Date(`${date}T12:00:00`), mon = addDays(date, -((d0.getDay() + 6) % 7));
     const days = Array.from({length: 7}, (_, i) => addDays(mon, i));
     Promise.all([Promise.all(days.map(d => api<Plan>(`/day/${d}?person=${me}&tz=${encodeURIComponent(browserTz())}`).catch(() => null))), api<CalEv[]>(`/meetings?from=${addDays(mon, -1)}&to=${addDays(mon, 7)}&mine=1`).catch(() => [] as CalEv[])])
-      .then(([plans, evs]) => setWeek(days.map((d, i) => { const p = plans[i]; const tzz = p?.tz || browserTz();
-        return {date: d, boxes: p?.blocks.length ?? 0, minutes: p?.blocks.reduce((a, b) => a + b.minutes, 0) ?? 0, events: evs.filter(e => !e.allDay && inZone(e.start, tzz).day === d).length}; })));
-  }, [date, me, Math.floor(now.getTime() / 60_000), plan?.updated]);
+      .then(([plans, evs]) => {
+        setWeekPlans(days.map((d, i) => ({date: d, plan: plans[i]})));
+        setWeekEvents(evs.filter(e => !e.allDay));
+        setWeek(days.map((d, i) => { const p = plans[i]; const tzz = p?.tz || browserTz();
+          return {date: d, boxes: p?.blocks.length ?? 0, minutes: p?.blocks.reduce((a, b) => a + b.minutes, 0) ?? 0, events: evs.filter(e => !e.allDay && inZone(e.start, tzz).day === d).length}; }));
+      });
+  }, [date, me, Math.floor(now.getTime() / 60_000), plan?.updated, weekTick]);
+  // The days before, for rolling brain dump lines over (only on today and later days).
+  useEffect(() => {
+    if (!me || date < localDate()) { setEarlier([]); return; }
+    const days = Array.from({length: 7}, (_, i) => addDays(date, -1 - i));
+    Promise.all(days.map(d => api<Plan>(`/day/${d}?person=${me}&tz=${encodeURIComponent(browserTz())}`).then(p => ({date: d, plan: p})).catch(() => null)))
+      .then(l => setEarlier(l.filter((x): x is {date: string; plan: Plan} => !!x && !!x.plan.updated && x.plan.dump.length > 0)));
+  }, [date, me, weekTick]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
 
   const save = (next: Plan, created: string[] = [], status?: {id: string; status: string}) => {
@@ -200,6 +225,30 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     // Saved (with undo) even when only the task changed, so Ctrl+Z can reopen it.
     if (before || JSON.stringify(r.plan) !== JSON.stringify(latest.current)) save(r.plan, [], before);
   };
+  const tzq = `person=${me}&tz=${encodeURIComponent(browserTz())}`;
+  /** Change any day: the one shown goes through the page (with undo); another day is read fresh, changed and saved. */
+  const editDay = async (d: string, fn: (p: Plan) => Plan) => {
+    if (d === date) { update(fn); return; }
+    try {
+      const n = fn(await api<Plan>(`/day/${d}?${tzq}`));
+      await api(`/day/${d}?${tzq}`, {method: 'PUT', body: {top: n.top, dump: n.dump, blocks: n.blocks}});
+    } catch (e) { store.fail(e); }
+    setWeekTick(t => t + 1);
+  };
+  /** A box dragged to another day is copied there (Shift: moved). On its own day it just moves to the new time. */
+  const sendBox = async (from: string, b: Block, to: string, start: string, move: boolean) => {
+    if (from === to) { await editDay(to, p => ({...p, blocks: p.blocks.map(x => x.id === b.id ? {...x, start, at: atOf(p.date, start)} : x)})); return; }
+    await editDay(to, p => ({...p, blocks: [...p.blocks, {...copyBox(b, rid, start), at: atOf(to, start)} as Block]}));
+    if (move) await editDay(from, p => ({...p, blocks: p.blocks.filter(x => x.id !== b.id)}));
+    store.flash(`${move ? 'Moved' : 'Copied'} "${item(b)?.title ?? (b.text || 'Time box')}" to ${dayName(to, true)}${move ? '' : '. Hold Shift while dropping to move instead'}`);
+  };
+  const planOf = (d: string) => d === date ? plan : weekPlans.find(w => w.date === d)?.plan ?? null;
+  /** Check a box off on any day of the week. */
+  const checkOn = async (d: string, b: Block) => {
+    if (d === date) { toggleEntry(b); return; }
+    try { await api(`/day/${d}/check?${tzq}`, {method: 'POST', body: {id: b.id}}); } catch (e) { store.fail(e); }
+    setWeekTick(t => t + 1);
+  };
   const listSpaces = new Set(store.projects.filter(p => p.settings.records).map(p => p.id));
   const mine = [...store.items.values()].filter(i => !listSpaces.has(i.projectId) && i.assignees.includes(me) && !i.completed && i.due && i.due <= date && !i.recur?.paused && !i.recur?.waiting && !(i.fields as {archived?: unknown}).archived)
     .sort((a, b) => (a.due ?? '').localeCompare(b.due ?? '') || (a.priority || 9) - (b.priority || 9));
@@ -209,6 +258,25 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const addLines = (text: string) => {
     const lines = text.split(/\r?\n/).map(l => l.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
     if (lines.length) update(p => ({...p, dump: [...p.dump, ...lines.map(t => ({id: rid(), text: t}))]}));
+  };
+  // Roll over: open plain lines (not tasks) from the days before. Brought over, they move to this day.
+  const carry = carryLines(earlier, plan, tinfo).filter(x => !carrySkip.has(x.entry.id));
+  const carryPicked = carry.filter(x => !carryOff.has(x.entry.id));
+  const normText = (t: string) => t.trim().replace(/\s+/g, ' ').toLowerCase();
+  const bringOver = async () => {
+    if (!carryPicked.length) return;
+    const texts = new Set(carryPicked.map(x => normText(x.entry.text)));
+    update(p => ({...p, dump: [...p.dump, ...carryPicked.map(x => ({id: rid(), text: x.entry.text}))]}));
+    setCarryOpen(false); setCarryOff(new Set());
+    // Off the earlier days, so they are not offered again (done lines stay there as a record).
+    for (const e of earlier) if (e.plan.dump.some(l => !l.itemId && texts.has(normText(l.text)) && !entryDone(e.plan, l, tinfo)))
+      await editDay(e.date, p => ({...p, dump: p.dump.filter(l => l.itemId || !texts.has(normText(l.text)) || entryDone(p, l, tinfo))}));
+    store.flash(`Brought over ${carryPicked.length} line${carryPicked.length === 1 ? '' : 's'}. Make them tasks or keep them as lines`);
+  };
+  const leaveCarry = () => {
+    const next = new Set([...carrySkip, ...carry.map(x => x.entry.id)]);
+    setCarrySkip(next); setCarryOpen(false);
+    localStorage.setItem('day-carry-skip', JSON.stringify([...next].slice(-500)));
   };
   // Suggestions per brain dump line: the 3 best open tasks, only when Match is on.
   const linked = new Set([...plan.top, ...plan.dump, ...plan.blocks].map(e => e.itemId).filter(Boolean));
@@ -397,10 +465,14 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       ? <a className="dp-gcal on" href="#/team" title={`Google Calendar connected: ${gcal.links.map(l => l.email).join(', ')}. Manage it on the Team page`}><CalendarClock size={12} /> {gcal.links.length === 1 ? gcal.links[0].email : `${gcal.links.length} Google calendars`}</a>
       : gcal.ready ? <a className="btn small" href={`/api/auth/google/start?mode=link&want=calendar&as=${encodeURIComponent(me)}&back=/day`} title="Show your Google Calendar events on the day, and add boxes to it">Connect Google Calendar</a>
       : <a className="btn small ghost" href="#/team" title="An admin adds the Google OAuth client on the Team page first, then everyone can connect">Set up Google Calendar</a>)}
+    <span className="seg dp-viewseg" role="group" aria-label="Day or week">
+      <button className={view === 'day' ? 'on' : ''} onClick={() => setView('day')}><CalendarClock size={12} /> Day</button>
+      <button className={view === 'week' ? 'on' : ''} onClick={() => setView('week')} title="The week side by side: drag a time box to another day to copy it"><CalendarRange size={12} /> Week</button>
+    </span>
     <div className="dp-date">
-      <button className="btn ghost small" onClick={() => setDate(addDays(date, -1))} title="Day before"><ChevronLeft size={14} /></button>
-      <b>{new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'})}</b>
-      <button className="btn ghost small" onClick={() => setDate(addDays(date, 1))} title="Day after"><ChevronRight size={14} /></button>
+      <button className="btn ghost small" onClick={() => setDate(addDays(date, view === 'week' ? -7 : -1))} title={view === 'week' ? 'Week before' : 'Day before'}><ChevronLeft size={14} /></button>
+      <b>{view === 'week' && weekPlans.length ? `Week of ${new Date(`${weekPlans[0].date}T12:00:00`).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}` : new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'})}</b>
+      <button className="btn ghost small" onClick={() => setDate(addDays(date, view === 'week' ? 7 : 1))} title={view === 'week' ? 'Week after' : 'Day after'}><ChevronRight size={14} /></button>
       {date !== today && <button className="btn small" onClick={() => setDate(today)}>Today</button>}
     </div>
     <span className="spacer" />
@@ -442,6 +514,19 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     <textarea className="plain-input dp-dump" rows={2} placeholder="Get it all out. Enter adds a line; paste many lines at once." value={line} onChange={e => setLine(e.target.value)}
       onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addLines(line); setLine(''); } }}
       onPaste={e => { const t = e.clipboardData.getData('text/plain'); if (t.includes('\n')) { e.preventDefault(); addLines(t); } }} />
+    {carry.length > 0 && <div className="dp-carry">
+      <button className="dp-carry-head" aria-expanded={carryOpen} onClick={() => setCarryOpen(o => !o)} title="Lines from your brain dump on earlier days that are not tasks and not done">
+        <History size={12} /> <span className="grow">{carry.length} open line{carry.length === 1 ? '' : 's'} from earlier days</span>{carryOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</button>
+      {carryOpen && <>
+        {carry.map(x => <label key={x.entry.id} className="dp-carry-row small"><input type="checkbox" checked={!carryOff.has(x.entry.id)} onChange={e => setCarryOff(o => { const n = new Set(o); if (e.target.checked) n.delete(x.entry.id); else n.add(x.entry.id); return n; })} />
+          <span className="grow">{x.entry.text}</span><span className="muted">{dayName(x.date)}</span></label>)}
+        <div className="row">
+          <button className="btn small primary" disabled={!carryPicked.length} onClick={() => void bringOver()} title="Move the ticked lines to this day's brain dump">Bring over {carryPicked.length}</button>
+          <button className="btn small ghost" onClick={leaveCarry} title="Stop offering these lines; they stay on their day">Leave them</button>
+        </div>
+        <p className="muted small">Ticked lines move to this day. Then make them tasks (Create task, Match) or keep them as lines.</p>
+      </>}
+    </div>}
     {plan.dump.map(e => entryRow(e, 'dump'))}
     {over?.list === 'dump' && !over.id && <div className="dp-dropline" />}
     {plan.dump.some(e => !e.itemId && !e.done) && <div className="dp-actions">
@@ -513,8 +598,13 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const dayHead = <div className="dp-dayhead">
     {week.length === 7 && <div className="dp-week">{week.map(w => {
       const due = [...store.items.values()].filter(i => i.assignees.includes(me) && !i.completed && i.due === w.date && !listSpaces.has(i.projectId)).length;
-      return <button key={w.date} className={'dp-wday' + (w.date === date ? ' on' : '') + (w.date === today ? ' today' : '')} onClick={() => setDate(w.date)}
-        title={`${w.boxes} time box${w.boxes === 1 ? '' : 'es'} (${fmtM(w.minutes)}), ${w.events} calendar event${w.events === 1 ? '' : 's'}, ${due} task${due === 1 ? '' : 's'} due`}>
+      // A box dropped on another day is copied there at the same time (Shift: moved).
+      const canDrop = (e: React.DragEvent) => dragging.current?.from === 'block' && w.date !== date && (e.preventDefault(), true);
+      return <button key={w.date} className={'dp-wday' + (w.date === date ? ' on' : '') + (w.date === today ? ' today' : '') + (weekGhost?.date === w.date && weekGhost.m < 0 ? ' drop-on' : '')} onClick={() => setDate(w.date)}
+        onDragOver={e => { if (canDrop(e) && weekGhost?.date !== w.date) setWeekGhost({date: w.date, m: -1, len: 0}); }}
+        onDragLeave={() => setWeekGhost(g => g?.date === w.date ? null : g)}
+        onDrop={e => { setWeekGhost(null); const d = readDrag(e); const b = d?.from === 'block' ? plan.blocks.find(x => x.id === d.id) : undefined; if (!b || w.date === date) return; e.preventDefault(); void sendBox(date, b, w.date, b.start, e.shiftKey); }}
+        title={`${w.boxes} time box${w.boxes === 1 ? '' : 'es'} (${fmtM(w.minutes)}), ${w.events} calendar event${w.events === 1 ? '' : 's'}, ${due} task${due === 1 ? '' : 's'} due. Drop a time box here to copy it to this day (hold Shift to move it)`}>
         <span className="dp-wname">{new Date(`${w.date}T12:00:00`).toLocaleDateString(undefined, {weekday: 'short'})} <b>{Number(w.date.slice(8))}</b></span>
         <span className="dp-wbar"><span style={{width: `${Math.min(100, w.minutes / 480 * 100)}%`}} /></span>
         <span className="dp-wstats">{w.boxes ? <span title="Time boxes">{fmtM(w.minutes)}</span> : null}{w.events ? <span title="Calendar events"><CalendarClock size={10} /> {w.events}</span> : null}{due ? <span title="Tasks due">{due} due</span> : null}</span>
@@ -579,8 +669,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         const running = !!it && store.running?.itemId === it.id;
         const bc = b.color ? GCAL_COLORS[b.color]?.[1] : bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
         return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '') + (bc ? ' colored' : '')} draggable
-          onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'move'; }}
-          onDragEnd={() => { dragging.current = null; setDropGhost(null); }}
+          onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'copyMove'; }}
+          onDragEnd={() => { dragging.current = null; setDropGhost(null); setWeekGhost(null); }}
           style={{...place(s, b.minutes, lane), ...(bc && !done ? {'--bc': bc} as React.CSSProperties : {})}}
           onClick={e => { if ((e.target as HTMLElement).closest('button, a, .dp-btitle-link')) return; if (it) open(it.id); else setEditing(b.id); }}
           title={it ? 'Click to open the task (notes, status, people). The clock opens this time slot' : 'Click to edit this time slot'}>
@@ -600,6 +690,65 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     </div>
     {!plan.blocks.length && <p className="muted small dp-hint">Drag a priority, a brain dump line or a task onto a time, or press Plan my day from now. Reminders go to your Inbox and to phones and desktops with notifications on.</p>}
   </div></div>;
+  // ---- Week: seven days side by side. Drag a box to another day to copy it there (Shift: move); within a day it moves. ----
+  const wDays = weekPlans.map(w => ({date: w.date, plan: planOf(w.date)}));
+  const wBlocks = wDays.flatMap(w => w.plan?.blocks ?? []);
+  const wStart = Math.floor(Math.min(plan.dayStart * 60, ...wBlocks.map(b => mins(b.start))) / 60) * 60;
+  const wEnd = Math.min(1440, Math.ceil(Math.max(plan.dayEnd * 60, ...wBlocks.map(b => mins(b.start) + b.minutes)) / 60) * 60);
+  const wpx = 0.9 * DENSITY[density];
+  const wMinute = (ev: React.DragEvent, d: DragData) => {
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    return Math.max(wStart, Math.min(wEnd - 15, wStart + Math.round((ev.clientY - r.top - (d.grab ?? 0)) / wpx / 15) * 15));
+  };
+  const wLen = (d: DragData) => d.from === 'block' ? planOf(d.day ?? date)?.blocks.find(b => b.id === d.id)?.minutes ?? 30 : lenFor(d);
+  const wDrop = (ev: React.DragEvent, day: string) => {
+    ev.preventDefault();
+    const d = readDrag(ev);
+    setWeekGhost(null); dragging.current = null; setDragActive(false);
+    if (!d) return;
+    const start = hhmm(wMinute(ev, d));
+    if (d.from === 'block') { const src = d.day ?? date, b = planOf(src)?.blocks.find(x => x.id === d.id); if (b) void sendBox(src, b, day, start, ev.shiftKey); return; }
+    void editDay(day, p => ({...p, blocks: [...p.blocks, {id: rid(), text: d.text, ...(d.itemId ? {itemId: d.itemId} : {}), start, minutes: lenFor(d), at: atOf(day, start), remind: false}]}));
+  };
+  const openBox = (day: string, b: Block) => { const it = item(b); if (it) { open(it.id); return; } setDate(day); setView('day'); setEditing(b.id); };
+  const weekGrid = <div className="dp-daycol dp-weekcol">
+    <div className="dp-wk" style={{'--wk-h': `${(wEnd - wStart) * wpx}px`} as React.CSSProperties}>
+      <div className="dp-wk-hours">{Array.from({length: (wEnd - wStart) / 60}, (_, k) => <span key={k} style={{top: k * 60 * wpx}}>{label(wStart + k * 60)}</span>)}</div>
+      {wDays.map((w, wi) => {
+        const p = w.plan, tzz = p?.tz || tz, blocks = p?.blocks ?? [], ln = lanesOf(blocks);
+        const evs = weekEvents.filter(e => !blocks.some(b => b.eventId === e.id) && inZone(e.start, tzz).day === w.date);
+        const total = blocks.reduce((a, b) => a + b.minutes, 0);
+        return <div key={w.date} className={'dp-wk-day' + (w.date === today ? ' today' : '') + (w.date === date ? ' on' : '')}>
+          <button className="dp-wk-head" style={{gridColumn: wi + 2}} onClick={() => { setDate(w.date); setView('day'); }} title="Open this day">
+            <span>{new Date(`${w.date}T12:00:00`).toLocaleDateString(undefined, {weekday: 'short'})} <b>{Number(w.date.slice(8))}</b></span>
+            {total > 0 && <span className="muted small">{fmtM(total)}</span>}</button>
+          <div className={'dp-wk-body' + (weekGhost?.date === w.date && weekGhost.m >= 0 ? ' drop-on' : '')} style={{gridColumn: wi + 2}}
+            onDragOver={e => { const d = dragging.current; if (!d) return; e.preventDefault(); const m = wMinute(e, d), len = wLen(d); if (weekGhost?.date !== w.date || weekGhost.m !== m || weekGhost.len !== len) setWeekGhost({date: w.date, m, len}); }}
+            onDragLeave={e => { if (!stillIn(e)) setWeekGhost(g => g?.date === w.date ? null : g); }}
+            onDrop={e => wDrop(e, w.date)}>
+            {Array.from({length: (wEnd - wStart) / 60}, (_, k) => <div key={k} className="dp-wk-line" style={{top: k * 60 * wpx}} />)}
+            {evs.map(e => { const s = inZone(e.start, tzz).m, len = Math.max(15, Math.round((Date.parse(e.end) - Date.parse(e.start)) / 60000));
+              return s + len > wStart && s < wEnd ? <div key={e.id + e.start} className="dp-wk-ev" style={{top: (Math.max(s, wStart) - wStart) * wpx, height: Math.max(14, len * wpx - 2)}} title={`Calendar: ${e.title}`}>{e.title}</div> : null; })}
+            {w.date === today && nowMin >= wStart && nowMin <= wEnd && <div className="dp-wk-now" style={{top: (nowMin - wStart) * wpx}} />}
+            {weekGhost?.date === w.date && weekGhost.m >= 0 && <div className="dp-ghost drop" style={{top: (weekGhost.m - wStart) * wpx, height: weekGhost.len * wpx}}>{label(weekGhost.m)}</div>}
+            {p && blocks.map(b => {
+              const s = mins(b.start), it = item(b), done = entryDone(p, b, tinfo), lane = ln.get(b.id) ?? {i: 0, n: 1};
+              const bc = b.color ? GCAL_COLORS[b.color]?.[1] : bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
+              return <div key={b.id} className={'dp-wk-box' + (done ? ' done' : '') + (bc ? ' colored' : '')} draggable
+                style={{top: (Math.max(s, wStart) - wStart) * wpx, height: Math.max(16, b.minutes * wpx - 2), left: `calc(${lane.i / lane.n * 100}% + 2px)`, width: `calc(${100 / lane.n}% - 4px)`, ...(bc && !done ? {'--bc': bc} as React.CSSProperties : {})}}
+                onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, day: w.date}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'copyMove'; }}
+                onDragEnd={() => { dragging.current = null; setWeekGhost(null); }}
+                onClick={e => { if (!(e.target as HTMLElement).closest('button')) openBox(w.date, b); }}
+                title={`${it?.title ?? b.text} ${label(s)} to ${label(s + b.minutes)}. Drag to another day to copy it there; hold Shift to move it`}>
+                <button className={'check' + (done ? ' on' : '')} onClick={() => void checkOn(w.date, b)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={10} strokeWidth={3} />}</button>
+                <span className="dp-wk-title">{it ? <><span className="dp-key">{itemKey(it, store.projects)}</span> {it.title}</> : b.text || <span className="muted">(untitled)</span>}</span>
+                {b.minutes * wpx >= 30 && <span className="dp-wk-time">{label(s)}</span>}
+              </div>; })}
+          </div>
+        </div>; })}
+    </div>
+    <p className="muted small dp-hint">Drag a box to another day to copy it there; hold Shift while dropping to move it. Drag lines and tasks from the left onto any day.</p>
+  </div>;
   const sorted = [...plan.blocks].sort((a, b) => mins(a.start) - mins(b.start));
   // Focus: what is on now, and what is next.
   const curB = sorted.find(b => nowM !== null && nowM >= mins(b.start) && nowM < mins(b.start) + b.minutes);
@@ -652,11 +801,12 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   };
   const splitL = <div className="dp-split" title="Drag to resize; double-click to reset" onMouseDown={leftDrag} onDoubleClick={leftReset} />;
   const splitR = <div className="dp-split" title="Drag to resize; double-click to reset" onMouseDown={rightDrag} onDoubleClick={rightReset} />;
+  const centre = view === 'week' ? weekGrid : dayGrid;
   let body;
   switch (D.id) {
-    case 'columns': body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}</div>{splitL}{dayGrid}{splitR}<div className="dp-left right" style={{width: rightW}}>{lists.mine}{lists.logged}</div></div>; break;
-    case 'horizontal': body = <div className="dp-main col">{dayGrid}<div className="dp-split row" title="Drag to resize; double-click to reset" onMouseDown={bottomDrag} onDoubleClick={bottomReset} /><div className="dp-row3" style={{height: bottomH, flex: 'none'}}><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
-    default: body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{splitL}{dayGrid}</div>;
+    case 'columns': body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}</div>{splitL}{centre}{splitR}<div className="dp-left right" style={{width: rightW}}>{lists.mine}{lists.logged}</div></div>; break;
+    case 'horizontal': body = <div className="dp-main col">{centre}<div className="dp-split row" title="Drag to resize; double-click to reset" onMouseDown={bottomDrag} onDoubleClick={bottomReset} /><div className="dp-row3" style={{height: bottomH, flex: 'none'}}><div>{nowCard}{lists.top}</div><div>{lists.dump}</div><div>{lists.mine}{lists.logged}</div></div></div>; break;
+    default: body = <div className="dp-main"><div className="dp-left" style={{width: leftW}}>{nowCard}{lists.top}{lists.dump}{lists.mine}{lists.logged}</div>{splitL}{centre}</div>;
   }
   const evModal = evEdit && <EventEditor store={store} event={evEdit.event} draft={evEdit.draft} items={[...store.items.values()]} open={open}
     onSaved={r => { if (evEdit.boxId) patchBlock(evEdit.boxId, {eventId: r.id}); }} onClose={() => { setEvEdit(null); load(); }} />;

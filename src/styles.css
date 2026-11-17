@@ -1915,3 +1915,37 @@ body.dp-resizing { cursor: col-resize; user-select: none; }
 .task-clock.below { flex-direction: column; align-items: flex-start; gap: 2px; }
 .task-clock .tc-total { font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
 .task-clock.below .tc-total { font-size: 12px; }
+
+/* Day planner: Day / Week switch, the week grid (drag a box to another day to copy it), and brain dump roll over. */
+.dp-viewseg { flex: none; }
+.dp-viewseg button { display: inline-flex; align-items: center; gap: 4px; }
+.dp-wday.drop-on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-line); }
+.dp-weekcol { overflow: auto; }
+.dp-wk { display: grid; grid-template-columns: 52px repeat(7, minmax(110px, 1fr)); gap: 0 4px; padding: 0 6px 8px 0; min-width: 860px; }
+.dp-wk-hours { grid-row: 2; grid-column: 1; position: relative; height: var(--wk-h); }
+.dp-wk-hours span { position: absolute; right: 6px; transform: translateY(-50%); font-size: 11px; color: var(--muted); }
+.dp-wk-hours span:first-child { transform: none; }
+.dp-wk-day { display: contents; }
+.dp-wk-head { grid-row: 1; position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 6px 8px; margin-bottom: 4px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; text-align: left; }
+.dp-wk-head:hover { border-color: var(--accent-line); }
+.dp-wk-day.on .dp-wk-head { border-color: var(--accent); background: var(--accent-soft); }
+.dp-wk-day.today .dp-wk-head b { color: var(--danger); }
+.dp-wk-body { grid-row: 2; position: relative; height: var(--wk-h); border: 1px solid var(--line); border-radius: 8px; background: var(--card); overflow: hidden; }
+.dp-wk-body.drop-on { border-color: var(--accent); }
+.dp-wk-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line2); pointer-events: none; }
+.dp-wk-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--danger); z-index: 3; pointer-events: none; }
+.dp-wk-ev { position: absolute; left: 2px; right: 2px; padding: 1px 5px; font-size: 11px; border-radius: 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: var(--muted); background: repeating-linear-gradient(135deg, var(--bg2), var(--bg2) 4px, transparent 4px, transparent 8px); border: 1px dashed var(--line); pointer-events: none; }
+.dp-wk-box { position: absolute; z-index: 2; display: flex; align-items: flex-start; gap: 4px; padding: 2px 4px; overflow: hidden; cursor: grab; font-size: 11.5px; line-height: 1.3; border-radius: 6px;
+  background: color-mix(in srgb, var(--bc, var(--accent)) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--bc, var(--accent)) 40%, transparent); border-left: 3px solid var(--bc, var(--accent)); }
+.dp-wk-box:hover { box-shadow: var(--shadow); }
+.dp-wk-box.done { background: color-mix(in srgb, var(--ok) 14%, var(--card)); border-color: color-mix(in srgb, var(--ok) 40%, transparent); border-left-color: var(--ok); }
+.dp-wk-box.done .dp-wk-title { text-decoration: line-through; color: var(--muted); }
+.dp-wk-box .check { flex: none; width: 14px; height: 14px; margin-top: 1px; }
+.dp-wk-title { flex: 1; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; }
+.dp-wk-time { flex: none; font-size: 10.5px; color: var(--muted); }
+.dp-carry { margin: 6px 0; border: 1px dashed var(--accent-line); border-radius: 8px; background: var(--accent-soft); padding: 4px 6px; display: flex; flex-direction: column; gap: 4px; }
+.dp-carry-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 2px; text-align: left; font-size: 12.5px; font-weight: 500; }
+.dp-carry-row { display: flex; align-items: center; gap: 6px; padding: 2px; }
+.dp-carry .row { gap: 6px; }
