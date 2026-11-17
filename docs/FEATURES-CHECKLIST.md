@@ -102,6 +102,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - A plain line and a box with the same text show done together, also on days saved before check-offs were shared. (unit)
 - Week view (Day / Week in the header): seven days side by side with their boxes and calendar events; arrows step a week. Dragging a box to another day copies it there (Shift while dropping moves it); within a day it moves. Lines and tasks from the left drop onto any day. Clicking a box opens its task or its day. (unit for the copy, manual for the drag)
 - In day view, dropping a box on a day in the week row copies it to that day at the same time (Shift moves it). (manual)
+- Lines and assigned tasks already in a box on the day are shaded and show the box times (several when it is in several boxes); clicking the times jumps to the box. The On the day setting in the header shades them (default), hides them from the lists, or shows them as usual. Dragging one out again adds another box. (unit for the match, manual for the look)
 - Roll over: on today and later days, open brain dump lines from the 7 days before (plain lines, not tasks, not done) are offered; tick which to bring over. They move to this day; Leave them stops offering them. (unit)
 - The day runs midnight to midnight; 12am to 6am folds open; a red line marks now. (e2e)
 - Plan my day from now: top 3, then due and overdue, then the dump; lines with a time ("2PM meeting") go at that time.
