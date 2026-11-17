@@ -28,3 +28,14 @@ export function carryLines<P extends CheckPlan>(earlier: {date: string; plan: P}
   }
   return out;
 }
+
+/**
+ * The time boxes on a day that a line or task is already in, earliest first: boxes for the same task, and boxes
+ * with the same text (or the task's title). A thing may sit in several boxes (work, a break, more work).
+ */
+export function boxesFor<B extends Box>(blocks: B[], e: {itemId?: string | null; text: string}, task: TaskInfo): B[] {
+  const key = (s: string | null | undefined) => (s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const names = new Set([key(e.text), e.itemId ? key(task(e.itemId)?.title) : ''].filter(Boolean));
+  return blocks.filter(b => (e.itemId && b.itemId === e.itemId) || (!b.itemId && names.has(key(b.text))) || (!e.itemId && b.itemId && names.has(key(task(b.itemId)?.title))))
+    .sort((a, b) => a.start.localeCompare(b.start));
+}

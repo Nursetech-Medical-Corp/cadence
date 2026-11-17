@@ -9,7 +9,7 @@ import {dayPlanReminders} from '../server/dayplan.ts';
 import {createMcpServer} from '../server/mcp.ts';
 import {guarded} from '../server/tokens.ts';
 import {checkEntries, entryDone} from '../src/daycheck.ts';
-import {carryLines, copyBox} from '../src/dayweek.ts';
+import {boxesFor, carryLines, copyBox} from '../src/dayweek.ts';
 
 function setup() {
   const t = new Tasks(openDb(':memory:'), () => '2026-11-14');
@@ -251,4 +251,13 @@ test('day planner: open brain dump lines from earlier days roll over, not tasks,
   const today = {top: [], dump: [{id: 'h', text: 'already today'}], blocks: []};
   const got = carryLines(earlier, today, none);
   assert.deepEqual(got.map(x => [x.date, x.entry.text]), [['2026-11-16', 'Call bank'], ['2026-11-15', 'Buy stamps']], 'newest copy of a line wins; one per text');
+});
+
+test('day planner: a line or task shows which boxes it is already in on the day', () => {
+  const task = (id: string) => id === 't1' ? {title: 'Write report', completed: false} : undefined;
+  const blocks = [{id: 'b2', text: 'Write report', itemId: 't1', start: '14:00', minutes: 60}, {id: 'b1', text: 'write  REPORT', start: '09:00', minutes: 30},
+    {id: 'b3', text: 'Lunch', start: '12:00', minutes: 60}];
+  assert.deepEqual(boxesFor(blocks, {text: 'Write report', itemId: 't1'}, task).map(b => b.id), ['b1', 'b2'], 'the task box and a plain box with its title, earliest first');
+  assert.deepEqual(boxesFor(blocks, {text: 'write report'}, task).map(b => b.id), ['b1', 'b2'], 'a plain line matches by text and by the task title');
+  assert.deepEqual(boxesFor(blocks, {text: 'Dinner'}, task), []);
 });

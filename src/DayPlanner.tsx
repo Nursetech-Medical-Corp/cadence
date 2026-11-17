@@ -40,7 +40,7 @@ const atOf = (date: string, start: string) => new Date(`${date}T${start}:00`).to
 import {matchScore} from './match.ts';
 import {TimeEntryEdit} from './TimeTracker.tsx';
 import {checkEntries, entryDone, type TaskInfo} from './daycheck.ts';
-import {carryLines, copyBox} from './dayweek.ts';
+import {boxesFor, carryLines, copyBox} from './dayweek.ts';
 import {EventEditor, GCAL_COLORS, type CalEvent as FullEvent} from './Meetings.tsx';
 import {uiAlert, uiConfirm} from './dialogs.tsx';
 
@@ -93,6 +93,8 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   const [rightW, rightDrag, rightReset] = usePanelSize('dp-w-right', 300, 200, 700, -1);
   const [bottomH, bottomDrag, bottomReset] = usePanelSize('dp-h-bottom', 320, 140, 900, -1, true);
   const [bySpace, setBySpace] = useState(() => localStorage.getItem('day-byspace') === '1');
+  // Lines and tasks already in a box on the day: shaded with their times (default), hidden, or shown as usual.
+  const [onDay, setOnDay] = useState<'shade' | 'hide' | 'plain'>(() => { const v = localStorage.getItem('day-onday'); return v === 'hide' || v === 'plain' ? v : 'shade'; });
   // Google Calendar: which of your Google accounts share calendars here, and whether Google is set up at all.
   const [gcal, setGcal] = useState<{links: {email: string}[]; ready: boolean} | null>(null);
   useEffect(() => {
@@ -207,8 +209,23 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
   // Done once per line: a task line (or a plain line with the same text as a task on the page) follows the task.
   const doneIds = new Set([...plan.top, ...plan.dump, ...plan.blocks].filter(e => entryDone(plan, e, tinfo)).map(e => e.id));
   const isDone = (e: Entry) => doneIds.has(e.id);
-  const boxedIds = new Set(plan.blocks.map(b => b.itemId).filter(Boolean)), boxedText = new Set(plan.blocks.map(b => b.text.toLowerCase()));
-  const boxed = (e: Entry) => e.itemId ? boxedIds.has(e.itemId) : boxedText.has(e.text.toLowerCase());
+  /** The boxes on this day a line or task is already in (it may be in several: work, a break, more work). */
+  const boxesOf = (e: {itemId?: string | null; text: string}) => boxesFor(plan.blocks, e, tinfo);
+  const boxed = (e: {itemId?: string | null; text: string}) => boxesOf(e).length > 0;
+  /** Scroll the day to a box and flash it. */
+  const showBox = (id: string) => {
+    if (view === 'week') setView('day');
+    setTimeout(() => { const el = document.querySelector(`.dp-block[data-box="${id}"]`) as HTMLElement | null; if (!el) return; el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1400); }, 50);
+  };
+  /** On the day: the times of its boxes; click to see the first one. */
+  const onDayChip = (e: {itemId?: string | null; text: string}) => {
+    const bs = boxesOf(e);
+    if (!bs.length || onDay === 'plain') return bs.length ? <Clock size={11} className="muted" aria-label="On the day" /> : null;
+    const times = bs.slice(0, 3).map(b => label(mins(b.start))).join(', ') + (bs.length > 3 ? ` +${bs.length - 3}` : '');
+    return <button className="dp-onday" onClick={() => showBox(bs[0].id)} title={`Already on this day: ${bs.map(b => `${label(mins(b.start))} to ${label(mins(b.start) + b.minutes)}`).join(', ')}. Click to see it. Dragging it out again adds another box`}><Clock size={10} /> {times}</button>;
+  };
+  const shade = (e: {itemId?: string | null; text: string}) => onDay !== 'plain' && boxed(e) ? ' boxed' : '';
+  const hidden = (e: {itemId?: string | null; text: string}) => onDay === 'hide' && boxed(e);
   /** Check a line off (or back on) everywhere it shows: top 3, brain dump and boxes with the same task or text, and the task itself. */
   const toggleEntry = (e: Entry) => {
     const want = !isDone(e);
@@ -437,14 +454,15 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     const it = item(e), done = isDone(e), sug = list === 'dump' ? suggest(e) : [];
     const mark = over?.list === list && over.id === e.id ? (over.after ? ' drop-after' : ' drop-before') : '';
     const sc = bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
-    return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + (boxed(e) ? ' boxed' : '') + (sc ? ' spaced' : '') + mark} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
+    if (list === 'dump' && hidden(e)) return null;
+    return <div key={e.id} className={'dp-entry' + (done ? ' done' : '') + shade(e) + (sc ? ' spaced' : '') + mark} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} {...dragProps({from: list, id: e.id, itemId: e.itemId, text: e.text})}
       onDragOver={ev => listOver(ev, list, e.id)} onDrop={ev => dropOnList(ev, list)}>
       <GripVertical size={12} className="dp-grip" />
       <button className={'check' + (done ? ' on' : '')} onClick={() => toggleEntry(e)} title={done ? 'Mark not done' : 'Mark done'}>{done && <CheckIcon size={11} strokeWidth={3} />}</button>
       {editText === e.id ? <input className="plain-input dp-text" autoFocus defaultValue={it?.title ?? e.text} onBlur={ev => renameEntry(list, e, ev.target.value)} onKeyDown={ev => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); if (ev.key === 'Escape') setEditText(null); }} />
         : it ? <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Click the key to open the task; double-click to rename"><button className="dp-key link" onClick={() => open(it.id)}>{itemKey(it, store.projects)}</button> {it.title}</span>
         : <span className="dp-text" onDoubleClick={() => setEditText(e.id)} title="Double-click to edit">{e.text}</span>}
-      {boxed(e) && <Clock size={11} className="muted" aria-label="On the day" />}
+      {onDayChip(e)}
       <button className="icon dp-x" title="Edit" onClick={() => setEditText(e.id)}><Pencil size={11} /></button>
       <button className="icon dp-x" title="Remove from the list (the task stays)" onClick={() => update(p => ({...p, [list]: p[list].filter(x => x.id !== e.id)}))}><X size={12} /></button>
       {list === 'dump' && matchOn && !e.itemId && !isDone(e) && !dismissed.has(e.id) && <div className="dp-sugs">{sug.map(x => <button key={x.item.id} className="dp-sug" title={`Tie this line to ${x.item.title} (${Math.round(Math.min(1, x.score) * 100)}% match). It joins your day.`} onClick={() => useMatch(e, x.item)}>
@@ -484,6 +502,9 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         <option value="compact">Compact</option><option value="normal">Normal</option><option value="roomy">Roomy</option></select>
       <label className="small muted" title="Color boxes by where they came from: top 3, tasks, brain dump"><input type="checkbox" checked={bySource} onChange={e => { setBySource(e.target.checked); localStorage.setItem('day-bysource', e.target.checked ? '1' : ''); }} /> Color by source</label>
       <label className="small muted" title="Color tasks by their space's color (set a space's color from its menu in the sidebar). A box's own color wins"><input type="checkbox" checked={bySpace} onChange={e => { setBySpace(e.target.checked); localStorage.setItem('day-byspace', e.target.checked ? '1' : ''); }} /> Color by space</label>
+      <label className="small muted" title="Lines and tasks you already put on this day (in a time box): shade them and show their times, hide them from the lists, or show them as usual">On the day
+        <select className="plain-select small" value={onDay} onChange={e => { const v = e.target.value as typeof onDay; setOnDay(v); localStorage.setItem('day-onday', v); }}>
+          <option value="shade">Shade, show times</option><option value="hide">Hide from lists</option><option value="plain">Show as usual</option></select></label>
     </span>
     <span className="picker">
       <button className="btn small" disabled={busy} onClick={() => setFitMenu(o => !o)} title="Move and size your boxes to the time you logged with timers, to see what you really did"><Timer size={13} /> Fit to my time <ChevronDown size={12} /></button>
@@ -538,15 +559,16 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     </div>}
   </section>;
   const mineSec = <section className="dp-sec dp-minesec">
-    <h4>Assigned: today and overdue <span className="count">{mine.length}</span></h4>
+    <h4>Assigned: today and overdue <span className="count">{mine.length}</span>{mine.some(i => boxed({itemId: i.id, text: i.title})) && <span className="muted small"> {mine.filter(i => boxed({itemId: i.id, text: i.title})).length} on the day</span>}</h4>
     {!mine.length && <p className="muted small">Nothing due. Nice.</p>}
-    {mine.map(i => { const p = store.projects.find(x => x.id === i.projectId)!; const sc = bySpace ? spaceColor(store.projects, i.projectId) : undefined; return <div key={i.id} className={'dp-entry' + (boxedIds.has(i.id) ? ' boxed' : '') + (sc ? ' spaced' : '')} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} title={i.title} {...dragProps({from: 'task', id: i.id, itemId: i.id, text: i.title})}>
+    {mine.filter(i => !hidden({itemId: i.id, text: i.title})).map(i => { const p = store.projects.find(x => x.id === i.projectId)!; const sc = bySpace ? spaceColor(store.projects, i.projectId) : undefined; return <div key={i.id} className={'dp-entry' + shade({itemId: i.id, text: i.title}) + (sc ? ' spaced' : '')} style={sc ? {'--sc': sc} as React.CSSProperties : undefined} title={i.title} {...dragProps({from: 'task', id: i.id, itemId: i.id, text: i.title})}>
       <GripVertical size={12} className="dp-grip" />
       <Check item={i} project={p} onToggle={status => store.updateItem(i.id, {status})} />
       <button className="dp-text link" onClick={() => open(i.id)}><span className="dp-key">{itemKey(i, store.projects)}</span> {i.title}</button>
       {i.due! < date && <span className="dp-late small">{i.due}</span>}
-      {boxedIds.has(i.id) && <Clock size={11} className="muted" />}
+      {onDayChip({itemId: i.id, text: i.title})}
     </div>; })}
+    {onDay === 'hide' && mine.some(i => boxed({itemId: i.id, text: i.title})) && <p className="muted small">{mine.filter(i => boxed({itemId: i.id, text: i.title})).length} more already on the day (hidden).</p>}
     {!!doneToday.length && <p className="muted small">Done today: {doneToday.length}</p>}
   </section>;
   const taskInfo = (it: Item) => {
@@ -668,7 +690,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         const s = Math.max(startM, mins(b.start)), it = item(b), done = isDone(b), lane = lanes.get(b.id) ?? {i: 0, n: 1};
         const running = !!it && store.running?.itemId === it.id;
         const bc = b.color ? GCAL_COLORS[b.color]?.[1] : bySpace && it ? spaceColor(store.projects, it.projectId) : undefined;
-        return <div key={b.id} data-src={srcOf(b)} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '') + (bc ? ' colored' : '')} draggable
+        return <div key={b.id} data-src={srcOf(b)} data-box={b.id} className={'dp-block' + (done ? ' done' : '') + (running ? ' running' : '') + (bc ? ' colored' : '')} draggable
           onDragStart={e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); const d: DragData = {from: 'block', id: b.id, itemId: b.itemId, text: b.text, grab: e.clientY - r.top, grabX: e.clientX - r.left}; dragging.current = d; e.dataTransfer.setData('application/x-plan', JSON.stringify(d)); e.dataTransfer.effectAllowed = 'copyMove'; }}
           onDragEnd={() => { dragging.current = null; setDropGhost(null); setWeekGhost(null); }}
           style={{...place(s, b.minutes, lane), ...(bc && !done ? {'--bc': bc} as React.CSSProperties : {})}}
