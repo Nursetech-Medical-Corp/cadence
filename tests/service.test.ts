@@ -386,7 +386,7 @@ test('rollover moves unfinished sprint work to the next sprint', () => {
 test('projects get default views; views are editable', () => {
   const {t, p} = setup();
   const views = t.listViews(p.id);
-  assert.deepEqual(views.map(v => v.kind), ['list', 'table', 'board', 'gantt', 'calendar', 'backlog', 'sprint']);
+  assert.deepEqual(views.map(v => v.kind), ['table', 'list', 'board', 'gantt', 'calendar', 'backlog', 'sprint']);
   const v = t.updateView(views[1].id, {name: 'Bugs', config: {types: ['Bug']}});
   assert.equal(t.listViews(p.id)[1].name, 'Bugs');
   t.deleteView(v.id);

@@ -19,7 +19,8 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The level tag on a List row (Project, Phase, Task, Subtask) opens a menu to change it; Task shows on hover. (manual)
 - List rows have a select box like the Table; the bar below offers bulk changes and Delete. Delete or Backspace removes the selected items after a confirm, but not while typing in a field. (manual)
 - Bug found in the check: in the All spaces rollup a drop could nest an item under one from another space. Drops now stay within one space and say why when refused. (unit)
-- Table with no column sort: a tree, subitems indented under their parent with a fold arrow in the Title cell; other columns stay aligned. Drag a row by its grip (left of +) the same way as in the List. With a column sort it is flat and a drop only nests. (unit for the order, manual)
+- Table: rows stay flat with plain titles (the tree is only in the List). Drag a row by its grip (left of +): the middle of a row nests it there, the top or bottom edge moves it above or below and keeps its parent. With a column sort a drop only nests. The select box stays centered and clickable. (manual)
+- New spaces open with Table first, then List, Board, Timeline, Calendar, Backlog, Sprint.
 
 ## Focus mode and timer
 - Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.

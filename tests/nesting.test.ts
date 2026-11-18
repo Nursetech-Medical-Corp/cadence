@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {isUnder, nestUnder, placeBeside, treeOrder, type Patch} from '../src/nesting.ts';
+import {isUnder, nestUnder, placeBeside, type Patch} from '../src/nesting.ts';
 
 const T = ['Project', 'Phase', 'Task', 'Subtask'];
 const items = () => [
@@ -44,9 +44,6 @@ test('reordering beside a row keeps its parent and sorts between neighbours; nev
   assert.ok(isUnder(items(), 'tk', 'p2') && !isUnder(items(), 'p1', 'p2'));
 });
 
-test('tree order lists each parent before its subitems, with depth', () => {
-  assert.deepEqual(treeOrder(items()).map(x => `${x.item.id}:${x.depth}`), ['p1:0', 'p2:0', 'ph:1', 'tk:2', 't2:0', 'odd:0']);
-});
 
 test('nesting and moving stay within one space (the All spaces rollup shows several)', () => {
   const l = [{id: 'a', parentId: null, type: 'Project', sort: 1, projectId: 'sales'}, {id: 'b', parentId: null, type: 'Task', sort: 2, projectId: 'finance'}, {id: 'c', parentId: 'a', type: 'Phase', sort: 1, projectId: 'sales'}];

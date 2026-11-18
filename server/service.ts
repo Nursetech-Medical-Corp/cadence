@@ -42,7 +42,7 @@ export const DEFAULT_STATUSES: Status[] = [
 export const DEFAULT_TYPES = ['Project', 'Phase', 'Task', 'Subtask'];
 export const SOFTWARE_TYPES = ['Epic', 'Feature', 'Story', 'Task', 'Bug'];
 export const DEFAULT_VIEWS: {name: string; kind: ViewKind; config?: ViewConfig}[] = [
-  {name: 'List', kind: 'list'}, {name: 'Table', kind: 'table'}, {name: 'Board', kind: 'board'},
+  {name: 'Table', kind: 'table'}, {name: 'List', kind: 'list'}, {name: 'Board', kind: 'board'},
   {name: 'Timeline', kind: 'gantt', config: {zoom: 'week'}}, {name: 'Calendar', kind: 'calendar'}, {name: 'Backlog', kind: 'backlog'}, {name: 'Sprint', kind: 'sprint'},
 ];
 

@@ -1972,10 +1972,8 @@ table.grid tr.dragging { opacity: .35; }
 .row-type .type { cursor: pointer; }
 .row-type.quiet { opacity: 0; }
 .list .row:hover .row-type.quiet { opacity: .7; }
-/* Table tree: indent and fold arrow in the Title cell, so every other column stays aligned. */
-.tree-pad { display: inline-block; flex: none; }
-.tree-twisty { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--muted); }
-.tree-twisty:hover { background: var(--hover); color: var(--text); }
-.tree-twisty.none { visibility: hidden; }
-.row-grip { cursor: grab; color: var(--muted); opacity: 0; display: inline-flex; vertical-align: middle; }
+/* Table: the drag grip and + sit at the left of the select column; the box stays centered in the rest. */
+.grid .sel-col { width: 50px; padding: 0 0 0 26px !important; }
+.row-grip { position: absolute; left: 0; top: 50%; transform: translateY(-50%); cursor: grab; color: var(--muted); opacity: 0; display: inline-flex; }
 table.grid tr:hover .row-grip { opacity: 1; }
+.grid tbody .row-add { left: 12px; }

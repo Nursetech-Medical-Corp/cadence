@@ -45,13 +45,3 @@ export function placeBeside<T extends Node>(items: T[], itemId: string, targetId
   const sort = lo === undefined ? (hi ?? 0) - 1 : hi === undefined ? lo + 1 : (lo + hi) / 2;
   return {id: itemId, patch: {parentId: target.parentId, sort}};
 }
-
-/** Items in tree order (each parent followed by its subitems, by sort), with their depth. Orphans start at the top. */
-export function treeOrder<T extends Node>(items: T[]): {item: T; depth: number}[] {
-  const ids = new Set(items.map(i => i.id)), kids = new Map<string | null, T[]>();
-  for (const i of items) { const p = i.parentId && ids.has(i.parentId) ? i.parentId : null; kids.set(p, [...(kids.get(p) ?? []), i]); }
-  const out: {item: T; depth: number}[] = [];
-  const walk = (p: string | null, d: number) => { for (const i of (kids.get(p) ?? []).sort((a, b) => a.sort - b.sort)) { out.push({item: i, depth: d}); if (d < 50) walk(i.id, d + 1); } };
-  walk(null, 0);
-  return out;
-}
