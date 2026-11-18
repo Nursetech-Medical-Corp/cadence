@@ -12,7 +12,8 @@ export function copyBox<B extends Box>(b: B, newId: () => string, start = b.star
 
 /**
  * Open brain dump lines from earlier days that could come over to this day: plain lines (not tasks), not done,
- * not already on this day. One per text, from the newest day first.
+ * not already on this day. One per text; the newest copy decides (a line brought over and finished, or made a task,
+ * is not offered again from an older day).
  */
 export function carryLines<P extends CheckPlan>(earlier: {date: string; plan: P}[], here: CheckPlan, task: TaskInfo): {date: string; entry: CheckEntry}[] {
   const key = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -21,8 +22,9 @@ export function carryLines<P extends CheckPlan>(earlier: {date: string; plan: P}
   for (const {date, plan} of [...earlier].sort((a, b) => b.date.localeCompare(a.date))) {
     for (const e of plan.dump) {
       const k = key(e.text);
-      if (e.itemId || !k || seen.has(k) || entryDone(plan, e, task)) continue;
+      if (!k || seen.has(k)) continue;
       seen.add(k);
+      if (e.itemId || entryDone(plan, e, task)) continue;
       out.push({date, entry: e});
     }
   }

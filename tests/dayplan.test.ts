@@ -4,7 +4,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {openDb} from '../server/db.ts';
 import {Tasks} from '../server/service.ts';
-import {migrate} from '../server/auth.ts';
+import {migrate, saveWorkspace} from '../server/auth.ts';
 import {dayPlanReminders} from '../server/dayplan.ts';
 import {createMcpServer} from '../server/mcp.ts';
 import {guarded} from '../server/tokens.ts';
@@ -293,4 +293,26 @@ test('day planner: a task boxed on today goes to Today; next day, not done and n
   t.updateItem(b.id, {status: 'today'}, david.id);
   rollTodayStatuses(t, noon(next));
   assert.equal(t.item(b.id).status, 'today');
+});
+
+test('day planner roll over: the newest copy of a line decides, so lines brought over are not offered again or lost on undo', () => {
+  const none = () => undefined;
+  // Brought over yesterday and finished there: the older open copy is not offered again.
+  const earlier = [
+    {date: '2026-11-16', plan: {top: [], dump: [{id: 'n', text: 'Call bank', done: true}, {id: 'm', text: 'Made a task', itemId: 'it'}], blocks: []}},
+    {date: '2026-11-15', plan: {top: [], dump: [{id: 'o', text: 'call bank'}, {id: 'p', text: 'made a task'}, {id: 'q', text: 'Still open'}], blocks: []}},
+  ];
+  assert.deepEqual(carryLines(earlier, {top: [], dump: [], blocks: []}, none).map(x => x.entry.text), ['Still open']);
+  // Bringing over leaves the earlier day as it was: with the line on today it is not offered; undone, it is offered again.
+  assert.deepEqual(carryLines(earlier, {top: [], dump: [{id: 'r', text: 'Still open'}], blocks: []}, none), []);
+});
+
+test('Today status: boxing a task only changes its status when the person may edit tasks in that space', () => {
+  const {t, david, sam} = setup();
+  const p = t.createProject({name: 'Sales', key: 'SAL', statuses: [{id: 'todo', name: 'To do', category: 'todo', color: '#999'}, {id: 'today', name: 'Today', category: 'doing', color: '#999'}, {id: 'done', name: 'Done', category: 'done', color: '#999'}]});
+  const it = t.createItem({projectId: p.id, title: 'Look only', assignees: [sam.id]}, david.id);
+  t.db.prepare("update people set role = 'viewer' where id = ?").run(sam.id);
+  saveWorkspace(t.db, {requireLogin: true});
+  t.updateDayPlan(sam.id, personDay(t, sam.id), {blocks: [{id: 'v', text: '', itemId: it.id, start: '09:00', minutes: 30}]});
+  assert.equal(t.item(it.id).status, 'todo', 'a viewer boxing a task does not move it');
 });

@@ -276,18 +276,16 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     const lines = text.split(/\r?\n/).map(l => l.replace(/^[-*•\d.)\s]+/, '').trim()).filter(Boolean);
     if (lines.length) update(p => ({...p, dump: [...p.dump, ...lines.map(t => ({id: rid(), text: t}))]}));
   };
-  // Roll over: open plain lines (not tasks) from the days before. Brought over, they move to this day.
+  // Roll over: open plain lines (not tasks) from the days before. Brought over, they come to this day; the earlier
+  // days keep theirs, so Ctrl+Z loses nothing, and the copy here (the newest) decides whether it is offered again.
   const carry = carryLines(earlier, plan, tinfo).filter(x => !carrySkip.has(x.entry.id));
   const carryPicked = carry.filter(x => !carryOff.has(x.entry.id));
   const normText = (t: string) => t.trim().replace(/\s+/g, ' ').toLowerCase();
-  const bringOver = async () => {
+  const bringOver = () => {
     if (!carryPicked.length) return;
-    const texts = new Set(carryPicked.map(x => normText(x.entry.text)));
-    update(p => ({...p, dump: [...p.dump, ...carryPicked.map(x => ({id: rid(), text: x.entry.text}))]}));
+    const here = new Set(latest.current!.dump.map(l => normText(l.text)));
+    update(p => ({...p, dump: [...p.dump, ...carryPicked.filter(x => !here.has(normText(x.entry.text))).map(x => ({id: rid(), text: x.entry.text}))]}));
     setCarryOpen(false); setCarryOff(new Set());
-    // Off the earlier days, so they are not offered again (done lines stay there as a record).
-    for (const e of earlier) if (e.plan.dump.some(l => !l.itemId && texts.has(normText(l.text)) && !entryDone(e.plan, l, tinfo)))
-      await editDay(e.date, p => ({...p, dump: p.dump.filter(l => l.itemId || !texts.has(normText(l.text)) || entryDone(p, l, tinfo))}));
     store.flash(`Brought over ${carryPicked.length} line${carryPicked.length === 1 ? '' : 's'}. Make them tasks or keep them as lines`);
   };
   const leaveCarry = () => {
@@ -542,10 +540,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
         {carry.map(x => <label key={x.entry.id} className="dp-carry-row small"><input type="checkbox" checked={!carryOff.has(x.entry.id)} onChange={e => setCarryOff(o => { const n = new Set(o); if (e.target.checked) n.delete(x.entry.id); else n.add(x.entry.id); return n; })} />
           <span className="grow">{x.entry.text}</span><span className="muted">{dayName(x.date)}</span></label>)}
         <div className="row">
-          <button className="btn small primary" disabled={!carryPicked.length} onClick={() => void bringOver()} title="Move the ticked lines to this day's brain dump">Bring over {carryPicked.length}</button>
+          <button className="btn small primary" disabled={!carryPicked.length} onClick={bringOver} title="Bring the ticked lines to this day's brain dump">Bring over {carryPicked.length}</button>
           <button className="btn small ghost" onClick={leaveCarry} title="Stop offering these lines; they stay on their day">Leave them</button>
         </div>
-        <p className="muted small">Ticked lines move to this day. Then make them tasks (Create task, Match) or keep them as lines.</p>
+        <p className="muted small">Ticked lines come to this day. Then make them tasks (Create task, Match) or keep them as lines. Ctrl+Z undoes.</p>
       </>}
     </div>}
     {plan.dump.map(e => entryRow(e, 'dump'))}

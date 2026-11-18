@@ -5,6 +5,7 @@
 import type {Tasks} from './service.ts';
 import type {Project} from '../src/types.ts';
 import {calendarSettings, localDay} from './events.ts';
+import {capsFor, type Access} from './auth.ts';
 
 const todayOf = (p: Project) => p.statuses.find(s => s.id === 'today' || s.name.trim().toLowerCase() === 'today');
 const todoOf = (p: Project) => p.statuses.find(s => s.category === 'todo' && (s.id === 'todo' || /^to ?do$/i.test(s.name.trim()))) ?? p.statuses.find(s => s.category === 'todo');
@@ -17,14 +18,15 @@ export function personDay(tasks: Tasks, person: string, now = new Date()) {
   try { return localDay(now, tz); } catch { return localDay(now, 'UTC'); }
 }
 
-/** Tasks just boxed on the person's current day: from a To do status to Today (spaces that have one). */
-export function markBoxedToday(tasks: Tasks, itemIds: string[], actor: string | null) {
+/** Tasks just boxed on the person's current day: from a To do status to Today (spaces that have one), when the person may edit tasks there. */
+export function markBoxedToday(tasks: Tasks, itemIds: string[], person: string) {
   for (const id of new Set(itemIds)) {
     let it; try { it = tasks.item(id); } catch { continue; }
     if (it.completed) continue;
     const p = tasks.project(it.projectId), today = todayOf(p);
     if (!today || it.status === today.id || p.statuses.find(s => s.id === it.status)?.category !== 'todo') continue;
-    tasks.updateItem(id, {status: today.id}, actor, {system: true});
+    if (!capsFor(tasks.db, person, (p.settings as {access?: Access}).access, false, p.id).has('edit')) continue;
+    tasks.updateItem(id, {status: today.id}, person, {system: true});
   }
 }
 
@@ -39,7 +41,7 @@ export function rollTodayStatuses(tasks: Tasks, now = new Date()) {
   for (const person of tasks.listPeople()) {
     const day = personDay(tasks, person.id, now);
     if (!tasks.db.prepare('insert or ignore into today_rolls (person, day) values (?, ?)').run(person.id, day).changes || first) continue;
-    markBoxedToday(tasks, [...boxedNow(person.id)], null);
+    markBoxedToday(tasks, [...boxedNow(person.id)], person.id);
     for (const it of tasks.listItems({open: true})) {
       if (!it.assignees.includes(person.id)) continue;
       const p = tasks.project(it.projectId), today = todayOf(p), todo = todoOf(p);
