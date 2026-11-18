@@ -7,6 +7,7 @@ import {Invalid, NotFound} from './errors.ts';
 import type {Item} from '../src/types.ts';
 import {checkEntries, entryDone, sameEntries, type TaskInfo} from '../src/daycheck.ts';
 import {calendarSettings, listEvents, localDay, localTime, validTz, zoned} from './events.ts';
+import {markBoxedToday, personDay} from './todaystatus.ts';
 
 /** A line of the plan: plain text, or a task (itemId). done is only used for plain text; tasks are done when completed. */
 export type Entry = {id: string; text: string; itemId?: string | null; done?: boolean};
@@ -106,6 +107,11 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
   const updated = new Date().toISOString();
   tasks.db.prepare('insert into day_plans (person, date, data, updated) values (?,?,?,?) on conflict(person, date) do update set data = excluded.data, updated = excluded.updated')
     .run(person, date, JSON.stringify({top: next.top, dump: next.dump, blocks: next.blocks.map(b => ({...b, at: momentOf(b.start)})), dayStart: next.dayStart, dayEnd: next.dayEnd, slot: next.slot, tz: next.tz}), updated);
+  // Tasks just put in a box on the person's current day move to Today (in spaces that have that status).
+  if (patch.blocks !== undefined && date === personDay(tasks, person)) {
+    const had = new Set(cur.blocks.map(b => b.itemId).filter(Boolean));
+    markBoxedToday(tasks, next.blocks.map(b => b.itemId).filter((x): x is string => !!x && !had.has(x)), person);
+  }
   tasks.emit({kind: 'dayplan', person});
   return {...next, blocks: next.blocks.map(b => ({...b, at: momentOf(b.start)})), updated};
 }

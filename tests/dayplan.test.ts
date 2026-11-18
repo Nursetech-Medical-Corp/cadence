@@ -10,6 +10,8 @@ import {createMcpServer} from '../server/mcp.ts';
 import {guarded} from '../server/tokens.ts';
 import {checkEntries, entryDone} from '../src/daycheck.ts';
 import {boxesFor, carryLines, copyBox} from '../src/dayweek.ts';
+import {personDay, rollTodayStatuses} from '../server/todaystatus.ts';
+import {addDays} from '../src/dates.ts';
 
 function setup() {
   const t = new Tasks(openDb(':memory:'), () => '2026-11-14');
@@ -260,4 +262,35 @@ test('day planner: a line or task shows which boxes it is already in on the day'
   assert.deepEqual(boxesFor(blocks, {text: 'Write report', itemId: 't1'}, task).map(b => b.id), ['b1', 'b2'], 'the task box and a plain box with its title, earliest first');
   assert.deepEqual(boxesFor(blocks, {text: 'write report'}, task).map(b => b.id), ['b1', 'b2'], 'a plain line matches by text and by the task title');
   assert.deepEqual(boxesFor(blocks, {text: 'Dinner'}, task), []);
+});
+
+test('day planner: a task boxed on today goes to Today; next day, not done and not boxed, back to To do', () => {
+  const {t, david, sam} = setup();
+  const statuses = [{id: 'backlog', name: 'Backlog', category: 'todo', color: '#999'}, {id: 'todo', name: 'To do', category: 'todo', color: '#999'},
+    {id: 'today', name: 'Today', category: 'doing', color: '#999'}, {id: 'doing', name: 'Doing', category: 'doing', color: '#999'}, {id: 'done', name: 'Done', category: 'done', color: '#999'}] as const;
+  const p = t.createProject({name: 'Sales', key: 'SAL', statuses: statuses.map(s => ({...s}))});
+  const mk = (title: string, status = 'todo', who = [david.id]) => t.createItem({projectId: p.id, title, status, assignees: who}, david.id);
+  const a = mk('Call Collin'), b = mk('Email samples', 'backlog'), c = mk('Already doing', 'doing'), later = mk('Later task');
+  const noToday = t.createProject({name: 'Plain', key: 'PL'}), x = t.createItem({projectId: noToday.id, title: 'No Today status', assignees: [david.id]}, david.id);
+  const day = personDay(t, david.id), next = addDays(day, 1);
+  t.updateDayPlan(david.id, day, {blocks: [a, b, c, x].map((i, n) => ({id: 'b' + n, text: '', itemId: i.id, start: `1${n}:00`, minutes: 30}))});
+  t.updateDayPlan(david.id, next, {blocks: [{id: 'n1', text: '', itemId: later.id, start: '09:00', minutes: 30}]});
+  assert.deepEqual([a, b, c, x, later].map(i => t.item(i.id).status), ['today', 'today', 'doing', x.status, 'todo'], 'boxed today: To do and Backlog go to Today; Doing, spaces without Today and other days untouched');
+
+  // The first run after an upgrade only marks the day, so work already in Today is not moved back at once.
+  const noon = (d: string) => new Date(`${d}T19:00:00Z`);
+  rollTodayStatuses(t, noon(day));
+  assert.equal(t.item(a.id).status, 'today');
+  // Next day: Call Collin is boxed again (stays), Email samples is not (back to To do), a done task stays done, the planned-ahead one flips to Today.
+  t.updateDayPlan(david.id, next, {blocks: [{id: 'n1', text: '', itemId: later.id, start: '09:00', minutes: 30}, {id: 'n2', text: '', itemId: a.id, start: '10:00', minutes: 30}]});
+  const shared = mk('Shared with Sam', 'today', [david.id, sam.id]);
+  t.updateDayPlan(sam.id, next, {blocks: [{id: 's1', text: '', itemId: shared.id, start: '09:00', minutes: 30}]});
+  const fin = mk('Finished', 'today'); t.updateItem(fin.id, {status: 'done'}, david.id);
+  rollTodayStatuses(t, noon(next));
+  assert.deepEqual([a, b, later, shared, fin].map(i => t.item(i.id).status), ['today', 'todo', 'today', 'today', 'done'],
+    'kept when boxed today (by any assignee); back to To do when not; planned-ahead tasks arrive in Today; done stays done');
+  // Once a day: a second run the same day changes nothing, even after a manual move to Today.
+  t.updateItem(b.id, {status: 'today'}, david.id);
+  rollTodayStatuses(t, noon(next));
+  assert.equal(t.item(b.id).status, 'today');
 });

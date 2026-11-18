@@ -19,6 +19,7 @@ import * as ai from './aiwork.ts';
 import * as approvals from './approvals.ts';
 import * as boards from './boards.ts';
 import * as dayplan from './dayplan.ts';
+import {rollTodayStatuses} from './todaystatus.ts';
 import {GALLERY, validatePack, type Node as PackNode, type Pack, checkTemplateData} from './packs.ts';
 import {DATE_TRIGGERS, apply as applyRule, matches as ruleMatches, validateRules, type RuleContext, type RuleHost} from './automations.ts';
 import {cleanHooks, cleanRuleSecrets, listDeliveries, queueHooks, saveWorkspaceHooks, workspaceHooks} from './webhooks.ts';
@@ -1108,6 +1109,7 @@ export class Tasks {
     try { boards.boardsPeriodic(this); } catch (e) { console.error('Whiteboard schedules failed', (e as Error).message); }
     this.dateEvents(today);
     this.reminders();
+    try { rollTodayStatuses(this); } catch (e) { console.error('Today status roll failed', (e as Error).message); }
   }
   /** Date events for webhooks, each sent once per item (or sprint) and date. On the first run after an upgrade the dates
    *  already reached are only marked, so old work does not flood the endpoints. */
