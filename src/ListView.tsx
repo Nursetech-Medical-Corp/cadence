@@ -7,7 +7,8 @@ import {RoutineMark} from './RoutineControls.tsx';
 import {AIStateChip} from './AIWork.tsx';
 import type {Item, Project} from './types.ts';
 import {between, type Store} from './store.ts';
-import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeBadge, move, SpaceChip} from './components.tsx';
+import {Check, DateInput, InlineText, PeoplePicker, PrioritySelect, Progress, StatusSelect, TagEditor, TypeSelect, move, SpaceChip} from './components.tsx';
+import {nestUnder, placeBeside} from './nesting.ts';
 import {rowFieldsOf, type RowField, type ViewProps} from './viewProps.ts';
 import {sortItems, sortsOf} from './Sorting.tsx';
 import {countRules} from './FilterBuilder.tsx';
@@ -23,7 +24,8 @@ export function ListView({store, project, items: shown, allItems: items, open, s
   const [insert, setInsert] = useState<Insert | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [quickText, setQuickText] = useState('');
-  const [overId, setOverId] = useState<string | null>(null);
+  // Where a dragged row would land on the row under the pointer: above it, inside it (one level down), or below it.
+  const [over, setOver] = useState<{id: string; zone: 'before' | 'inside' | 'after'} | null>(null);
   const [dragField, setDragField] = useState<RowField | null>(null);
   const [overField, setOverField] = useState<RowField | null>(null);
   const fields = rowFieldsOf(config);
@@ -55,12 +57,23 @@ export function ListView({store, project, items: shown, allItems: items, open, s
     const parent = i.parentId ? items.find(x => x.id === i.parentId) : null;
     if (parent) store.updateItem(i.id, {parentId: parent.parentId, sort: between(parent.sort, siblingsOf(parent)[siblingsOf(parent).indexOf(parent) + 1]?.sort)});
   };
-  const dropOn = (target: Item) => {
-    if (!dragId || dragId === target.id) return;
-    const sibs = siblingsOf(target), idx = sibs.indexOf(target);
-    store.updateItem(dragId, {parentId: target.parentId, sort: between(sibs[idx - 1]?.sort, target.sort)});
+  /** Drop on the middle of a row to nest under it (one level down); on its top or bottom edge to reorder beside it. */
+  const dropOn = (target: Item, zone: 'before' | 'inside' | 'after') => {
+    const id = dragId;
     setDragId(null);
+    if (!id || id === target.id) return;
+    if (zone === 'inside') {
+      const patches = nestUnder(items, id, target.id, project.types);
+      if (!patches) { store.flash('Cannot nest it there: not under itself, and only within the same space'); return; }
+      for (const p of patches) store.updateItem(p.id, p.patch);
+      setCollapsed(c => { const n = new Set(c); n.delete(target.id); return n; });
+      return;
+    }
+    const p = placeBeside(items, id, target.id, zone === 'after');
+    if (p) store.updateItem(p.id, p.patch); else store.flash('Cannot move it there: not into itself, and only within the same space');
   };
+  const zoneOf = (e: React.DragEvent) => { const r = e.currentTarget.getBoundingClientRect(), y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' : y > 0.72 ? 'after' : 'inside'; };
+  const orderedIds = () => [...document.querySelectorAll<HTMLElement>('.list .row[data-id]')].map(r => r.dataset.id!);
 
   // Priority, assignee and status: drag one onto another to reorder them in every row of this view. Alt+Left and Alt+Right do the same.
   const slot = (id: RowField, i: Item) => (
@@ -94,9 +107,14 @@ export function ListView({store, project, items: shown, allItems: items, open, s
           {insert?.beforeId === i.id && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} createExtra={createExtra} />}
           <div onClickCapture={e => { if (e.ctrlKey || e.metaKey || e.shiftKey) { e.preventDefault(); e.stopPropagation(); toggle(i.id, e, [...document.querySelectorAll<HTMLElement>('.list .row[data-id]')].map(r => r.dataset.id!)); } }} data-id={i.id}
             style={tint(colorOf(i, activeColors(config), {project, today: store.today}))}
-            className={'row' + (selected.has(i.id) ? ' sel' : '') + (i.completed ? ' done' : '') + (dragId === i.id ? ' dragging' : '') + (overId === i.id && dragId !== i.id ? ' drop-before' : '')} draggable
-            onDragStart={e => { if ((e.target as HTMLElement).closest('input')) { e.preventDefault(); return; } setDragId(i.id); }} onDragEnd={() => { setDragId(null); setOverId(null); }}
-            onDragOver={e => { if (dragField) return; e.preventDefault(); setOverId(i.id); }} onDrop={() => { dropOn(i); setOverId(null); }}>
+            className={'row' + (selected.has(i.id) ? ' sel' : '') + (i.completed ? ' done' : '') + (dragId === i.id ? ' dragging' : '') + (over?.id === i.id && dragId && dragId !== i.id ? ` drop-${over.zone}` : '')} draggable
+            onDragStart={e => { if ((e.target as HTMLElement).closest('input')) { e.preventDefault(); return; } setDragId(i.id); }} onDragEnd={() => { setDragId(null); setOver(null); }}
+            onDragOver={e => { if (dragField || !dragId) return; e.preventDefault(); const zone = zoneOf(e); if (over?.id !== i.id || over.zone !== zone) setOver({id: i.id, zone}); }}
+            onDragLeave={e => { const r = e.currentTarget.getBoundingClientRect(); if (e.clientY < r.top || e.clientY >= r.bottom) setOver(o => o?.id === i.id ? null : o); }}
+            onDrop={e => { e.preventDefault(); dropOn(i, over?.id === i.id ? over.zone : zoneOf(e)); setOver(null); }}
+            title={dragId && dragId !== i.id ? 'Drop on the middle to nest it here (one level down); on the top or bottom edge to move it above or below' : undefined}>
+            <input type="checkbox" className="row-sel" checked={selected.has(i.id)} title="Select (Shift: a range). Then Delete removes, or use the bar below" onChange={() => {}}
+              onClick={e => { e.stopPropagation(); toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, orderedIds()); }} />
             <span className="row-gutter">
               <button className="gutter-btn" title="Click to add below. Alt+click to add above" onClick={e => { e.stopPropagation(); if (e.altKey) startInsertBefore(i, depth); else startInsertAfter(i, depth); }}><Plus size={14} /></button>
               <span className="gutter-btn grip" title="Drag to move"><GripVertical size={14} /></span>
@@ -109,7 +127,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
             </button>
             <Check item={i} project={project} onToggle={status => store.updateItem(i.id, {status})} />
             {project.settings.rollup && <SpaceChip item={i} projects={store.projects} />}
-            {i.type !== 'Task' && <TypeBadge type={i.type} />}
+            <span className={'row-type' + (i.type === 'Task' ? ' quiet' : '')} title="Change the level: Project, Phase, Task, Subtask"><TypeSelect project={project} value={i.type} onChange={type => store.updateItem(i.id, {type})} /></span>
             <RowTitle item={i} onOpen={() => open(i.id)}
               onSave={title => store.updateItem(i.id, {title})}
               onEnter={() => startInsertAfter(i, depth)}
@@ -136,7 +154,7 @@ export function ListView({store, project, items: shown, allItems: items, open, s
 
   const top = kids.get(null) ?? [];
   return (
-    <div className="list">
+    <div className={'list' + (selected.size ? ' selecting' : '')}>
       {rows(null, 0)}
       {insert && insert.afterId === null && !insert.beforeId && <QuickRow store={store} project={project} insert={insert} setInsert={setInsert} items={items} text={quickText} setText={setQuickText} createExtra={createExtra} />}
       {!insert && (

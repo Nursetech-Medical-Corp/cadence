@@ -13,6 +13,14 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
 - Alerts: until this device is signed up for alerts, a bar at the top asks to turn them on (browser permission, like Slack), offers Install app where the browser can, Not now hides it for a week (kept after reload), and when the browser blocks alerts it says how to allow them. Bug found: alerts were only reachable from Inbox, Settings, so nobody was asked. (e2e timers)
 
+## Organizing in List and Table
+- Drop a row on the middle of another row: it nests there as the next level down (a Project on a Project becomes a Phase, anything on a Task becomes a Subtask); its own subitems move down too, never past the last level; an item already deeper keeps its level. (unit, manual)
+- Drop on the top or bottom edge of a row: it moves above or below it, among that row's siblings. Never into its own subitems. (unit, manual)
+- The level tag on a List row (Project, Phase, Task, Subtask) opens a menu to change it; Task shows on hover. (manual)
+- List rows have a select box like the Table; the bar below offers bulk changes and Delete. Delete or Backspace removes the selected items after a confirm, but not while typing in a field. (manual)
+- Bug found in the check: in the All spaces rollup a drop could nest an item under one from another space. Drops now stay within one space and say why when refused. (unit)
+- Table with no column sort: a tree, subitems indented under their parent with a fold arrow in the Title cell; other columns stay aligned. Drag a row by its grip (left of +) the same way as in the List. With a column sort it is flat and a drop only nests. (unit for the order, manual)
+
 ## Focus mode and timer
 - Focus on a task fills the screen (black around it) with title, notes, subitems and the timer; Esc or X leaves.
 - Done in focus mode, on the timer bar or in the pop-out stops a running timer and completes the task.

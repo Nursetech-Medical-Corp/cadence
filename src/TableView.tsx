@@ -1,7 +1,8 @@
 import {Fragment, useEffect, useRef, useState} from 'react';
 import {TimeCell} from './TimeTracker.tsx';
 import {activeColors, colorOf, tint} from './ColorRules.tsx';
-import {ArrowDown, ArrowUp, Eye, EyeOff, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
+import {ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
+import {nestUnder, placeBeside, treeOrder} from './nesting.ts';
 import type {FieldDef, Item, Project} from './types.ts';
 import {api, between, fmtMinutes, type Store} from './store.ts';
 import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf, itemKey, SpaceChip} from './components.tsx';
@@ -36,6 +37,16 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   const qa = useQuickAssist(store, project.types, draft, setDraft);
   const [pinned, setPinned] = useState<string[]>([]);
   const [dragCol, setDragCol] = useState<string | null>(null);
+  // Rows: with no column sort the table is a tree (subitems under their parent, folded with the arrow in the Title cell).
+  // Drag a row by its grip onto another row's middle to nest it one level down, or onto its top or bottom edge to move it.
+  const [folded, setFolded] = useState<Set<string>>(new Set());
+  const [dragRow, setDragRow] = useState<string | null>(null);
+  const [overRow, setOverRow] = useState<{id: string; zone: 'before' | 'inside' | 'after'} | null>(null);
+  const sorts = sortsOf(config), treeMode = !sorts.length;
+  const tree = treeMode ? treeOrder(items.filter(i => !pinned.includes(i.id))) : [];
+  const depthOf = new Map(tree.map(x => [x.item.id, x.depth]));
+  const hasKids = new Set(items.map(i => i.parentId).filter(Boolean) as string[]);
+  const fold = (id: string) => setFolded(f => { const n = new Set(f); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [overCol, setOverCol] = useState<string | null>(null);
   const [live, setLive] = useState<{id: string; width: number} | null>(null);
   const resizing = useRef<{id: string; x: number; w: number} | null>(null);
@@ -46,7 +57,9 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     {id: 'key', name: 'ID', width: 80, sortVal: i => i.number, cell: i => <button className="link" onClick={() => open(i.id)}>{itemKey(i, store.projects)}</button>},
     ...(project.settings.rollup ? [{id: 'space', name: 'Space', width: 150, sortVal: (i: Item) => store.projects.find(p => p.id === i.projectId)?.name ?? '', cell: (i: Item) => <SpaceChip item={i} projects={store.projects} />} as Col] : []),
     {id: 'title', name: 'Title', width: 340, sortVal: i => i.title.toLowerCase(), raw: i => i.title, cell: i => (
-      <span className="title-cell"><Check item={i} project={project} onToggle={status => up(i)({status})} /><InlineText value={i.title} onSave={title => up(i)({title})} /></span>)},
+      <span className="title-cell">{treeMode && <><span className="tree-pad" style={{width: (depthOf.get(i.id) ?? 0) * 18}} />
+        <button className={'tree-twisty' + (hasKids.has(i.id) ? '' : ' none')} title={folded.has(i.id) ? 'Show subitems' : 'Hide subitems'} onClick={() => fold(i.id)}>{folded.has(i.id) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button></>}
+        <Check item={i} project={project} onToggle={status => up(i)({status})} /><InlineText value={i.title} onSave={title => up(i)({title})} /></span>)},
     {id: 'parent', name: 'Parent', width: 200, sortVal: i => (i.parentId ? store.items.get(i.parentId)?.title ?? '' : '~'), raw: i => i.parentId, cell: i => (
       <select className="plain-select parent-select" value={i.parentId ?? ''} onChange={e => up(i)({parentId: e.target.value || null})} title="Parent">
         <option value="">None</option>
@@ -85,8 +98,18 @@ export function TableView({store, project, items, allItems, sprints, open, confi
   const shown = cols.filter(c => !hidden.includes(c.id));
   const saveCols = (list: {id: string; width: number}[]) => setConfig({columns: list});
 
-  const sorts = sortsOf(config);
-  const rows = sortItems(items.filter(i => !pinned.includes(i.id)), sorts, project, store);
+  const byId = new Map(items.map(i => [i.id, i]));
+  const underFold = (i: Item) => { for (let p = i.parentId ? byId.get(i.parentId) : undefined, n = 0; p && n < 50; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (folded.has(p.id)) return true; return false; };
+  const rows = treeMode ? tree.map(x => x.item).filter(i => !underFold(i)) : sortItems(items.filter(i => !pinned.includes(i.id)), sorts, project, store);
+  const dropRow = (target: Item, zone: 'before' | 'inside' | 'after') => {
+    const id = dragRow; setDragRow(null); setOverRow(null);
+    if (!id || id === target.id) return;
+    if (zone === 'inside') { const ps = nestUnder(allItems, id, target.id, project.types); if (!ps) store.flash('Cannot nest it there: not under itself, and only within the same space'); if (ps) { for (const p of ps) store.updateItem(p.id, p.patch); setFolded(f => { const n = new Set(f); n.delete(target.id); return n; }); } return; }
+    const p = placeBeside(allItems, id, target.id, zone === 'after');
+    if (p) store.updateItem(p.id, p.patch); else store.flash('Cannot move it there: not into itself, and only within the same space');
+  };
+  // Sorted by a column, only nesting makes sense: the sort decides the order.
+  const zoneOf = (e: React.DragEvent) => { if (!treeMode) return 'inside' as const; const r = e.currentTarget.getBoundingClientRect(), y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' as const : y > 0.72 ? 'after' as const : 'inside' as const; };
   // Large tables: render only the rows near the screen (plus a buffer), with spacers keeping the scroll height.
   const wrap = useRef<HTMLDivElement>(null);
   const [win, setWin] = useState({top: 0, height: 900, rowH: 36});
@@ -173,8 +196,11 @@ export function TableView({store, project, items, allItems, sprints, open, confi
         </tr></thead>
         <tbody>
           {first > 0 && <tr aria-hidden style={{height: first * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
-          {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '')}>
-            <td className="sel-col"><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
+          {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '') + (dragRow === i.id ? ' dragging' : '') + (overRow?.id === i.id && dragRow && dragRow !== i.id ? ` drop-${overRow.zone}` : '')}
+            onDragOver={e => { if (!dragRow) return; e.preventDefault(); const zone = zoneOf(e); if (overRow?.id !== i.id || overRow.zone !== zone) setOverRow({id: i.id, zone}); }}
+            onDrop={e => { if (!dragRow) return; e.preventDefault(); dropRow(i, overRow?.id === i.id ? overRow.zone : zoneOf(e)); }}>
+            <td className="sel-col"><span className="row-grip" draggable title={treeMode ? 'Drag onto a row: the middle nests it there (one level down), the top or bottom edge moves it above or below' : 'Drag onto a row to nest it there. Clear the sort to reorder by dragging'}
+              onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', i.id); setDragRow(i.id); }} onDragEnd={() => { setDragRow(null); setOverRow(null); }}><GripVertical size={12} /></span><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
             {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>
             {insertAt?.id === i.id && <InsertRow store={store} types={project.types} cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
               // Between this row and the one shown next to it.

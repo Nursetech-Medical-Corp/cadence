@@ -1957,3 +1957,25 @@ body.dp-resizing { cursor: col-resize; user-select: none; }
 .dp-carry-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 3px 2px; text-align: left; font-size: 12.5px; font-weight: 500; }
 .dp-carry-row { display: flex; align-items: center; gap: 6px; padding: 2px; }
 .dp-carry .row { gap: 6px; }
+
+/* Organizing by drag (List and Table): drop on a row's middle to nest it one level down, on its edges to move it above or below. */
+.row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.row.drop-inside, table.grid tr.drop-inside td { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
+table.grid tr.drop-before td { box-shadow: inset 0 2px 0 var(--accent); }
+table.grid tr.drop-after td { box-shadow: inset 0 -2px 0 var(--accent); }
+table.grid tr.dragging { opacity: .35; }
+/* List: a select box on every row, like the Table. Shown on hover, and always once anything is selected. */
+.row-sel { flex: none; width: 14px; height: 14px; margin: 0 2px 0 0; opacity: 0; cursor: pointer; accent-color: var(--accent); }
+.list .row:hover .row-sel, .row.sel .row-sel, .list.selecting .row-sel { opacity: 1; }
+/* The level tag (Project, Phase, Task, Subtask) opens a menu to change it; Task stays quiet until hover. */
+.row-type { flex: none; display: inline-flex; }
+.row-type .type { cursor: pointer; }
+.row-type.quiet { opacity: 0; }
+.list .row:hover .row-type.quiet { opacity: .7; }
+/* Table tree: indent and fold arrow in the Title cell, so every other column stays aligned. */
+.tree-pad { display: inline-block; flex: none; }
+.tree-twisty { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--muted); }
+.tree-twisty:hover { background: var(--hover); color: var(--text); }
+.tree-twisty.none { visibility: hidden; }
+.row-grip { cursor: grab; color: var(--muted); opacity: 0; display: inline-flex; vertical-align: middle; }
+table.grid tr:hover .row-grip { opacity: 1; }

@@ -1,5 +1,6 @@
-// Edit many items at once. Appears when rows are selected (Table checkboxes, or Ctrl/Shift+click in List and Backlog).
-import {useState} from 'react';
+// Edit many items at once. Appears when rows are selected (checkboxes in Table and List, or Ctrl/Shift+click).
+// Delete or Backspace removes the selected items (after a confirm) when you are not typing in a field.
+import {useEffect, useRef, useState} from 'react';
 import {CalendarDays, Trash2, X} from 'lucide-react';
 import type {ItemPatch, Project, Sprint} from './types.ts';
 import {PRIORITIES} from './types.ts';
@@ -10,8 +11,22 @@ import {uiConfirm} from './dialogs.tsx';
 export function BulkBar({store, project, sprints, selected, clear}: {store: Store; project: Project; sprints: Sprint[]; selected: Set<string>; clear: () => void}) {
   const [date, setDate] = useState('');
   const [doneOn, setDoneOn] = useState('');
-  if (!selected.size) return null;
   const ids = [...selected].filter(id => store.items.has(id));
+  const remove = async () => { if ((await uiConfirm(`Delete ${ids.length} item${ids.length === 1 ? '' : 's'} and their subitems?`))) { for (const id of ids) store.deleteItem(id); clear(); } };
+  const removeRef = useRef(remove); removeRef.current = remove;
+  useEffect(() => {
+    if (!selected.size) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (t.closest('textarea, select, [contenteditable="true"], .dlg') || (t.matches('input') && (t as HTMLInputElement).type !== 'checkbox')) return;
+      e.preventDefault();
+      void removeRef.current();
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [selected.size > 0]);
+  if (!selected.size) return null;
   const apply = (patch: (id: string) => ItemPatch) => { for (const id of ids) store.updateItem(id, patch(id)); };
   const doneId = project.statuses.find(s => s.category === 'done')?.id;
   return (
@@ -31,7 +46,7 @@ export function BulkBar({store, project, sprints, selected, clear}: {store: Stor
       {doneId && <button className="btn" onClick={() => apply(() => ({status: doneId}))}>Mark done</button>}
       {doneId && <label className="bulk-date" title="Mark done on a past date"><span className="small">Done on</span><input type="date" value={doneOn} max={store.today}
         onChange={e => { setDoneOn(e.target.value); if (e.target.value) apply(() => ({status: doneId, completed: e.target.value})); }} /></label>}
-      <button className="btn danger" onClick={async () => { if ((await uiConfirm(`Delete ${ids.length} items and their subitems?`))) { for (const id of ids) store.deleteItem(id); clear(); } }}><Trash2 size={13} /></button>
+      <button className="btn danger" title="Delete the selected items (or press Delete)" onClick={() => void remove()}><Trash2 size={13} /></button>
       <button className="icon" title="Clear selection (Esc)" onClick={clear}><X size={15} /></button>
     </div>
   );
