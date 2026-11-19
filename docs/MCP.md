@@ -72,7 +72,7 @@ Ask the agent to call `get_guide`, then `get_workspace`. The guide (also in [AI-
 | Write | `create_item`, `quick_add`, `update_item`, `complete_item`, `delete_item`, `add_comment`, `resolve_comment`, `apply_to_subitems`, `revert_change` |
 | Views | `list_views`, `create_view`, `update_view` (filters, sorts, grouping, columns, colors, lock), `delete_view`, `reorder_views` |
 | Data | `export_items` (JSON or CSV), `import_items` (adds rows, reports bad ones), `export_workspace` (admins) |
-| Time | `start_timer`, `stop_timer` (with an outcome note), `log_time`, `list_time`, `get_timesheet`, `set_day_time`, `update_time_entry` (fix start, end, minutes or note), `delete_time_entry` |
+| Time | `start_timer`, `stop_timer` (with an outcome note), `log_time` (all three add a `warning` when an app works as a person, so AI time is not filed as theirs), `list_time`, `get_timesheet`, `set_day_time`, `update_time_entry` (fix start, end, minutes or note), `delete_time_entry` |
 | Team | `merge_people` (admins: merge a duplicate team member row into another) |
 | Inbox | `my_notifications`, `mark_notifications_read`, `email_alerts` (read or set which notifications also come by email) |
 | Spaces (named project in the tools) | `create_project`, `update_project`, `delete_project` (admins, confirm by name), `create_rollup`, `set_automations`, `trigger_automation` |

@@ -183,3 +183,22 @@ test('agents and proposals over the REST API', async () => {
     void createToken;
   } finally { server.close(); }
 });
+
+test('an AI app connected as a person is told so: time tools warn, agent tools explain how to switch', async () => {
+  const {t, david, p, dc} = setup();
+  const item = t.createItem({projectId: p.id, title: 'Save the report'}, david.id);
+  const asDavid = await mcp(t, david.id);
+  const started = await asDavid('start_timer', {item: item.id});
+  assert.match(started.warning, /Recorded as David, a person/);
+  assert.match(started.warning, /Connected apps/);
+  assert.match((await asDavid('stop_timer', {})).warning, /counts as theirs/);
+  assert.match((await asDavid('log_time', {item: item.id, minutes: 5})).warning, /a person/);
+  const guide = await asDavid('get_guide', {});
+  assert.deepEqual(guide.actingAs, {name: 'David', kind: 'person'});
+  assert.match(guide.warning, /You are working as David/);
+  await assert.rejects(asDavid('agent_inbox', {}), /works as David, a person.*Connected apps/s);
+  const asAgent = await mcp(t, dc.id);
+  assert.equal((await asAgent('start_timer', {item: item.id})).warning, undefined, 'an agent gets no warning');
+  assert.equal((await asAgent('get_guide', {})).actingAs.kind, 'ai');
+  assert.equal((await asAgent('get_guide', {})).warning, undefined);
+});
