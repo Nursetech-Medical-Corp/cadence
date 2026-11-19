@@ -37,6 +37,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.
 
 ## AI agents
+- An AI app connected "as me" is told so: `get_guide` shows `actingAs` and a warning, time tools warn, `agent_inbox` explains how to switch (bug: Claude filled the owner's timesheet with its own work).
 - AI work: cards with a pending approval sit in Ready for review (also work an agent did by assignment, without a claim); people drag cards between working, review, approved and discarded (claims dragged to working are accepted). Bug found: approvals waiting showed under AI working and admins could not move them. (unit)
 - Several agents suggesting the same task: approving one makes it once and closes the others; the approver picks which agent (or a person) does it. (manual)
 - Connect Claude: the consent page asks who it works as, its own AI agent (default) or you; Team page can switch a connected app later. Bug found: Connect Claude always acted as the person. (manual)

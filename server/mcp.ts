@@ -74,7 +74,9 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
   };
 
   tool('get_guide', 'Read the guide for AI agents: concepts, field meanings, quick-add syntax, recipes for common jobs. Read this first.', {}, true,
-    () => { const w = getWorkspace(tasks.db); return {guide: readGuide(), agentGuide: w.agentGuide.trim() || DEFAULT_AGENT_GUIDE, ...(w.aiRules ? {workspaceRules: w.aiRules} : {})}; });
+    () => { const w = getWorkspace(tasks.db); const r = actorRow(); const warn = asPersonWarning();
+      return {...(r ? {actingAs: {name: r.name, kind: r.kind === 'ai' ? 'ai' : 'person'}} : {}), ...(warn ? {warning: warn.replace(/^Recorded as/, 'You are working as')} : {}),
+        guide: readGuide(), agentGuide: w.agentGuide.trim() || DEFAULT_AGENT_GUIDE, ...(w.aiRules ? {workspaceRules: w.aiRules} : {})}; });
   server.registerResource('guide', 'tasks://guide', {mimeType: 'text/markdown', description: 'How to use this task app as an AI agent'}, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: readGuide()}]}));
   tool('merge_people', 'Admins: merge a duplicate team member row into another (the same AI or person added twice). Tasks, comments, time, approvals, keys and owned agents move to the kept row; the other is deactivated, never deleted.',
     {from: z.string().describe('Row to merge away (name or id)'), into: z.string().describe('Row to keep (name or id)')}, false,
@@ -111,11 +113,17 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     return tasks.addComment(tasks.findItem(i.item).id, actor, i.body, i.assignee ? personId(i.assignee) : null);
   });
   const me = () => { if (!actor) throw new Error('Pass person, or start the MCP server with --as <person> (or use a token)'); return actor; };
+  // An AI app connected "as me" works as that person: its timers and time count as theirs. Say so on every time tool,
+  // so an agent can notice and ask its owner to switch the app to an AI agent instead of quietly filling their timesheet.
+  const actorRow = () => actor ? tasks.db.prepare('select name, kind from people where id = ?').get(actor) as {name: string; kind: string | null} | undefined : undefined;
+  const SWITCH_HINT = 'To keep AI work separate, the person switches this app to an AI agent: Team page, Connect Claude, Connected apps, "works as".';
+  const asPersonWarning = () => { const r = actorRow(); return r && r.kind !== 'ai' ? `Recorded as ${r.name}, a person. If you are an AI app, this time counts as theirs, not yours. ${SWITCH_HINT}` : undefined; };
+  const withWarning = (x: unknown, forSomeoneElse = false) => { const w = forSomeoneElse ? undefined : asPersonWarning(); return w ? {...(x && typeof x === 'object' ? x : {result: x}), warning: w} : x; };
   tool('start_timer', 'Start your timer on an item (stops any other timer you have running). Timers record to the second. Work you log on a task starts it for you.',
     {item: z.string(), kind: z.enum(['work', 'review']).optional().describe('review: time spent reviewing the work on this item')}, false,
-    i => tasks.startTimer(tasks.findItem(i.item).id, me(), i.kind ?? 'work'));
+    i => withWarning(tasks.startTimer(tasks.findItem(i.item).id, me(), i.kind ?? 'work')));
   tool('stop_timer', 'Stop your running timer, with an optional note such as the outcome. Submitting work stops it for you.', {note: z.string().optional()}, false,
-    i => tasks.stopTimer(me(), i.note) ?? {stopped: false, reason: 'No timer was running'});
+    i => withWarning(tasks.stopTimer(me(), i.note) ?? {stopped: false, reason: 'No timer was running'}));
   // ---- Views: what the board shows (filters, sorts, grouping, columns, colors) ----
   const VIEW_CONFIG_DOC = 'View config keys: filter {join: and|or, rules: [{field, op: is|is-not|contains|empty|not-empty|before|after|gte|lte, value, off?}], off?} (off: kept but not applied), '
     + 'sorts [{col, dir: 1|-1, by?: order|alpha}] (col: title, status, type, priority, assignees, due, start, estimate, sprint, key, created, updated, or f:<fieldId>), '
@@ -168,7 +176,7 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     i => { const {id, ...patch} = i; return tasks.updateTime(id, patch); });
   tool('delete_time_entry', 'Delete a time entry by id.', {id: z.string()}, false, i => { tasks.deleteTime(i.id); return {ok: true}; });
   tool('log_time', 'Log minutes against an item.', {item: z.string(), minutes: z.number().positive(), person: z.string().optional(), note: z.string().optional(), date: z.string().optional()}, false,
-    i => tasks.logTime({itemId: tasks.findItem(i.item).id, person: i.person ? personId(i.person) : me(), minutes: i.minutes, note: i.note, date: i.date}));
+    i => { const person = i.person ? personId(i.person) : me(); return withWarning(tasks.logTime({itemId: tasks.findItem(i.item).id, person, minutes: i.minutes, note: i.note, date: i.date}), person !== actor); });
   tool('my_work', 'Open items assigned to a person, grouped overdue, today, thisWeek, later, noDate.', {person: z.string()}, true, i => tasks.myWork(personId(i.person)));
   tool('create_project', 'Create a space (project) with default statuses. personal: true makes it private to you until you share it (anyone can do this; shared spaces need an admin).', {name: z.string(), key: z.string().optional(), personal: z.boolean().optional()}, false,
     i => tasks.createProject({name: i.name, key: i.key, ...(i.personal && actor ? {settings: {access: personalAccess(actor)}} : {})}));
@@ -338,7 +346,7 @@ export function buildMcp(tasks: Tasks, actorRef: string | null) {
     async i => held() ? propose(tasks, actor!, 'event.delete', [i.event, {scope: i.scope, occurrence: i.occurrence}]) : synced(deleteEvent(tasks, i.event, actor, {scope: i.scope, occurrence: i.occurrence})));
 
   // ---- AI agents: what to look at, suggesting work, proposals ----
-  const meAgent = () => { const a = me(); if ((tasks.db.prepare('select kind from people where id = ?').get(a) as {kind?: string} | undefined)?.kind !== 'ai') throw new Error('This tool is for AI agent accounts'); return a; };
+  const meAgent = () => { const a = me(); const r = actorRow(); if (r?.kind !== 'ai') throw new Error(`This tool is for AI agent accounts. This connection works as ${r?.name ?? 'a person'}, a person, so anything you do here counts as their work. ${SWITCH_HINT}`); return a; };
   tool('agent_inbox', 'Start every run here (AI agents). New tasks assigned to your owner, work you may claim (within your settings), work sent back to you, and decisions on your proposals since the time you pass (default: last 24 hours). Store now and pass it as since next time.',
     {since: z.string().optional()}, true, i => agentInbox(tasks, meAgent(), i.since));
   tool('suggest_work', 'Suggest a task for a person and their agent: a new task (project and title) or an existing item. Your owner approves it; then the task is assigned to the person and the agent, already accepted. Tag sop with an approved AI SOP id to skip approval.',
