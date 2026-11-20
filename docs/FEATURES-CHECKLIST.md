@@ -14,6 +14,12 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Changes made by another tab, an agent or MCP show up without a reload, and never undo a newer local change.
 - Alerts: until this device is signed up for alerts, a bar at the top asks to turn them on (browser permission, like Slack), offers Install app where the browser can, Not now hides it for a week (kept after reload), and when the browser blocks alerts it says how to allow them. Bug found: alerts were only reachable from Inbox, Settings, so nobody was asked. (e2e timers)
 
+## Views: your own and the team's
+- Changing filters, sort or columns saves for you only (a bar says so) and is kept after a reload. (e2e views)
+- Bug fixed: clearing a team filter for yourself came back after a reload. Cleared settings are now saved too. (e2e views)
+- Save for everyone makes your setup the team view; your copy is only dropped once the save worked, so a refused save never loses your filters. Reset to team view drops yours. (e2e views)
+- The space header shows how many items the current view shows (after its filters) next to the space's open count (not done, backlog included). (e2e views)
+
 ## Organizing in List and Table
 - Drop a row on the middle of another row: it nests there as the next level down (a Project on a Project becomes a Phase, anything on a Task becomes a Subtask); its own subitems move down too, never past the last level; an item already deeper keeps its level. (unit, manual)
 - Drop on the top or bottom edge of a row: it moves above or below it, among that row's siblings. Never into its own subitems. (unit, manual)
@@ -92,6 +98,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Every clock for the same task shows the same second (focus bar, pop-out, focus view, task panel, top bar): one shared app clock. Bug found: the pop-out and the focus view were a second apart. (e2e timers)
 - Starting or stopping a timer in one tab updates every other tab: same browser at once, other devices through the event stream (kept open with a ping every 25 s, reloaded after a reconnect), and a tab checks again when it comes back into view. Bug found: a stopped timer still showed running in the calendar tab. (e2e timers)
 - Clocks: the big number is this run, the total on the task beside or below. (e2e timers)
+- Focus bar: drag it by its grip (Focus label); it snaps to the nearest corner or edge (top or bottom, left, middle or right) and stays there after a reload. Double-click the grip to put it back at the top. Shrink shows only the running timer; Clear empties the bar but keeps the running task. Bug found: the only way to clear it was removing tasks one by one, and it covered the space header. (e2e views)
 - Focus bar: a task's name opens its task panel; Full page (four corners) and Pop out (picture-in-picture) are labeled buttons. (e2e timers)
 - Pop out opens the small always-on-top window in the corner (picture-in-picture, Chrome and Edge), shown over every page and app: each task's clock, progress against the estimate, and the running task's notes and subitems. Its Full page button opens the full page focus and it stays open. A reload closes it (the browser does that) and the next click or key press brings it back, and that click still works; closing it yourself keeps it closed. Other browsers get a small separate window (#/popout). Bug found: the pop-out closed on reload; a separate window replaced the corner one and was rolled back. (e2e timers)
 - Progress against the estimate: accent, amber from 80%, red past it with the overrun shown; the same bar in the focus view and the pop-out. (e2e timers)

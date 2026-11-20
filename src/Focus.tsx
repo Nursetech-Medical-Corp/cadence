@@ -7,10 +7,10 @@
 // Each person picks what starting a timer does (prefs "focus"): open the focus view, pop out, show the bar.
 // Any of these can be on together. Set on the bar's gear, in the focus view, or on the Team page (My account).
 import {TaskClock, TimeProgress} from './TimeTracker.tsx';
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState, type PointerEvent as PE} from 'react';
 import {wsId} from './store.ts';
 import {createPortal} from 'react-dom';
-import {Calendar, CheckCircle2, Focus as FocusIcon, Maximize, Minimize, PictureInPicture2, Play, Settings2, Square, X} from 'lucide-react';
+import {Calendar, CheckCircle2, ChevronDown, ChevronUp, Focus as FocusIcon, GripVertical, ListX, Maximize, Minimize, PictureInPicture2, Play, Settings2, Square, X} from 'lucide-react';
 import {fmtClock, fmtMinutes, useSharedNow, type Store} from './store.ts';
 import {BlockEditor} from './BlockEditor.tsx';
 import {Check, InlineText, Popover, PriorityIcon, StatusIcon, itemKey} from './components.tsx';
@@ -149,12 +149,47 @@ export function FocusSettingsCard({store}: {store: Store}) {
   </section>;
 }
 
+/** Where the bar sits: one of six spots it snaps to (kept per browser, since screens differ). */
+type Spot = 'tl' | 'tc' | 'tr' | 'bl' | 'bc' | 'br';
+const SPOTS: Spot[] = ['tl', 'tc', 'tr', 'bl', 'bc', 'br'];
+const getLocal = (k: string) => { try { return localStorage.getItem(k) ?? ''; } catch { return ''; } };
+const setLocal = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+/** The nearest spot to a point: left, middle or right third; top or bottom half. */
+export const nearestSpot = (x: number, y: number, w: number, h: number): Spot =>
+  `${y < h / 2 ? 't' : 'b'}${x < w / 3 ? 'l' : x > w * 2 / 3 ? 'r' : 'c'}` as Spot;
+
 function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open: (id: string) => void; popOut: () => void}) {
   const run = store.running;
-  return <div className="focus-bar" role="status">
-    <span className="fb-label"><FocusIcon size={13} /> Focus</span>
+  const [spot, setSpot] = useState<Spot>(() => SPOTS.includes(getLocal('fb-pos') as Spot) ? getLocal('fb-pos') as Spot : 'tc');
+  const [min, setMin] = useState(() => getLocal('fb-min') === '1');
+  const [drag, setDrag] = useState<{x: number; y: number} | null>(null);
+  const grab = useRef<{dx: number; dy: number} | null>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const place = (s: Spot) => { setSpot(s); setLocal('fb-pos', s); };
+  const toggleMin = () => { setMin(!min); setLocal('fb-min', min ? '' : '1'); };
+  const onDown = (e: PE) => {
+    if (e.button !== 0 || !bar.current) return;
+    const r = bar.current.getBoundingClientRect();
+    grab.current = {dx: e.clientX - r.left, dy: e.clientY - r.top};
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onMove = (e: PE) => { if (grab.current) setDrag({x: e.clientX - grab.current.dx, y: e.clientY - grab.current.dy}); };
+  const onUp = (e: PE) => {
+    if (!grab.current) return;
+    grab.current = null;
+    if (drag) place(nearestSpot(e.clientX, e.clientY, innerWidth, innerHeight));
+    setDrag(null);
+  };
+  const shown = min ? list.filter(i => run?.itemId === i.id) : list;
+  const others = list.filter(i => i.id !== run?.itemId);
+  return <div ref={bar} className={`focus-bar at-${spot}` + (drag ? ' dragging' : '') + (min ? ' min' : '')} role="status"
+    style={drag ? {left: drag.x, top: drag.y, right: 'auto', bottom: 'auto', transform: 'none'} : undefined}>
+    <span className="fb-label fb-grip" title="Drag to move. It snaps to the nearest corner or edge. Double-click to put it back at the top."
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { grab.current = null; setDrag(null); }}
+      onDoubleClick={() => place('tc')}><GripVertical size={12} /><FocusIcon size={13} /> Focus{min && list.length > shown.length ? <span className="muted"> ({list.length})</span> : null}</span>
     <div className="fb-items">
-      {list.map(i => {
+      {shown.map(i => {
         const on = run?.itemId === i.id;
         return <div key={i.id} className={'fb-item' + (on ? ' on' : '')}>
           {on ? <button className="fb-btn" title="Stop the timer" onClick={() => store.stopTimer()}><Square size={10} fill="currentColor" /></button>
@@ -167,9 +202,13 @@ function FocusBar({store, list, open, popOut}: {store: Store; list: Item[]; open
         </div>;
       })}
     </div>
-    <button className="fb-btn fb-labeled" title="Full page focus on the running task (or the first one)" onClick={() => { fullPage(true); store.setFocusId(store.running && list.some(i => i.id === store.running!.itemId) ? store.running.itemId : list[0].id); }}><Maximize size={13} /> Full page</button>
-    <button className="fb-btn fb-labeled" title="Pop out a small timer that stays in the corner on top of every window" onClick={popOut}><PictureInPicture2 size={13} /> Pop out</button>
-    <FocusSettings store={store} />
+    {!min && <>
+      <button className="fb-btn fb-labeled" title="Full page focus on the running task (or the first one)" onClick={() => { fullPage(true); store.setFocusId(store.running && list.some(i => i.id === store.running!.itemId) ? store.running.itemId : list[0].id); }}><Maximize size={13} /> Full page</button>
+      <button className="fb-btn fb-labeled" title="Pop out a small timer that stays in the corner on top of every window" onClick={popOut}><PictureInPicture2 size={13} /> Pop out</button>
+      {others.length > 0 && <button className="fb-btn" title={run ? 'Clear the others (keeps the running task)' : 'Clear all tasks from focus'} onClick={() => store.focusClear()}><ListX size={14} /></button>}
+      <FocusSettings store={store} />
+    </>}
+    <button className="fb-btn" title={min ? 'Show all focus tasks' : 'Shrink to the running timer'} onClick={toggleMin}>{min ? <ChevronDown size={14} /> : <ChevronUp size={14} />}</button>
   </div>;
 }
 

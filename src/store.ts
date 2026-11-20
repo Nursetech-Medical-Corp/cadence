@@ -323,6 +323,12 @@ export function useStore(me: string) {
       if (!list.includes(id)) { const next = [...list, id].slice(-8); setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).then(toldPrefs).catch(fail); }
       if (open) setFocusId(id);
     },
+    /** Empties the focus bar, keeping the task whose timer is running. */
+    focusClear() {
+      const keep = runningRef.current?.itemId;
+      const next = ((prefsRef.current.focusList as string[] | undefined) ?? []).filter(x => x === keep);
+      setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).then(toldPrefs).catch(fail);
+    },
     focusRemove(id: string) {
       const next = ((prefsRef.current.focusList as string[] | undefined) ?? []).filter(x => x !== id);
       setPrefs(p => ({...p, focusList: next})); api('/prefs', {method: 'PUT', body: {key: 'focusList', value: next}}).then(toldPrefs).catch(fail);

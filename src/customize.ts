@@ -30,6 +30,16 @@ function inOrder<T extends {id: string; sort: number}>(list: T[], mine: unknown)
   return [...list].sort((a, b) => at(a) - at(b));
 }
 
+/** Your own settings on top of the team's. A null in yours means you cleared that setting (JSON drops undefined,
+ *  so a cleared filter is saved as null, or the team's filter would come back after a reload). */
+export function withMine(team: ViewConfig, mine: Partial<ViewConfig>): ViewConfig {
+  const out: Record<string, unknown> = {...team, ...mine};
+  for (const k of Object.keys(out)) if (out[k] === null || out[k] === undefined) delete out[k];
+  return out as ViewConfig;
+}
+/** A change to keep as yours: cleared settings become null so they survive saving. */
+export const asMine = (patch: Partial<ViewConfig>) => Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === undefined ? null : v])) as Partial<ViewConfig>;
+
 export type ShownView = View & {mine?: Partial<ViewConfig>};
 /** A project's views as this person sees them: their tab order, and their own settings on top of the team's. */
 export function viewsFor(store: Store, projectId: string): ShownView[] {
@@ -37,7 +47,7 @@ export function viewsFor(store: Store, projectId: string): ShownView[] {
   const list = store.views.filter(v => v.projectId === projectId);
   return inOrder(list, personal('viewOrder') ? store.prefs[`views:${projectId}`] : undefined).map(v => {
     const mine = personal('viewSettings') && !v.config.locked ? store.prefs[`view:${v.id}`] as Partial<ViewConfig> | undefined : undefined;
-    return mine && Object.keys(mine).length ? {...v, config: {...v.config, ...mine}, mine} : v;
+    return mine && Object.keys(mine).length ? {...v, config: withMine(v.config, mine), mine} : v;
   });
 }
 export const projectsFor = (store: Store): Project[] =>

@@ -141,7 +141,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 
 ## Focus mode and the timer bar
 
-- The focus bar at the top of every page lists the tasks a person is focused on (prefs `focusList`, up to 8). Starting a timer adds its task. One timer runs at a time; each task has play or stop, Done, open and remove.
+- The focus bar at the top of every page lists the tasks a person is focused on (prefs `focusList`, up to 8). Starting a timer adds its task. One timer runs at a time; each task has play or stop, Done, open and remove. Drag the bar by its grip to snap it to a corner or edge (kept per browser, double-click puts it back at the top); shrink shows only the running timer; Clear empties it except the running task.
 - The focus view (Focus button on a task, right-click Focus on it, or a title in the bar) fills the screen with one task: details, notes, subitems, the timer against the estimate, and the other tasks in focus. Done stops a running timer, completes the task and takes it out of focus. Esc leaves.
 - Pop out opens a small window listing the tasks in focus that stays on top of every window (Chrome and Edge; other browsers get a normal small window).
 - Each person picks what starting a timer does (gear on the bar, in the focus view, or Team page, Focus and timer): open the focus view, pop out, show the bar. Any of them can be on together. Saved in prefs `focus` `{onStart: none|focus, popOut, bar}`.
@@ -172,7 +172,7 @@ UI-only settings (no tool, by design): sign-in, permission levels, job roles and
 - Focus: the focus bar lists tasks in focus (prefs `focusList`); Pop out opens a small always-on-top window in the corner (picture-in-picture) with clocks, progress against the estimate (amber from 80%, red past it) and the running task's notes; after a page reload it comes back on the next click. Browsers without picture-in-picture get a separate small window at `#/popout`.
 - Time entries can be fixed (`update_time_entry`, REST `PATCH /api/time/:id` `{start?, end?, minutes?, note?}`): a timed entry takes a new start and end (minutes follow, to the second) or minutes (the end moves); an entry added as minutes takes new minutes or a new day; a running timer takes an earlier start. Your own entries, or anyone's for an admin. In the app: the pencil (or double-click) on an entry in a task's time box or the day planner's timesheet.
 - Timers: there is one running timer per person. Every clock for a task (focus bar, pop-out, focus view, task panel, top bar) is one component reading that one timer and one app clock: the big number is this run, the total on the task sits beside or below it. Starting or stopping anywhere (app, another tab, `start_timer`/`stop_timer`) updates every open tab.
-- Preferences (`PUT /api/prefs` `{key, value}`) accept: `view:<id>`, `views:<space>`, `projects`, `cover:mywork`, `cover:everything`, `focus`, `focusList`, `newItems`, `newDefaults`, `rollupAdd`, `eventColors`. Time logged with timers shows beside the boxes.
+- Preferences (`PUT /api/prefs` `{key, value}`) accept: `view:<id>`, `views:<space>`, `projects`, `cover:mywork`, `cover:everything`, `focus`, `focusList`, `newItems`, `newDefaults`, `rollupAdd`, `eventColors`. Time logged with timers shows beside the boxes. In `view:<id>`, a null value means that setting was cleared for this person (the team value does not apply).
 
 ## Email alerts
 

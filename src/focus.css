@@ -18,6 +18,16 @@
 .fb-title:hover { color: var(--accent); }
 .fb-item .fb-btn { width: 22px; height: 22px; }
 @media (max-width: 700px) { .focus-bar { top: auto; bottom: 70px; } }
+/* Snap spots (drag the grip; Focus.tsx). Top center is the default above. */
+.focus-bar.at-tl { left: 8px; transform: none; }
+.focus-bar.at-tr { left: auto; right: 8px; transform: none; }
+.focus-bar.at-bl, .focus-bar.at-bc, .focus-bar.at-br { top: auto; bottom: 12px; }
+.focus-bar.at-bl { left: 8px; transform: none; }
+.focus-bar.at-br { left: auto; right: 8px; transform: none; }
+.fb-grip { cursor: grab; user-select: none; touch-action: none; }
+.focus-bar.dragging { opacity: .85; transition: none; }
+.focus-bar.dragging .fb-grip { cursor: grabbing; }
+.focus-bar:not(.dragging) { transition: left .15s, right .15s, top .15s, bottom .15s; }
 
 /* The focus view: same surfaces as the task panel, centered, everything else dark */
 .fv-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(6, 6, 10, .86); backdrop-filter: blur(3px); display: flex; justify-content: center; align-items: flex-start; overflow: auto; padding: 5vh 20px; }

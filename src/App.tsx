@@ -5,7 +5,7 @@ import {FocusHost} from './Focus.tsx';
 import {PluginsPage, PluginPageView} from './Plugins.tsx';
 import {hasFeature, pluginPages, usePluginTheme} from './pluginsClient.ts';
 import {CoverHeader} from './Cover.tsx';
-import {canShare, saveMode, viewsFor, type ShownView} from './customize.ts';
+import {asMine, canShare, saveMode, viewsFor, withMine, type ShownView} from './customize.ts';
 import {ColorRulesButton} from './ColorRules.tsx';
 import {Puzzle, CircleUser, FileSignature, GraduationCap, Sparkles, Repeat, LayoutTemplate, Bot, BarChart3, Shield, LogOut, Users, Keyboard, Bell, CalendarDays, CalendarRange, History, PanelLeft, PanelLeftClose, ChevronDown, Columns3, Copy, Database, Download, Filter, FolderInput, GanttChart, Kanban, Layers, List, MoreHorizontal, Pencil, Plus, Search, Settings, Square, Sun, Table, Trash2, Zap, Paperclip, X, ChevronLeft, Lock, Unlock, EyeOff, Clock, ChevronRight, Archive, Workflow, CalendarClock} from 'lucide-react';
 import type {Item, Notification, Project, View, ViewConfig, ViewKind} from './types.ts';
@@ -511,7 +511,7 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
   const setConfig = (patch: Partial<ViewConfig>) => {
     if (!view || !team || (view.config.locked && !('locked' in patch))) return;
     const mode = 'locked' in patch || 'privateTo' in patch ? 'team' : saveMode(store, 'viewSettings');
-    if (mode === 'mine') store.setPref(`view:${view.id}`, {...view.mine, ...patch});
+    if (mode === 'mine') store.setPref(`view:${view.id}`, {...view.mine, ...asMine(patch)});
     else store.updateView(view.id, {config: {...team.config, ...patch}});
   };
   const currentSprint = useMemo(() => { const t = store.today; const list = store.sprints.filter(s => s.projectId === project.id); return (list.find(s => s.start <= t && t <= s.end) ?? null)?.id ?? null; }, [store.sprints, store.today, project.id]);
@@ -544,7 +544,8 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
       <div className="head-top">
         <span className="crumb">Spaces /</span>
         <InlineText value={project.name} onSave={name => name && store.updateProject(project.id, {name})} className="h1-edit" />
-        <span className="muted small">{items.filter(i => !i.completed).length} open</span>
+        <span className="muted small head-count" title="In this view: what the view shows now, after its filters. Open: everything in the space that is not done, backlog included.">
+          {!settings && view && <><b>{filtered.length}</b> in this view · </>}{items.filter(i => !i.completed).length} open in space</span>
         {isRollup(own) && !scope && <button className="tag rollup-tag" onClick={() => go({page: 'project', id: own.id, view: 'settings'})} title="Choose which spaces show here">Rollup of {included.length} project{included.length === 1 ? '' : 's'}</button>}
         {scope && <span className="tag rollup-tag" title="Built in: always here, shows work from every space">Built in</span>}
       </div>
@@ -569,7 +570,10 @@ function ProjectPage({store, project: own, views, view, settings, open}: {store:
       </div>
     </header>
     {!settings && view?.mine && <div className="locked-note mine-note">Your own changes to this view: only you see them.
-      {canShare(store, 'viewSettings') ? <button className="btn ghost small" title="Make your changes the team setup for this view" onClick={() => { store.updateView(view.id, {config: {...(team?.config ?? {}), ...view.mine}}); store.setPref(`view:${view.id}`, null); }}>Save for everyone</button> : null}
+      {canShare(store, 'viewSettings') ? <button className="btn ghost small" title="Make your changes the team setup for this view" onClick={async () => {
+        // Only drop your copy once the team view has it: a failed save must not lose your filters.
+        if (await store.updateView(view.id, {config: withMine(team?.config ?? {}, view.mine!)})) store.setPref(`view:${view.id}`, null);
+      }}>Save for everyone</button> : null}
       <button className="btn ghost small" title="Go back to the team setup" onClick={() => store.setPref(`view:${view.id}`, null)}>Reset to team view</button></div>}
     {!settings && view && view.config.locked && <div className="locked-note"><Lock size={12} /> This view is locked, so its filters, sort and columns stay as they are. Unlock it from the view's ... menu.</div>}
     {!settings && view && <Toolbar store={store} project={project} view={view} config={config} setConfig={setConfig} openItem={open} />}
