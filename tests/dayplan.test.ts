@@ -82,6 +82,28 @@ test('day planner: reminders fire once at the start, again after a move', () => 
   assert.equal(t.listNotifications(david.id).length, 2);
 });
 
+test('day planner: Remind all reminds every box, carries over to other days, and turns off', () => {
+  const {t, david, sam} = setup();
+  t.updateDayPlan(david.id, '2026-11-14', {tz: 'UTC', blocks: [{id: 'a', text: 'Bookkeeping', start: '16:00', minutes: 30}, {id: 'b', text: 'Done one', start: '16:00', minutes: 30, done: true}]});
+  assert.equal(t.dayPlan(david.id, '2026-11-14').remindAll, false, 'off by default');
+  dayPlanReminders(t, new Date('2026-11-14T16:01:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 0, 'boxes stay quiet without a bell or Remind all');
+  t.updateDayPlan(david.id, '2026-11-14', {remindAll: true});
+  assert.equal(t.dayPlan(david.id, '2026-11-15').remindAll, true, 'carries over to the next day');
+  assert.equal(t.dayPlan(sam.id, '2026-11-14').remindAll, false, 'only for that person');
+  dayPlanReminders(t, new Date('2026-11-14T16:02:00Z'));
+  dayPlanReminders(t, new Date('2026-11-14T16:03:00Z'));
+  const n = t.listNotifications(david.id);
+  assert.equal(n.length, 1, 'once, and not for a box already done');
+  assert.match(n[0].text, /Bookkeeping/);
+  t.updateDayPlan(david.id, '2026-11-15', {tz: 'UTC', blocks: [{id: 'c', text: 'Pay Collin', start: '19:00', minutes: 30}]});
+  dayPlanReminders(t, new Date('2026-11-15T19:01:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 2, 'the next day reminds too');
+  t.updateDayPlan(david.id, '2026-11-15', {remindAll: false, blocks: [{id: 'd', text: 'Later', start: '20:00', minutes: 30}]});
+  dayPlanReminders(t, new Date('2026-11-15T20:01:00Z'));
+  assert.equal(t.listNotifications(david.id).length, 2, 'off again: per-box bells only');
+});
+
 test('day planner: fit boxes to logged time, up to now or all day', () => {
   const {t, david, p} = setup();
   const a = t.createItem({projectId: p.id, title: 'Write report', assignees: [david.id]}, david.id);

@@ -17,7 +17,7 @@ type Block = Entry & {start: string; minutes: number; at?: string | null; remind
 type FitSummary = {plannedMinutes: number; loggedMinutes: number; moved: number; added: number; upTo: string | null};
 /** A calendar event (Cadence meeting or synced Google event) shown on the day. */
 type CalEv = {id: string; title: string; start: string; end: string; allDay: boolean; meetUrl: string | null; location: string; source: string; occurrenceOf?: string; itemId: string | null; color?: string | null};
-type Plan = {tz: string; updated?: string | null; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number};
+type Plan = {tz: string; updated?: string | null; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; remindAll?: boolean};
 /** day: the day a dragged box comes from (week view). */
 type DragData = {from: 'top' | 'dump' | 'task' | 'block'; id: string; itemId?: string | null; text: string; grab?: number; grabX?: number; day?: string};
 
@@ -514,6 +514,10 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
       </Popover>
     </span>
     <button className="btn primary small" disabled={busy} onClick={auto} title="Put the top 3, today's and overdue tasks, then the brain dump into the next free times, from now"><Wand2 size={13} /> Plan my day from now</button>
+    <label className={'small dp-remind-all' + (plan.remindAll ? ' on' : '')} title="Your setting, kept day to day: every time box sends an alert (phone and desktop) when it starts. Off: only boxes with their bell on.">
+      <input type="checkbox" checked={!!plan.remindAll} onChange={e => { const on = e.target.checked; setPlan(p => p && {...p, remindAll: on}); if (latest.current) latest.current = {...latest.current, remindAll: on};
+        api(`/day/${plan.date}?person=${me}&tz=${encodeURIComponent(browserTz())}`, {method: 'PUT', body: {remindAll: on}}).catch(err => store.fail(err)); if (on) askNotify(); }} />
+      {plan.remindAll ? <Bell size={13} /> : <BellOff size={13} />} Remind all</label>
     <label className="small muted" title="Plan my day from now fills only these hours; the day shows all 24">Plan between <select className="plain-select" value={plan.dayStart} onChange={e => Number(e.target.value) < plan.dayEnd && save({...plan, dayStart: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h}>{label(h * 60)}</option>)}</select></label>
     <label className="small muted">and <select className="plain-select" value={plan.dayEnd} onChange={e => Number(e.target.value) > plan.dayStart && save({...plan, dayEnd: Number(e.target.value)})}>{Array.from({length: 24}, (_, h) => <option key={h} value={h + 1}>{label((h + 1) * 60)}</option>)}</select></label>
     <label className="small muted">Slots <select className="plain-select" value={plan.slot} onChange={e => save({...plan, slot: Number(e.target.value)})}><option value={15}>15m</option><option value={30}>30m</option><option value={60}>1h</option></select></label>
@@ -587,7 +591,7 @@ export function DayPlanner({store, me, open}: {store: Store; me: string; open: (
     {it && !done && (running ? <button className="icon" title="Stop timer" onClick={() => store.stopTimer()}><Square size={11} /></button> : <button className="icon" title="Start timer" onClick={() => store.startTimer(it.id)}><Play size={11} /></button>)}
     {!it && !b.done && <button className="icon" title="Start a timer (makes this box a task first, so the time is logged)" onClick={() => timeBox(b)}><Play size={11} /></button>}
     {it && actualOf(it.id).length > 0 && <button className="icon" title="Fit this box to the time you logged" onClick={() => adapt(b)}><Clock size={11} /></button>}
-    <button className={'icon' + (b.remind ? ' on' : '')} title={b.remind ? 'Reminder on: you get a notification when it starts' : 'Remind me when it starts (phone and desktop)'} onClick={() => patchBlock(b.id, {remind: !b.remind, at: atOf(plan.date, b.start)})}>{b.remind ? <Bell size={11} /> : <BellOff size={11} />}</button>
+    <button className={'icon' + (b.remind || plan.remindAll ? ' on' : '')} title={plan.remindAll && !b.remind ? 'Remind all is on: you get a notification when it starts' : b.remind ? 'Reminder on: you get a notification when it starts' : 'Remind me when it starts (phone and desktop)'} onClick={() => patchBlock(b.id, {remind: !b.remind, at: atOf(plan.date, b.start)})}>{b.remind || plan.remindAll ? <Bell size={11} /> : <BellOff size={11} />}</button>
     <button className="icon" title="Take off the day" onClick={() => removeBlock(b.id)}><X size={11} /></button>
   </>;
   // Where a block sits: top/height down the day, or left/width across it.

@@ -88,6 +88,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Make my own copy opens the editor with the plugin under a new id.
 
 ## Day planner
+- Remind all (header checkbox): every box sends an alert when it starts; boxes stay off by default; the setting carries over to the next day and is only yours; a box already done stays quiet. Each box's bell shows on while Remind all is on. Bug found: boxes start with reminders off, and nothing in the header said so, so no alert ever came. (unit, manual)
 - Box reminders: Off, when it starts, 5, 10, 15, 30 minutes, 1 or 2 hours, or 1 day before; fires once; changing the lead or moving the box arms it again; on-screen alert and desktop alert while the app is open. (unit dayplan; alert manual)
 - Side panels resize by dragging their edge in Focus and Three columns; the bottom area resizes in Timeline across; double-click resets; sizes are kept. (manual)
 - Hovering a brain dump or assigned line shows its full name. (manual)

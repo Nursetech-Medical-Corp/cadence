@@ -27,7 +27,9 @@ export type Block = Entry & {start: string; minutes: number; at?: string | null;
   /** Box color: a Google Calendar color id, 1 to 11 (kept when the box becomes a calendar event). */
   color?: string | null};
 /** tz: the time zone the day is planned in (IANA, like America/Denver). Box times are wall-clock times there. */
-export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; tz: string; updated: string | null};
+export type DayPlan = {person: string; date: string; top: Entry[]; dump: Entry[]; blocks: Block[]; dayStart: number; dayEnd: number; slot: number; tz: string; updated: string | null;
+  /** Your setting (not per day): every time box reminds you, on every day, until you turn it off. */
+  remindAll: boolean};
 
 const rid = () => randomBytes(5).toString('hex');
 const migrated = new WeakSet<object>();
@@ -59,7 +61,7 @@ export function getDayPlan(tasks: Tasks, person: string, date: string, hintTz?: 
   try { cs = calendarSettings(tasks, person); } catch { cs = {workStart: '09:00', workEnd: '17:00', tz: 'UTC'}; }
   const hour = (t: string, up = false) => { const m = mins(t); return Math.min(24, Math.max(0, up ? Math.ceil(m / 60) : Math.floor(m / 60))); };
   return {person, date, top: d.top ?? [], dump: d.dump ?? [], blocks: d.blocks ?? [], dayStart: d.dayStart ?? hour(cs.workStart), dayEnd: d.dayEnd ?? Math.max(hour(cs.workStart) + 1, hour(cs.workEnd, true)),
-    slot: d.slot ?? 30, tz: d.tz ?? (hintTz && validTz(hintTz) ? hintTz : cs.tz), updated: r?.updated ?? null};
+    slot: d.slot ?? 30, tz: d.tz ?? (hintTz && validTz(hintTz) ? hintTz : cs.tz), updated: r?.updated ?? null, remindAll: remindsAll(tasks, person)};
 }
 
 function cleanEntry(tasks: Tasks, e: Partial<Entry>, allowEmpty = false): Entry {
@@ -70,8 +72,11 @@ function cleanEntry(tasks: Tasks, e: Partial<Entry>, allowEmpty = false): Entry 
   if (e.done) out.done = true;
   return out;
 }
-export type DayPatch = Partial<Pick<DayPlan, 'top' | 'dump' | 'blocks' | 'dayStart' | 'dayEnd' | 'slot' | 'tz'>>;
+/** Remind all: a person setting kept in prefs (dayRemindAll), so it carries over from day to day. */
+export const remindsAll = (tasks: Tasks, person: string) => tasks.prefs(person).dayRemindAll === true;
+export type DayPatch = Partial<Pick<DayPlan, 'top' | 'dump' | 'blocks' | 'dayStart' | 'dayEnd' | 'slot' | 'tz' | 'remindAll'>>;
 export function updateDayPlan(tasks: Tasks, person: string, date: string, patch: DayPatch): DayPlan {
+  if (patch.remindAll !== undefined) tasks.setPref(person, 'dayRemindAll', patch.remindAll ? true : null);
   const cur = getDayPlan(tasks, person, date);
   const next = {...cur};
   if (patch.tz !== undefined) { if (!validTz(String(patch.tz))) throw new Invalid(`Unknown time zone ${patch.tz}`); next.tz = String(patch.tz); }
@@ -91,7 +96,7 @@ export function updateDayPlan(tasks: Tasks, person: string, date: string, patch:
       const old = cur.blocks.find(x => x.id === e.id);
       // Moving a box or changing its reminder arms the reminder again.
       const before = Math.max(0, Math.min(1440, Math.round(Number(b.remindBefore ?? 0)) || 0));
-      const notified = !!old?.notified && old.start === b.start && old.at === momentOf(b.start) && !!b.remind && (old.remindBefore ?? 0) === before;
+      const notified = !!old?.notified && old.start === b.start && old.at === momentOf(b.start) && (!!b.remind || cur.remindAll) && (old.remindBefore ?? 0) === before;
       const links = Array.isArray(b.links) ? [...new Set(b.links.slice(0, 50).map(x => tasks.findItem(String(x)).id))] : [];
       return {...e, start: b.start, minutes, at: momentOf(b.start), remind: !!b.remind, ...(b.remind && before ? {remindBefore: before} : {}), ...(notified ? {notified: true} : {}),
         ...(links.length ? {links} : {}), ...(b.eventId ? {eventId: String(b.eventId).slice(0, 200)} : {}), ...(b.note ? {note: String(b.note).slice(0, 5000)} : {}),
@@ -198,16 +203,18 @@ export function autoSchedule(tasks: Tasks, person: string, date: string, opts: {
   return updateDayPlan(tasks, person, date, {blocks});
 }
 
-/** Every minute: time boxes with a reminder whose moment has come (its start, less remindBefore minutes; within the last 15 minutes) tell their person once. */
+/** Every minute: time boxes with a reminder (or every box, for people with Remind all on) whose moment has come (its start, less remindBefore minutes; within the last 15 minutes) tell their person once. */
 export function dayPlanReminders(tasks: Tasks, now = new Date()) {
   migrateDayPlans(tasks);
   const day = (d: number) => new Date(now.getTime() + d * 86400_000).toISOString().slice(0, 10);
   const rows = tasks.db.prepare('select person, date, data from day_plans where date between ? and ?').all(day(-1), day(1)) as {person: string; date: string; data: string}[];
+  const all = new Map<string, boolean>();
   for (const r of rows) {
     const d = JSON.parse(r.data) as {blocks?: Block[]};
+    if (!all.has(r.person)) all.set(r.person, remindsAll(tasks, r.person));
     let changed = false;
     for (const b of d.blocks ?? []) {
-      if (!b.remind || b.notified || !b.at) continue;
+      if (!(b.remind || all.get(r.person)) || b.notified || !b.at || b.done) continue;
       const before = b.remindBefore ?? 0, t = Date.parse(b.at) - before * 60_000;
       if (t > now.getTime() || now.getTime() - t > 15 * 60_000) continue;
       b.notified = true; changed = true;

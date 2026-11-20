@@ -173,7 +173,7 @@ export type HookEvent = {event: string; projectId?: string | null; project?: {id
   actor?: string | null; details?: Record<string, unknown>; target?: {hook: string; scope: string; url: string; secretKey: string | null}};
 
 /** Preference keys a person may save: view and space order, covers, focus, new-item defaults, rollup targets, event colors. */
-export const PREF_KEY = /^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything)|focus|focusList|newItems|newDefaults|rollupAdd|eventColors|tableTab)$/;
+export const PREF_KEY = /^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything)|focus|focusList|newItems|newDefaults|rollupAdd|eventColors|tableTab|dayRemindAll)$/;
 export class Tasks {
   private listeners = new Set<(e: ChangeEvent) => void>();
   /** Folder for this workspace's uploaded files. */
