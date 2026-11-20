@@ -24,6 +24,9 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Bug fixed: adding an item scrolled a wide table sideways, cutting off its first columns. Jumping to a new item now scrolls only up or down; the hints under the rows stay in view. (manual)
 - Table Routine column: click it to make a task repeat or change its rule, like the task panel. The task panel always shows Repeat (Make it repeat). (manual)
 - All spaces Table: the Space cell opens a menu to move the item to another space. (manual)
+- Table sorted (say by priority): drag a row by its grip onto the top or bottom edge of another to put it above or below; rows with the same priority keep that hand order. Dropped next to a row with another priority, status, type, date, sprint or assignee, it takes that value. (manual)
+- Bug fixed: in the Table, the quick-add helpers under a new row (@ who, ! prio, due:) were cut off. The new row grows to show them. (manual)
+- Bug fixed: a date cell opened only from its small dash or calendar icon. Clicking anywhere in the cell opens the calendar. (manual)
 - New spaces open with Table first, then List, Board, Timeline, Calendar, Backlog, Sprint.
 
 ## Focus mode and timer

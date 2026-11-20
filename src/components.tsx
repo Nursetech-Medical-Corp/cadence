@@ -277,7 +277,7 @@ export function DateInput({value, onChange, today, className = '', placeholder =
   if (!value && !editing) return <button className={'date-empty ' + className} onClick={e => { e.stopPropagation(); setEditing(true); }} title="Set date">{placeholder || <span className="date-dash">-</span>}</button>;
   return (
     <span className={'date-wrap ' + className + (overdue ? ' overdue' : '')}>
-      <input ref={ref} type="date" className="date" value={value ?? ''} onClick={e => e.stopPropagation()}
+      <input ref={ref} type="date" className="date" value={value ?? ''} onClick={e => { e.stopPropagation(); try { e.currentTarget.showPicker(); } catch { /* not supported */ } }}
         onChange={e => { onChange(e.target.value || null); setEditing(false); }} onBlur={() => setEditing(false)} />
     </span>
   );

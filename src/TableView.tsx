@@ -13,11 +13,14 @@ import {FilesCell} from './FilesCell.tsx';
 import {useQuickAssist} from './QuickAssist.tsx';
 import {RoutineMark, SopLinks, peopleFor} from './RoutineControls.tsx';
 import {nextOccurrence} from './recur.ts';
-import {sortItems, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
+import {sortItems, sortKey, sortsOf, type SortRule, hasOrder} from './Sorting.tsx';
+import type {ItemPatch} from './types.ts';
 import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
 export const DEFAULT_HIDDEN = ['start', 'tags', 'parent'];
+/** Sorted columns a drag may change: dropped among rows with another value, the item takes it. */
+const SETTABLE: (keyof Item)[] = ['priority', 'status', 'type', 'due', 'start', 'sprint', 'assignees'];
 const CALC_LABEL: Record<string, string> = {count: 'Count', filled: 'Filled', empty: 'Empty', unique: 'Unique', sum: 'Sum', avg: 'Average', min: 'Min', max: 'Max', checked: 'Checked', done: 'Done'};
 /** Column ids and names, for the Columns menu in the toolbar. */
 export const tableColumns = (project: Project) => [
@@ -98,16 +101,28 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     const id = dragRow; setDragRow(null); setOverRow(null);
     if (!id || id === target.id) return;
     if (zone === 'inside') { const ps = nestUnder(allItems, id, target.id, project.types); if (!ps) { store.flash('Cannot nest it there: not under itself, and only within the same space'); return; } for (const p of ps) store.updateItem(p.id, p.patch); return; }
-    // Moving above or below keeps its parent; it takes a place between the rows shown next to the target.
-    const k = rows.findIndex(r => r.id === target.id), others = rows.filter(r => r.id !== id), at = others.findIndex(r => r.id === target.id);
-    if (k < 0 || at < 0) return;
-    store.updateItem(id, {sort: zone === 'after' ? between(target.sort, others[at + 1]?.sort) : between(others[at - 1]?.sort, target.sort)});
+    // Moving above or below keeps its parent. With a sort on, rows with the same values (same priority, say) keep the
+    // order you drag them into; dropped next to a row with another value it takes that value, when it is one you can set.
+    const item = allItems.find(x => x.id === id);
+    if (!item) return;
+    const patch: ItemPatch = {};
+    const same = (a: (string | number | null)[], b: (string | number | null)[]) => a.every((v, n) => v === b[n]);
+    const kt = sortKey(target, sorts, project, store), ki = sortKey(item, sorts, project, store);
+    const diff = sorts.findIndex((_, n) => ki[n] !== kt[n]);
+    if (diff >= 0) {
+      const col = sorts[diff].col as keyof Item;
+      if (!SETTABLE.includes(col)) { store.flash(`Sorted by ${tableColumns(project).find(c => c[0] === col)?.[1] ?? col}: it can only move among rows with the same value. Clear the sort to place it anywhere`); return; }
+      (patch as Record<string, unknown>)[col] = target[col];
+    }
+    const group = rows.filter(r => r.id !== id && same(sortKey(r, sorts, project, store), kt)), at = group.findIndex(r => r.id === target.id);
+    if (at < 0) return;
+    patch.sort = zone === 'after' ? between(target.sort, group[at + 1]?.sort) : between(group[at - 1]?.sort, target.sort);
+    store.updateItem(id, patch);
   };
   /** Grip, + and select box: every row has them, rows just added too. */
-  const selCell = (i: Item) => <td className="sel-col"><span className="row-grip" draggable title={!sorts.length ? 'Drag onto a row: the middle nests it there (one level down), the top or bottom edge moves it above or below' : 'Drag onto a row to nest it there. Clear the sort to reorder by dragging'}
+  const selCell = (i: Item) => <td className="sel-col"><span className="row-grip" draggable title={!sorts.length ? 'Drag onto a row: the middle nests it there (one level down), the top or bottom edge moves it above or below' : 'Drag onto a row: the top or bottom edge moves it above or below (next to a row with another priority or status, it takes that value); the middle nests it there'}
               onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', i.id); setDragRow(i.id); }} onDragEnd={() => { setDragRow(null); setOverRow(null); }}><GripVertical size={12} /></span><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, [...rows, ...fresh].map(r => r.id))} /></td>;
-  // Sorted by a column, only nesting makes sense: the sort decides the order.
-  const zoneOf = (e: React.DragEvent) => { if (sorts.length) return 'inside' as const; const r = e.currentTarget.getBoundingClientRect(), y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' as const : y > 0.72 ? 'after' as const : 'inside' as const; };
+  const zoneOf = (e: React.DragEvent) => { const r = e.currentTarget.getBoundingClientRect(), y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' as const : y > 0.72 ? 'after' as const : 'inside' as const; };
   // Large tables: render only the rows near the screen (plus a buffer), with spacers keeping the scroll height.
   const wrap = useRef<HTMLDivElement>(null);
   const [win, setWin] = useState({top: 0, height: 900, rowH: 36});

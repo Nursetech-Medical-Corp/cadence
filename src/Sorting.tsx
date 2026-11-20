@@ -23,11 +23,10 @@ export function sortFields(project: Project): {id: string; label: string}[] {
 /** Saved sorts, accepting the older single-sort setting. */
 export const sortsOf = (c: ViewConfig): SortRule[] => c.sorts ?? (c.sort ? [c.sort] : []);
 
-/** Empty values always sort last, whatever the direction. */
-export function sortItems(items: Item[], rules: SortRule[], project: Project, store: Store): Item[] {
-  if (!rules.length) return [...items].sort((a, b) => a.sort - b.sort);
-  const PRIO = ['', 'urgent', 'high', 'medium', 'low'];
-  const val = (i: Item, col: string, alpha: boolean): string | number | null => {
+const PRIO = ['', 'urgent', 'high', 'medium', 'low'];
+/** What a sort rule compares for an item: one value per rule. Items with the same values keep their hand order. */
+export const sortKey = (i: Item, rules: SortRule[], project: Project, store: Store) => rules.map(r => sortVal(i, r.col, r.by === 'alpha', project, store));
+function sortVal(i: Item, col: string, alpha: boolean, project: Project, store: Pick<Store, 'people' | 'sprints' | 'items'>): string | number | null {
     const f = col.startsWith('f:') ? project.fields.find(x => x.id === col.slice(2)) : undefined;
     if (f && (f.kind === 'select' || f.kind === 'multi')) {
       // Dropdown columns: the option order you arranged, or A to Z.
@@ -49,7 +48,12 @@ export function sortItems(items: Item[], rules: SortRule[], project: Project, st
       case 'key': return i.number; case 'created': return i.created; case 'updated': return i.updated;
       default: { const v = i.fields[col.slice(2)]; return v == null || v === '' ? null : typeof v === 'number' ? v : String(v).toLowerCase(); }
     }
-  };
+}
+
+/** Empty values always sort last, whatever the direction. Ties keep the hand order (drag to arrange them). */
+export function sortItems(items: Item[], rules: SortRule[], project: Project, store: Store): Item[] {
+  if (!rules.length) return [...items].sort((a, b) => a.sort - b.sort);
+  const val = (i: Item, col: string, alpha: boolean) => sortVal(i, col, alpha, project, store);
   return [...items].sort((a, b) => {
     for (const r of rules) {
       const alpha = r.by === 'alpha';
