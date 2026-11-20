@@ -206,7 +206,8 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
         const empty = new Set<string>([
           ...(['assignees', 'priority', 'sprint', 'start', 'due', 'tags'] as const).filter(k => blank(item[k])),
           ...(estimateOf(item, store.items).hours == null ? ['estimate'] : []),
-          ...(item.parentId ? [] : ['parent']), ...(item.recur ? [] : ['repeat']),
+          // Repeat always shows (Make it repeat), so a task can become a routine from here.
+          ...(item.parentId ? [] : ['parent']),
           ...project.fields.filter(f => !COMPUTED.includes(f.kind) && blank(item.fields[f.id])).map(f => 'f:' + f.id),
         ]);
         const shown = order.filter(k => !layout.hidden.includes(k) && (layout.showEmpty || !empty.has(k)));

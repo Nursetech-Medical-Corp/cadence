@@ -4,7 +4,8 @@ import {activeColors, colorOf, tint} from './ColorRules.tsx';
 import {ArrowDown, ArrowUp, Eye, EyeOff, GripVertical, Plus, Trash2, Pencil, Maximize2} from 'lucide-react';
 import {nestUnder} from './nesting.ts';
 import type {FieldDef, Item, Project} from './types.ts';
-import {api, between, fmtMinutes, type Store} from './store.ts';
+import {api, between, fmtMinutes, realProjects, type Store} from './store.ts';
+import {RecurEditor} from './RecurEditor.tsx';
 import {Check, DateInput, InlineText, Menu, PeoplePicker, Popover, PrioritySelect, SprintSelect, StatusSelect, TypeSelect, EstimateCell, estimateOf, itemKey, SpaceChip} from './components.tsx';
 import type {ViewProps} from './viewProps.ts';
 import {AddField, CalcCell, COMPUTED, ComputedCell, RatingCell, RelationCell, calc, fmtMoney, valueOf} from './Fields.tsx';
@@ -49,7 +50,9 @@ export function TableView({store, project, items, allItems, sprints, open, confi
 
   const base: Col[] = [
     {id: 'key', name: 'ID', width: 80, sortVal: i => i.number, cell: i => <button className="link" onClick={() => open(i.id)}>{itemKey(i, store.projects)}</button>},
-    ...(project.settings.rollup ? [{id: 'space', name: 'Space', width: 150, sortVal: (i: Item) => store.projects.find(p => p.id === i.projectId)?.name ?? '', cell: (i: Item) => <SpaceChip item={i} projects={store.projects} />} as Col] : []),
+    ...(project.settings.rollup ? [{id: 'space', name: 'Space', width: 150, sortVal: (i: Item) => store.projects.find(p => p.id === i.projectId)?.name ?? '', cell: (i: Item) => <span className="space-cell" title="Move it to another space"><SpaceChip item={i} projects={store.projects} />
+      <select className="plain-select space-move" value={i.projectId} onChange={e => e.target.value !== i.projectId && up(i)({projectId: e.target.value})} aria-label="Space">
+        {realProjects(store.projects).filter(p => !p.settings.records || p.id === i.projectId).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></span>} as Col] : []),
     {id: 'title', name: 'Title', width: 340, sortVal: i => i.title.toLowerCase(), raw: i => i.title, cell: i => (
       <span className="title-cell"><Check item={i} project={project} onToggle={status => up(i)({status})} /><InlineText value={i.title} onSave={title => up(i)({title})} /></span>)},
     {id: 'parent', name: 'Parent', width: 200, sortVal: i => (i.parentId ? store.items.get(i.parentId)?.title ?? '' : '~'), raw: i => i.parentId, cell: i => (
@@ -69,7 +72,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     {id: 'estimate', name: 'Estimate', width: 110, sortVal: i => estimateOf(i, store.items).hours ?? 0, raw: i => estimateOf(i, store.items).hours, cell: i => (
       <EstimateCell item={i} items={store.items} onChange={estimate => up(i)({estimate})} />)},
     {id: 'repeat', name: 'Routine', width: 150, sortVal: i => !i.recur ? '~' : i.recur.paused ? 'b' : i.recur.waiting ? 'c' : 'a', raw: i => i.recur ? (i.recur.paused ? 'paused' : i.recur.waiting ? 'waiting' : 'on') : null,
-      cell: i => i.recur ? <RoutineMark item={i} label /> : <span className="muted">-</span>},
+      cell: i => <span className="repeat-cell"><RecurEditor value={i.recur} onChange={recur => up(i)({recur})} due={i.due} today={store.today} onDue={due => up(i)({due})} />{i.recur && <RoutineMark item={i} corner />}</span>},
     {id: 'tags', name: 'Tags', width: 160, sortVal: i => i.tags.join(','), raw: i => i.tags, cell: i => (
       <InlineText value={i.tags.join(', ')} placeholder="-" onSave={v => up(i)({tags: v.split(',').map(s => s.trim()).filter(Boolean)})} />)},
     ...routineCols(project, store),
@@ -100,6 +103,9 @@ export function TableView({store, project, items, allItems, sprints, open, confi
     if (k < 0 || at < 0) return;
     store.updateItem(id, {sort: zone === 'after' ? between(target.sort, others[at + 1]?.sort) : between(others[at - 1]?.sort, target.sort)});
   };
+  /** Grip, + and select box: every row has them, rows just added too. */
+  const selCell = (i: Item) => <td className="sel-col"><span className="row-grip" draggable title={!sorts.length ? 'Drag onto a row: the middle nests it there (one level down), the top or bottom edge moves it above or below' : 'Drag onto a row to nest it there. Clear the sort to reorder by dragging'}
+              onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', i.id); setDragRow(i.id); }} onDragEnd={() => { setDragRow(null); setOverRow(null); }}><GripVertical size={12} /></span><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, [...rows, ...fresh].map(r => r.id))} /></td>;
   // Sorted by a column, only nesting makes sense: the sort decides the order.
   const zoneOf = (e: React.DragEvent) => { if (sorts.length) return 'inside' as const; const r = e.currentTarget.getBoundingClientRect(), y = (e.clientY - r.top) / r.height; return y < 0.28 ? 'before' as const : y > 0.72 ? 'after' as const : 'inside' as const; };
   // Large tables: render only the rows near the screen (plus a buffer), with spacers keeping the scroll height.
@@ -191,8 +197,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
           {visibleRows.map(i => <Fragment key={i.id}><tr data-id={i.id} style={tint(colorOf(i, activeColors(config), {project, today: store.today}))} className={(i.completed ? 'done' : '') + (selected.has(i.id) ? ' sel' : '') + (dragRow === i.id ? ' dragging' : '') + (overRow?.id === i.id && dragRow && dragRow !== i.id ? ` drop-${overRow.zone}` : '')}
             onDragOver={e => { if (!dragRow) return; e.preventDefault(); const zone = zoneOf(e); if (overRow?.id !== i.id || overRow.zone !== zone) setOverRow({id: i.id, zone}); }}
             onDrop={e => { if (!dragRow) return; e.preventDefault(); dropRow(i, overRow?.id === i.id ? overRow.zone : zoneOf(e)); }}>
-            <td className="sel-col"><span className="row-grip" draggable title={!sorts.length ? 'Drag onto a row: the middle nests it there (one level down), the top or bottom edge moves it above or below' : 'Drag onto a row to nest it there. Clear the sort to reorder by dragging'}
-              onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', i.id); setDragRow(i.id); }} onDragEnd={() => { setDragRow(null); setOverRow(null); }}><GripVertical size={12} /></span><button className="row-add" title="Add a row below (Alt+click: above)" onClick={e => setInsertAt({id: i.id, above: e.altKey})}><Plus size={12} /></button><input type="checkbox" checked={selected.has(i.id)} onChange={() => {}} onClick={e => toggle(i.id, {shiftKey: e.shiftKey, ctrlKey: true, metaKey: false}, rows.map(r => r.id))} /></td>
+            {selCell(i)}
             {shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>
             {insertAt?.id === i.id && <InsertRow store={store} types={project.types} cols={shown.length} onDone={() => setInsertAt(null)} onAdd={async text => {
               // Between this row and the one shown next to it.
@@ -203,7 +208,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
             }} />}
           </Fragment>)}
           {last < rows.length && <tr aria-hidden style={{height: (rows.length - last) * win.rowH}}><td colSpan={shown.length + 2} /></tr>}
-          {fresh.map(i => <tr key={i.id} data-id={i.id} className={'fresh' + (i.completed ? ' done' : '')}><td className="sel-col" />{shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><span className="new-tag">new</span></td></tr>)}
+          {fresh.map(i => <tr key={i.id} data-id={i.id} className={'fresh' + (i.completed ? ' done' : '') + (selected.has(i.id) ? ' sel' : '')}>{selCell(i)}{shown.map(c => <td key={c.id}>{c.cell(i)}</td>)}<td><span className="new-tag">new</span><button className="icon more" title="Open details" onClick={() => open(i.id)}><Maximize2 size={14} /></button></td></tr>)}
           {drafting ? (
             <tr className="draft">
               <td className="sel-col" />
@@ -221,11 +226,11 @@ export function TableView({store, project, items, allItems, sprints, open, confi
               <td />
             </tr>
           ) : (
-            <tr><td colSpan={shown.length + 2}>
+            <tr className="hint-row"><td colSpan={shown.length + 2}>
               <button className="add-row" onClick={() => setDrafting(true)}><Plus size={14} /> New row <span className="small">Enter adds another, Tab moves to the next column. Shortcuts also work: @sam !high due:fri #tag ~2h</span></button>
             </td></tr>
           )}
-          {fresh.length > 0 && !drafting && <tr><td colSpan={shown.length + 2}><button className="btn" onClick={() => setPinned([])}>Done adding ({fresh.length}), apply sort and filters</button></td></tr>}
+          {fresh.length > 0 && !drafting && <tr className="hint-row"><td colSpan={shown.length + 2}><button className="btn" onClick={() => setPinned([])}>Done adding ({fresh.length}), apply sort and filters</button></td></tr>}
           <tr className="calc-row"><td className="sel-col" />{shown.map(c => {
             const k = config.calcs?.[c.id] ?? '';
             const label = k ? CALC_LABEL[k] : '';

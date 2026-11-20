@@ -36,7 +36,8 @@ export function NewItemSpotlight({store}: {store: Store}) {
     const find = () => {
       if (!alive) return;
       const el = document.querySelector<HTMLElement>(`[data-id="${store.lastNew!.id}"]`);
-      if (el) { el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.setAttribute('data-flash', ''); setTimeout(() => el.removeAttribute('data-flash'), 2500); }
+      // Up and down only: a wide table row must not scroll the table sideways (that cut off its first columns).
+      if (el) { scrollToMiddle(el); el.setAttribute('data-flash', ''); setTimeout(() => el.removeAttribute('data-flash'), 2500); }
       else if (tries++ < 12) setTimeout(find, 150);
     };
     setTimeout(find, 80);
@@ -90,4 +91,14 @@ export function AddToSpace({store, project}: {store: Store; project: Project}) {
       {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
   </label>;
+}
+
+/** Scroll the nearest scroll area up or down so el sits in the middle, leaving the sideways scroll alone. */
+function scrollToMiddle(el: HTMLElement) {
+  let sc = el.parentElement;
+  while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight)) sc = sc.parentElement;
+  const box = el.getBoundingClientRect();
+  if (!sc) { window.scrollBy({top: box.top + box.height / 2 - innerHeight / 2, behavior: 'smooth'}); return; }
+  const r = sc.getBoundingClientRect();
+  sc.scrollBy({top: box.top + box.height / 2 - (r.top + sc.clientHeight / 2), behavior: 'smooth'});
 }

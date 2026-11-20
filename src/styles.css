@@ -1977,3 +1977,9 @@ table.grid tr.dragging { opacity: .35; }
 .row-grip { position: absolute; left: 0; top: 50%; transform: translateY(-50%); cursor: grab; color: var(--muted); opacity: 0; display: inline-flex; }
 table.grid tr:hover .row-grip { opacity: 1; }
 .grid tbody .row-add { left: 12px; }
+
+/* Table: hints under the rows stay in view when the table is scrolled sideways. */
+.grid tr.hint-row td > * { position: sticky; left: 8px; }
+/* All spaces: the Space cell shows the space and a menu to move the item to another one. */
+.space-cell { display: flex; align-items: center; gap: 4px; min-width: 0; position: relative; }
+.space-cell .space-move { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

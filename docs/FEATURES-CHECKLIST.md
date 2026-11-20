@@ -20,6 +20,10 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - List rows have a select box like the Table; the bar below offers bulk changes and Delete. Delete or Backspace removes the selected items after a confirm, but not while typing in a field. (manual)
 - Bug found in the check: in the All spaces rollup a drop could nest an item under one from another space. Drops now stay within one space and say why when refused. (unit)
 - Table: rows stay flat with plain titles (the tree is only in the List). Drag a row by its grip (left of +): the middle of a row nests it there, the top or bottom edge moves it above or below and keeps its parent. With a column sort a drop only nests. The select box stays centered and clickable. (manual)
+- Bug fixed: rows just added in the Table had no select box, grip or open button until a reload. Now they have them like every row. (manual)
+- Bug fixed: adding an item scrolled a wide table sideways, cutting off its first columns. Jumping to a new item now scrolls only up or down; the hints under the rows stay in view. (manual)
+- Table Routine column: click it to make a task repeat or change its rule, like the task panel. The task panel always shows Repeat (Make it repeat). (manual)
+- All spaces Table: the Space cell opens a menu to move the item to another space. (manual)
 - New spaces open with Table first, then List, Board, Timeline, Calendar, Backlog, Sprint.
 
 ## Focus mode and timer
