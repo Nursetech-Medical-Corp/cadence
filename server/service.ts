@@ -173,7 +173,7 @@ export type HookEvent = {event: string; projectId?: string | null; project?: {id
   actor?: string | null; details?: Record<string, unknown>; target?: {hook: string; scope: string; url: string; secretKey: string | null}};
 
 /** Preference keys a person may save: view and space order, covers, focus, new-item defaults, rollup targets, event colors. */
-export const PREF_KEY = /^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything)|focus|focusList|newItems|newDefaults|rollupAdd|eventColors)$/;
+export const PREF_KEY = /^(view:[\w-]{1,40}|views:[\w-]{1,40}|projects|cover:(mywork|everything)|focus|focusList|newItems|newDefaults|rollupAdd|eventColors|tableTab)$/;
 export class Tasks {
   private listeners = new Set<(e: ChangeEvent) => void>();
   /** Folder for this workspace's uploaded files. */
@@ -492,6 +492,8 @@ export class Tasks {
     const next: Item = {...before, ...patch, updated: now()};
     if (patch.title !== undefined && !next.title.trim()) throw new Invalid('Title is required');
     if (patch.projectId && patch.projectId !== before.projectId) {
+      // Rollups (All spaces, Routines, Archive and later) list work from other spaces; an item always lives in a real space.
+      if (p.settings.rollup) throw new Invalid(`${p.name} shows work from other spaces and holds none itself. Move it to a space instead.`);
       if (!p.statuses.some(s => s.id === next.status)) next.status = p.statuses[0].id;
       next.number = ((this.db.prepare('select coalesce(max(number),0) n from items where project_id = ?').get(p.id) as Row).n as number) + 1;
       next.parentId = null;

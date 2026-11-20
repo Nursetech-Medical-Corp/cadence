@@ -6,7 +6,7 @@ import {COMPUTED} from './Fields.tsx';
 import {FocusButton} from './Focus.tsx';
 import {GripVertical, Link2, SlidersHorizontal, Trash2, X, ArrowLeft, ArrowRight, Pin, PinOff} from 'lucide-react';
 import type {Comment, Item} from './types.ts';
-import {api, type Store} from './store.ts';
+import {api, realProjects, type Store} from './store.ts';
 import {RecurEditor} from './RecurEditor.tsx';
 import {RoutineBadge, RoutineControls, SopLinks, peopleFor} from './RoutineControls.tsx';
 import {ItemBoards} from './Whiteboard.tsx';
@@ -196,7 +196,7 @@ export function ItemPanel({store, id, close, open, me, nav}: {store: Store; id: 
           </select>],
           ['tags', 'Tags', <div className="tags-cell"><TagEditor tags={item.tags} onChange={tags => up({tags})} /><SopLinks store={store} item={item} /><ItemBoards store={store} item={item} /></div>],
           ['repeat', 'Repeat', <div className="repeat-cell"><RecurEditor value={item.recur} onChange={recur => up({recur})} due={item.due} today={store.today} onDue={due => up({due})} /><RoutineControls store={store} item={item} /></div>],
-          ['project', 'Project', <select className="plain-select" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{store.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
+          ['project', 'Space', <select className="plain-select" title="The space it lives in. Routines and Archive and later only list work from spaces" value={item.projectId} onChange={e => up({projectId: e.target.value})}>{realProjects(store.projects).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>],
           ...project.fields.filter(f => f.kind !== 'time').map(f => [`f:${f.id}`, f.name, ['multi', 'select', 'relation', 'phone', 'email', 'files', 'rating', 'money', ...COMPUTED].includes(f.kind)
             ? <FieldCell field={f} item={item} project={project} value={item.fields[f.id]} store={store} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />
             : <FieldValue kind={f.kind} options={f.options} value={item.fields[f.id]} onChange={v => up({fields: {...item.fields, [f.id]: v}})} />] as [string, string, React.ReactNode]),

@@ -24,6 +24,7 @@ import {ItemPanel} from './ItemPanel.tsx';
 import {DataPage, downloadCsv} from './DataPage.tsx';
 import {MyWork} from './MyWork.tsx';
 import {NotifyPrompt, NotifySettings} from './NotifySettings.tsx';
+import {UpdateBar} from './UpdateBar.tsx';
 import {setBadge} from './device.ts';
 import {AccessCard, AcceptInvite, EmailLinkSignIn, NoAccess, SetupServer, SignIn, type Me} from './Team.tsx';
 import {WorkspaceSwitcher, useWorkspaces} from './Workspaces.tsx';
@@ -32,7 +33,7 @@ import {ContextMenus} from './ContextMenu.tsx';
 import {FileDrop, FilesView} from './FilesView.tsx';
 import {ProjectList, includedIn, isRollup, rollupProject} from './ProjectNav.tsx';
 import {HelpPage, TOURS, TourRunner} from './Tours.tsx';
-import {AddField, DEFAULT_HIDDEN, tableColumns} from './TableView.tsx';
+import {AddField, DEFAULT_HIDDEN, tabDir, tableColumns} from './TableView.tsx';
 import {PropertyPanel} from './Fields.tsx';
 import {resumeConnect} from './ConnectedApps.tsx';
 import {deviceOn} from './device.ts';
@@ -265,6 +266,7 @@ export function App() {
       <button className="side-toggle" onClick={toggleSide} title="Show sidebar"><PanelLeft size={16} /></button>
       <main className="main">
         <FocusHost store={store} open={open} />
+        <UpdateBar />
         {me && <NotifyPrompt />}
         <DialogHost />
         {route.page === 'project' && project && (
@@ -724,6 +726,9 @@ function ColumnsMenu({store, project, config, setConfig}: {store: Store; project
         <div className="pop-label">Property visibility</div>
         <PropertyPanel cols={tableColumns(project)} config={config} setConfig={setConfig} defaultHidden={DEFAULT_HIDDEN} />
         {config.columns && <button className="pop-row muted" onClick={() => setConfig({columns: undefined})}>Reset widths and order</button>}
+        <div className="pop-sep" />
+        <label className="pop-row" title="Your own setting, for every table">Tab key moves
+          <select className="plain-select" value={tabDir(store)} onChange={e => store.setPref('tableTab', e.target.value)}><option value="down">Down the column</option><option value="across">Across the row</option></select></label>
         <div className="pop-sep" />
         <div className="pop-label">New column</div>
         <AddField store={store} project={project} />

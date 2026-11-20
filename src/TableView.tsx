@@ -19,6 +19,25 @@ import {uiAlert, uiConfirm} from './dialogs.tsx';
 
 type Col = {id: string; name: string; width: number; sortVal: (i: Item) => string | number; cell: (i: Item) => React.ReactNode; raw?: (i: Item) => unknown};
 export const DEFAULT_HIDDEN = ['start', 'tags', 'parent'];
+/** Where Tab goes in a table cell: down the column (the default) or across the row. Each person's own choice. */
+export const tabDir = (store: Pick<Store, 'prefs'>): 'down' | 'across' => store.prefs.tableTab === 'across' ? 'across' : 'down';
+/** Tab down the column: the same cell in the next row (Shift+Tab: the row above). Off the last row, Tab goes on as usual. */
+function tabMove(e: React.KeyboardEvent, dir: 'down' | 'across') {
+  if (e.key !== 'Tab' || dir !== 'down' || e.altKey || e.ctrlKey || e.metaKey) return;
+  const t = e.target as HTMLElement, td = t.closest('td'), tr = td?.closest('tr');
+  if (!td || !tr?.dataset.id || t.closest('.popover, tr.draft')) return;
+  let next = (e.shiftKey ? tr.previousElementSibling : tr.nextElementSibling) as HTMLTableRowElement | null;
+  while (next && !next.dataset.id) next = (e.shiftKey ? next.previousElementSibling : next.nextElementSibling) as HTMLTableRowElement | null;
+  const cell = next?.cells[td.cellIndex];
+  // The cell's main control: its text box or menu first (the title, not its check circle), else its first button.
+  const to = ['input:not([type=checkbox])', 'select', 'textarea', 'button', 'input'].map(q => cell?.querySelector<HTMLElement>(q)).find(Boolean);
+  if (!to) return;
+  e.preventDefault();
+  // Leaving a text box saves it (blur), then the same column one row down takes focus.
+  t.blur();
+  to.focus();
+  if (to instanceof HTMLInputElement && to.type === 'text') to.select();
+}
 /** Sorted columns a drag may change: dropped among rows with another value, the item takes it. */
 const SETTABLE: (keyof Item)[] = ['priority', 'status', 'type', 'due', 'start', 'sprint', 'assignees'];
 const CALC_LABEL: Record<string, string> = {count: 'Count', filled: 'Filled', empty: 'Empty', unique: 'Unique', sum: 'Sum', avg: 'Average', min: 'Min', max: 'Max', checked: 'Checked', done: 'Done'};
@@ -187,7 +206,7 @@ export function TableView({store, project, items, allItems, sprints, open, confi
 
   return (
     <div className="table-wrap" ref={wrap}>
-      <table className="grid" style={{width: 50 + shown.reduce((a, c) => a + c.width, 0) + 44}}>
+      <table className="grid" style={{width: 50 + shown.reduce((a, c) => a + c.width, 0) + 44}} onKeyDownCapture={e => tabMove(e, tabDir(store))}>
         <thead><tr>
           <th className="sel-col">{(() => {
             const n = rows.filter(i => selected.has(i.id)).length, all = rows.length > 0 && n === rows.length;

@@ -5,6 +5,7 @@ Rows marked (e2e) are checked by a browser script in `tests/e2e/`; the rest by u
 Found a bug? Add a row here and a scenario to the matching script, so it stays fixed.
 
 ## Everywhere
+- Bug found: a tab left open kept running the old version after a release, so fixes looked missing. A bar now says Cadence was updated, with Reload; checked every 2 minutes and when the tab comes back into view. (unit for the check, manual)
 - Ctrl+Z undoes the last change, also right after typing in a box that is now empty.
 - Clicking outside a side panel or editor closes it; it never also creates something.
 - Every title is editable where it is shown.
@@ -27,6 +28,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Table sorted (say by priority): drag a row by its grip onto the top or bottom edge of another to put it above or below; rows with the same priority keep that hand order. Dropped next to a row with another priority, status, type, date, sprint or assignee, it takes that value. (manual)
 - Bug fixed: in the Table, the quick-add helpers under a new row (@ who, ! prio, due:) were cut off. The new row grows to show them. (manual)
 - Bug fixed: a date cell opened only from its small dash or calendar icon. Clicking anywhere in the cell opens the calendar. (manual)
+- Table: Tab moves to the same column one row down (Shift+Tab: up), into the cell's text box or menu. Properties, Tab key moves: Down the column (default) or Across the row; each person's own setting. (manual)
 - New spaces open with Table first, then List, Board, Timeline, Calendar, Backlog, Sprint.
 
 ## Focus mode and timer
@@ -39,6 +41,7 @@ Found a bug? Add a row here and a scenario to the matching script, so it stays f
 - Short timer entries read like Mon, Nov 16, 12:51:57 AM to 12:52:48 AM. Bug found: the seconds were stuck after AM (12:51 AM:57). (e2e)
 
 ## Routines
+- A routine is a task in its own space; the Routines page only lists them (like ClickUp's Recurring Task Overview). Bug fixed: the task panel's space field (was called Project) listed Routines, Archive and All spaces, so a task could look like it lived there; it now lists real spaces only, and the server refuses moving an item into a rollup. (unit)
 - Skip moves the routine to its next date and keeps a closed record of the skipped cycle, shown as ✕ Skipped, with the routine keeping its id.
 - Skipped (not done this time) is in the status menu of a live routine (list, table, backlog, task panel) and in the right-click menu (board cards too); not for other tasks.
 - The Repeat row in the task panel shows the dates on one line and Skip, Delay, Wait, Pause as one button group.

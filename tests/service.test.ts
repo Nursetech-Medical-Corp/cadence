@@ -834,3 +834,11 @@ test('done date: set automatically, editable by people, not by AI, validated', (
   const both = t.updateItem(it.id, {status: done, completed: created});
   assert.equal(both.completed!.slice(0, 10), created, 'bulk mark done on a date');
 });
+
+test('routines live in their own space: a task cannot be moved into Routines, Archive or All spaces', () => {
+  const {t, p} = setup();
+  const it = t.createItem({projectId: p.id, title: 'Weekly review', recur: {every: 1, unit: 'week', mode: 'schedule'}});
+  const rollup = t.createRollup();
+  assert.throws(() => t.updateItem(it.id, {projectId: rollup.id}), /shows work from other spaces and holds none itself/);
+  assert.equal(t.item(it.id).projectId, p.id, 'the routine stays in its space');
+});

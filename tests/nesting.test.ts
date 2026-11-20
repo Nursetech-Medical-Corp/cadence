@@ -51,3 +51,9 @@ test('nesting and moving stay within one space (the All spaces rollup shows seve
   assert.equal(placeBeside(l, 'b', 'c', true), null);
   assert.ok(nestUnder(l, 'c', 'a', T) && placeBeside(l, 'a', 'c', false) === null, 'same space works; still never into itself');
 });
+
+test('update bar: finds the main script of a page, so an open tab knows when a newer version is live', async () => {
+  const {mainScript} = await import('../src/UpdateBar.tsx');
+  assert.equal(mainScript('<script type="module" crossorigin src="/assets/index-NFjdRxgC.js"></script><link href="/assets/index-9Y8.css">'), '/assets/index-NFjdRxgC.js');
+  assert.equal(mainScript('<html>no build</html>'), null);
+});
